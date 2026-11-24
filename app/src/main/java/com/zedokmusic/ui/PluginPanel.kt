@@ -26,7 +26,7 @@ fun PluginPanel(vm: DawViewModel) {
         }
         return
     }
-    var editor by remember(t.id) { mutableStateOf(false) }
+    val editor = t.editorOpen
     var keys by remember(t.id) { mutableStateOf(false) }
     var query by remember(t.id) { mutableStateOf("") }
     var onlyChanged by remember(t.id) { mutableStateOf(false) }
@@ -41,7 +41,7 @@ fun PluginPanel(vm: DawViewModel) {
                 Text("${params.size} parameters · ${t.paramOverrides.size} changed", color = Zk.dim, fontSize = 11.sp)
             }
             if (editor) LabelButton("Keys", keys, w = 60.dp) { keys = !keys }
-            LabelButton("Editor", editor, w = 70.dp) { editor = !editor }
+            LabelButton("Editor", editor, w = 70.dp) { if (editor) vm.closeEditor(t) else vm.openEditor(t) }
             if (!editor) LabelButton("Changed", onlyChanged, w = 76.dp) { onlyChanged = !onlyChanged }
         }
         if (editor) { Box(Modifier.weight(1f).fillMaxWidth()) { PluginEditor(vm, t, keys) }; return@Column }

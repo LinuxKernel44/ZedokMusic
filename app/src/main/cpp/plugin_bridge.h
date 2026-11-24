@@ -50,9 +50,9 @@ public:
         return n;
     }
     // --- plugin editor ---
-    void guiCommand(uint32_t cmd) { if (b_) __atomic_store_n(&b_->gui_cmd, cmd, __ATOMIC_RELEASE); }
+    void guiCommand(uint32_t cmd, int x, int y) { if (!b_) return; b_->gui_x_pos_req = (uint32_t)x; b_->gui_y_pos_req = (uint32_t)y; __atomic_store_n(&b_->gui_cmd, cmd, __ATOMIC_RELEASE); }
     uint32_t guiState() const { return b_ ? __atomic_load_n(&b_->gui_state, __ATOMIC_ACQUIRE) : (uint32_t)ZK_GUI_CLOSED; }
-    void guiSize(int* w, int* h) const { *w = b_ ? (int)b_->gui_w : 0; *h = b_ ? (int)b_->gui_h : 0; }
+    void guiSize(int* w, int* h, int* x, int* y) const { *w = b_ ? (int)b_->gui_w : 0; *h = b_ ? (int)b_->gui_h : 0; *x = b_ ? b_->gui_x : 0; *y = b_ ? b_->gui_y : 0; }
 
     // Real-time safe. Hands one block (events for the window about to be rendered by the host) to the Wine host.
     void submit(const ZkEvent* ev, int n, int frames, const ZkParamChange* ch = nullptr, int nch = 0) {

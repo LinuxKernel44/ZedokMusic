@@ -16,7 +16,7 @@ class GuiServer(private val ctx: Context) {
     private val socket = File(env.root, "tmp/.X11-unix/X0")
     private val xvfbBin = File(env.root, "usr/bin/Xvfb")
 
-    companion object { const val WIDTH = 1600; const val HEIGHT = 1000 }
+    companion object { const val WIDTH = 1600; const val HEIGHT = 3000; const val SLOT_HEIGHT = 1000 }  // three editors fit, one per slot
 
     val available get() = xvfbBin.exists() && File(env.root, "usr/lib/libxshim.so").exists()
 

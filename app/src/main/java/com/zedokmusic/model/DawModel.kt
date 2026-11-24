@@ -33,6 +33,8 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     val notes = mutableStateListOf<NoteM>()
     val clips = mutableStateListOf<ClipM>()
     val lanes = mutableStateListOf<AutoLane>()
+    /** The plugin's own editor window is open (it stays open while you look at other tracks). */
+    var editorOpen by mutableStateOf(false)
 
     /** End of the content in beats, rounded up to whole bars (min 1 bar). */
     fun lengthBeats(bpm: Float): Float {
@@ -44,7 +46,8 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
 }
 
 /** One automation breakpoint: [value] is the normalized parameter value (0..1) at [beat]. */
-data class AutoPoint(val beat: Float, val value: Float)
+/** [shape] describes the segment that starts at this point: 0 linear, 1 step (hold), 2 smooth (ease in/out). */
+data class AutoPoint(val beat: Float, val value: Float, val shape: Int = 0)
 
 /** Automation of one plugin parameter over the timeline (linear between points). */
 class AutoLane(val paramName: String, var paramIndex: Int) {

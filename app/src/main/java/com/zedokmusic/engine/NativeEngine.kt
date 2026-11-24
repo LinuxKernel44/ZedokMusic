@@ -60,12 +60,12 @@ object NativeEngine {
 
     // --- plugin parameters (normalized 0..1); valid once pluginState == 2 ---
     /** Automation lanes: [meta] = (param index, point count) per lane; [frames]/[values] = all points, lane after lane. */
-    external fun setAutomation(track: Int, meta: LongArray, frames: LongArray, values: FloatArray)
+    external fun setAutomation(track: Int, meta: LongArray, frames: LongArray, values: FloatArray, shapes: ByteArray)
     /** Parameter edits made inside the plugin editor since the last call: index, value, index, value... */
     external fun pollEdits(track: Int): FloatArray
     /** Plugin editor: [cmd] 1 = open, 2 = close. */
-    external fun guiCommand(track: Int, cmd: Int)
-    /** [state (0 closed, 1 open, 2 failed), width, height]. */
+    external fun guiCommand(track: Int, cmd: Int, x: Int, y: Int)
+    /** [state (0 closed, 1 open, 2 failed), width, height, x, y]; x, y = the window's position on the X screen. */
     external fun guiState(track: Int): IntArray
     external fun paramCount(track: Int): Int
     /** Returns [name, units] and writes [defaultValue, stepCount] into [out]; null if the index is invalid. */

@@ -36,7 +36,7 @@ struct Note {
 constexpr int kMaxPlugins = 16;
 
 // Parameter automation: piecewise-linear lane of a plugin parameter, points sorted by frame.
-struct AutoLane { int param = 0; std::vector<int64_t> frames; std::vector<float> values; };
+struct AutoLane { int param = 0; std::vector<int64_t> frames; std::vector<float> values; std::vector<uint8_t> shapes; };  // shape of the segment starting at each point: 0 linear, 1 step, 2 smooth
 constexpr int kMaxLanes = 32;
 
 struct TrackState {
@@ -111,8 +111,8 @@ public:
     void setAutomation(int track, std::vector<AutoLane> lanes);
     int pollEdits(int track, ZkParamChange* out, int max);  // edits made inside the plugin editor
     // --- plugin editor window (hosted by Wine, shown through the X framebuffer) ---
-    void guiCommand(int track, int cmd);   // 1 open, 2 close
-    int guiState(int track, int* w, int* h);  // 0 closed, 1 open, 2 failed
+    void guiCommand(int track, int cmd, int x, int y);   // 1 open (window at x,y on the X screen), 2 close
+    int guiState(int track, int* w, int* h, int* x, int* y);  // 0 closed, 1 open, 2 failed
     struct PluginStats { int64_t late, blocks, waited, waitNsTotal, waitNsMax; };
     PluginStats pluginStats(int track);
 
@@ -169,6 +169,7 @@ private:
     mutable std::atomic<float> meters_[kMaxTracks + 1];  // [kMaxTracks] = master
     std::shared_ptr<oboe::AudioStream> stream_;
     std::atomic<int64_t> callbacks_{0};
+    std::atomic<bool> exporting_{false};  // offline render owns the plugin bridges: the audio callback stays away from them
     std::atomic<int64_t> cbNsTotal_{0};
     std::atomic<int64_t> cbNsMax_{0};
     std::atomic<bool> restart_{false};

@@ -146,13 +146,14 @@ DWORD WINAPI guiThread(LPVOID) {
                     InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_FAILED);
                 } else {
                     const int w = std::max(1, (int)(r.right - r.left)), h = std::max(1, (int)(r.bottom - r.top));
-                    hwnd = CreateWindowExA(WS_EX_TOOLWINDOW, "ZedokEditor", "Editor", WS_POPUP, 0, 0, w, h, nullptr, nullptr, wc.hInstance, nullptr);
+                    const int px = (int)gB->gui_x_pos_req, py = (int)gB->gui_y_pos_req;
+                    hwnd = CreateWindowExA(WS_EX_TOOLWINDOW, "ZedokEditor", "Editor", WS_POPUP, px, py, w, h, nullptr, nullptr, wc.hInstance, nullptr);
                     frame.hwnd = hwnd; view->setFrame(&frame);
                     if (!hwnd || view->attached(hwnd, kPlatformTypeHWND) != kResultOk) { closeView(); InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_FAILED); }
                     else {
                         ViewRect nr{0, 0, w, h}; view->onSize(&nr);
-                        SetWindowPos(hwnd, HWND_TOP, 0, 0, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                        gB->gui_x = 0; gB->gui_y = 0; gB->gui_w = w; gB->gui_h = h;
+                        SetWindowPos(hwnd, HWND_TOP, px, py, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                        gB->gui_x = px; gB->gui_y = py; gB->gui_w = w; gB->gui_h = h;
                         InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_OPENED);
                     }
                 }

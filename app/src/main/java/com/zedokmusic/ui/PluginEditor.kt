@@ -47,10 +47,9 @@ fun PluginEditor(vm: DawViewModel, t: TrackM, keyboard: Boolean = false) {
         vm.openEditor(t)
         while (true) { info = vm.editorState(t); delay(250) }
     }
-    DisposableEffect(t.id) { onDispose { vm.closeEditor(t) } }
     when {
         !vm.guiAvailable -> Message("This build has no GUI runtime. Reinstall the app to update the Windows runtime.")
-        info[0] == 1 && info[1] > 0 && info[2] > 0 -> EditorSurface(info[1], info[2], keyboard)
+        info[0] == 1 && info[1] > 0 && info[2] > 0 -> EditorSurface(info[1], info[2], info[3], info[4], keyboard)
         info[0] == 2 -> Message("This plugin could not open its editor.")
         else -> Message("Opening the editor…")
     }
@@ -60,11 +59,11 @@ fun PluginEditor(vm: DawViewModel, t: TrackM, keyboard: Boolean = false) {
 private fun Message(text: String) = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(text, color = Zk.dim, fontSize = 13.sp) }
 
 @Composable
-private fun EditorSurface(w: Int, h: Int, keyboard: Boolean) {
+private fun EditorSurface(w: Int, h: Int, ox: Int, oy: Int, keyboard: Boolean) {
     val bmp = remember(w, h) { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }
     var tick by remember(bmp) { mutableIntStateOf(0) }
-    LaunchedEffect(bmp) {
-        while (true) { withContext(Dispatchers.Default) { XDisplay.fbBlit(bmp, 0, 0, w, h) }; tick++; delay(33) }
+    LaunchedEffect(bmp, ox, oy) {
+        while (true) { withContext(Dispatchers.Default) { XDisplay.fbBlit(bmp, ox, oy, w, h) }; tick++; delay(33) }
     }
     if (keyboard) KeyCapture()
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.TopStart) {
@@ -77,8 +76,8 @@ private fun EditorSurface(w: Int, h: Int, keyboard: Boolean) {
             awaitPointerEventScope {
                 var leftDown = false; var multi = false
                 var multiStart = 0L; var multiMoved = false; var lastY = 0f; var scrollAcc = 0f; var cx = 0; var cy = 0
-                fun sx(v: Float) = (v / scale).toInt().coerceIn(0, w - 1)
-                fun sy(v: Float) = (v / scale).toInt().coerceIn(0, h - 1)
+                fun sx(v: Float) = ox + (v / scale).toInt().coerceIn(0, w - 1)
+                fun sy(v: Float) = oy + (v / scale).toInt().coerceIn(0, h - 1)
                 while (true) {
                     val ev = awaitPointerEvent()
                     val down = ev.changes.filter { it.pressed }

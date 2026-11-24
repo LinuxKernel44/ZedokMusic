@@ -38,10 +38,10 @@ object PluginSelfTest {
         // automation: Output = 0 for the first 1.6 s, then 0.5 -> the first half must be silent and the second half audible
         if (volIdx >= 0) {
             val fr = longArrayOf(0, (1.6 * rate).toLong(), (1.62 * rate).toLong()); val va = floatArrayOf(0f, 0f, 0.5f)
-            e.setAutomation(tr, longArrayOf(volIdx.toLong(), 3), fr, va); e.seek(0); e.play()
+            e.setAutomation(tr, longArrayOf(volIdx.toLong(), 3), fr, va, ByteArray(3)); e.seek(0); e.play()
             var firstHalf = 0f; var secondHalf = 0f
             for (i in 0 until 34) { Thread.sleep(100); val pk = e.peak(tr); if (i in 4..14) firstHalf = maxOf(firstHalf, pk); if (i in 20..30) secondHalf = maxOf(secondHalf, pk) }
-            e.pause(); e.setAutomation(tr, LongArray(0), LongArray(0), FloatArray(0)); e.setParam(tr, volIdx, 0.5f); Thread.sleep(200)
+            e.pause(); e.setAutomation(tr, LongArray(0), LongArray(0), FloatArray(0), ByteArray(0)); e.setParam(tr, volIdx, 0.5f); Thread.sleep(200)
             log("automation: peak in first half=%.4f (expect ~0), second half=%.4f (expect >0)".format(firstHalf, secondHalf))
         }
         // steady state: 20 s of looping notes, count late blocks

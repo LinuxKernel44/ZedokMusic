@@ -169,7 +169,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         tracks.add(t); selected = t; dirty = true; return t
     }
     fun removeTrack(t: TrackM) {
-        if (t.pluginPath != null) host.stop(t.id)
+        if (t.pluginPath != null) { closeEditor(t); host.stop(t.id) }
         e.removeTrack(t.id); tracks.remove(t); if (selected == t) selected = tracks.firstOrNull(); dirty = true
     }
     fun importClip(t: TrackM, wav: File, startBeat: Float = 0f) {
@@ -203,11 +203,17 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- plugin editor (GUI) ----------
     val guiAvailable get() = host.gui.available
+    private val editorSlots = LinkedHashMap<Int, Int>()  // track id -> slot (vertical band of the shared X screen), oldest first
+    /** Opens the plugin's editor; up to three stay open at once (the oldest is closed to make room). */
     fun openEditor(t: TrackM) {
-        for (o in tracks) if (o !== t && o.pluginPath != null) e.guiCommand(o.id, 2)  // one editor at a time: they share the screen
-        e.guiCommand(t.id, 1)
+        if (editorSlots.containsKey(t.id)) { t.editorOpen = true; return }
+        if (editorSlots.size >= 3) tracks.firstOrNull { it.id == editorSlots.keys.first() }?.let { closeEditor(it) }
+        val slot = (0..2).first { it !in editorSlots.values }
+        editorSlots[t.id] = slot
+        e.guiCommand(t.id, 1, 0, slot * com.zedokmusic.wine.GuiServer.SLOT_HEIGHT)
+        t.editorOpen = true
     }
-    fun closeEditor(t: TrackM) = e.guiCommand(t.id, 2)
+    fun closeEditor(t: TrackM) { if (editorSlots.remove(t.id) != null) e.guiCommand(t.id, 2, 0, 0); t.editorOpen = false }
     fun editorState(t: TrackM): IntArray = e.guiState(t.id)
 
     // ---------- plugin parameters ----------
@@ -242,10 +248,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     private fun syncLanes(t: TrackM) {
         val lanes = t.lanes.filter { it.points.isNotEmpty() }
-        val meta = LongArray(lanes.size * 2); val frames = ArrayList<Long>(); val values = ArrayList<Float>()
+        val meta = LongArray(lanes.size * 2); val frames = ArrayList<Long>(); val values = ArrayList<Float>(); val shapes = ArrayList<Byte>()
         lanes.forEachIndexed { i, l -> meta[i * 2] = l.paramIndex.toLong(); meta[i * 2 + 1] = l.points.size.toLong()
-            l.points.forEach { frames.add((it.beat * fpb).toLong()); values.add(it.value) } }
-        e.setAutomation(t.id, meta, frames.toLongArray(), values.toFloatArray())
+            l.points.forEach { frames.add((it.beat * fpb).toLong()); values.add(it.value); shapes.add(it.shape.toByte()) } }
+        e.setAutomation(t.id, meta, frames.toLongArray(), values.toFloatArray(), shapes.toByteArray())
     }
     /** While recording (transport running), writes the touched parameter into its lane at the playhead. */
     private fun recordAutomation(t: TrackM, index: Int, v: Float) {
@@ -304,7 +310,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
             .put("params", JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } })
-            .put("lanes", JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble())) } })) } })
+            .put("lanes", JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble()).put(p.shape)) } })) } })
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", c.path).put("start", c.start.toDouble())) } }))
         root.put("tracks", arr)
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
@@ -332,7 +338,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 for (k in 0 until na.length()) { val n = na.getJSONArray(k); t.notes.add(NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3))) }
                 syncNotes(t)
                 o.optJSONArray("lanes")?.let { la -> pendingLanes[t.id] = (0 until la.length()).map { k -> val lo = la.getJSONObject(k); val pa = lo.getJSONArray("points")
-                    lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat()) } } } }
+                    lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat(), x.optInt(2, 0)) } } } }
                 o.optJSONArray("params")?.let { pa -> pendingParams[t.id] = (0 until pa.length()).map { k -> pa.getJSONArray(k).let { x -> x.getString(0) to x.getDouble(1).toFloat() } } }
                 val ca = o.getJSONArray("clips")
                 for (k in 0 until ca.length()) { val c = ca.getJSONObject(k); val w = File(c.getString("path")); if (w.exists()) importClip(t, w, c.getDouble("start").toFloat()) }

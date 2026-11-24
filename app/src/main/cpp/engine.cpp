@@ -1,6 +1,7 @@
 #include "engine.h"
 #include <android/log.h>
 #include <algorithm>
+#include <thread>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -182,6 +183,11 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
     ms->playClips = true;
     constexpr int64_t kSyncWaitNs = 5'000'000'000;
     const int plugFrames = kCallbackFrames;
+    // Take the plugin bridges away from the realtime callback (it keeps running but outputs silence) and wait until it has noticed.
+    exporting_.store(true, std::memory_order_release);
+    { const int64_t c0 = callbacks_.load(); auto t0 = std::chrono::steady_clock::now();
+      while (stream_ && callbacks_.load() < c0 + 3 && std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(500)) std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+    struct Done { Engine* e; ~Done() { e->exporting_.store(false, std::memory_order_release); } } done{this};
     // Drain anything the realtime path left in flight, then silence the plugins.
     for (auto& t : q.tracks) if (t.plugin && t.plugin->ready()) {
         t.plugin->collect(ms->plugOut[t.pluginSlot], plugFrames, kSyncWaitNs);
@@ -211,6 +217,10 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
         }
         mix(q, pos, n, blk.data(), *ms, nullptr, 0);
         all.insert(all.end(), blk.begin(), blk.begin() + n * 2);
+    }
+    for (auto& t : q.tracks) if (t.plugin && t.plugin->ready()) {  // leave the plugins silent for the realtime path
+        ZkEvent off{0, ZK_ALL_NOTES_OFF, 0, 0, 0}; t.plugin->submit(&off, 1, plugFrames);
+        t.plugin->collect(ms->plugOut[t.pluginSlot], plugFrames, kSyncWaitNs);
     }
     return writeWav(path, all, kProjectRate, fmt);
 }
@@ -281,10 +291,10 @@ bool Engine::paramInfo(int track, int index, std::string* name, std::string* uni
 }
 float Engine::paramValue(int track, int index) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->paramValue(index) : 0.f; }
 std::string Engine::paramText(int track, int index) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->paramText(index) : ""; }
-void Engine::guiCommand(int track, int cmd) { std::lock_guard<std::mutex> lk(editMutex_); if (auto b = bridgeOf(current_, track)) b->guiCommand((uint32_t)cmd); }
-int Engine::guiState(int track, int* w, int* h) {
+void Engine::guiCommand(int track, int cmd, int x, int y) { std::lock_guard<std::mutex> lk(editMutex_); if (auto b = bridgeOf(current_, track)) b->guiCommand((uint32_t)cmd, x, y); }
+int Engine::guiState(int track, int* w, int* h, int* x, int* y) {
     std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track);
-    *w = *h = 0; if (!b) return 0; b->guiSize(w, h); return (int)b->guiState();
+    *w = *h = *x = *y = 0; if (!b) return 0; b->guiSize(w, h, x, y); return (int)b->guiState();
 }
 void Engine::setParam(int track, int index, float value) {
     value = std::clamp(value, 0.f, 1.f);
@@ -334,7 +344,12 @@ static float laneValueAt(const AutoLane& l, int64_t pos) {
     if (pos >= l.frames[n - 1]) return l.values[n - 1];
     size_t hi = std::upper_bound(l.frames.begin(), l.frames.end(), pos) - l.frames.begin(), lo = hi - 1;
     const double span = (double)(l.frames[hi] - l.frames[lo]);
-    return span <= 0 ? l.values[hi] : l.values[lo] + (float)((l.values[hi] - l.values[lo]) * ((double)(pos - l.frames[lo]) / span));
+    if (span <= 0) return l.values[hi];
+    const uint8_t shape = lo < l.shapes.size() ? l.shapes[lo] : 0;
+    if (shape == 1) return l.values[lo];
+    double t = (double)(pos - l.frames[lo]) / span;
+    if (shape == 2) t = t * t * (3.0 - 2.0 * t);
+    return l.values[lo] + (float)((l.values[hi] - l.values[lo]) * t);
 }
 // Appends the automation changes for the block starting at [pos]. [last] holds the last value sent per lane (NaN = send now).
 static void appendAutomation(const TrackState& t, int64_t pos, float* last, ZkParamChange* ch, int& nc) {
@@ -384,7 +399,9 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
     const Project* p = audioProject_;
     const bool playing = playing_.load(std::memory_order_relaxed);
     int64_t pos = pos_.load(std::memory_order_relaxed);
-    if (p && frames <= ZK_MAX_FRAMES) {
+    if (exporting_.load(std::memory_order_acquire)) {
+        memset(out, 0, sizeof(float) * 2 * frames); pluginWasPlaying_ = false; pluginExpectedPos_ = -1;
+    } else if (p && frames <= ZK_MAX_FRAMES) {
         const bool jumped = (playing != pluginWasPlaying_) || (playing && pos != pluginExpectedPos_);
         // Plugin block requested one callback ago (bounded wait: never stall the audio thread).
         const int64_t budgetNs = (int64_t)(0.5 * 1e9 * frames / kProjectRate);

@@ -93,20 +93,20 @@ J(jobjectArray, paramInfo, jint track, jint index, jfloatArray out) {
     env->SetObjectArrayElement(a, 0, env->NewStringUTF(name.c_str())); env->SetObjectArrayElement(a, 1, env->NewStringUTF(units.c_str())); return a;
 }
 J(jfloat, paramValue, jint track, jint index) { return eng().paramValue(track, index); }
-J(void, guiCommand, jint track, jint cmd) { eng().guiCommand(track, cmd); }
-J(jintArray, guiState, jint track) {  // [state, width, height]
-    int w, h; int st = eng().guiState(track, &w, &h); jint v[3] = {st, w, h};
-    jintArray a = env->NewIntArray(3); env->SetIntArrayRegion(a, 0, 3, v); return a;
+J(void, guiCommand, jint track, jint cmd, jint x, jint y) { eng().guiCommand(track, cmd, x, y); }
+J(jintArray, guiState, jint track) {  // [state, width, height, x, y]
+    int w, h, x, y; int st = eng().guiState(track, &w, &h, &x, &y); jint v[5] = {st, w, h, x, y};
+    jintArray a = env->NewIntArray(5); env->SetIntArrayRegion(a, 0, 5, v); return a;
 }
 // meta = [param, pointCount] per lane; frames/values are the concatenated points.
-J(void, setAutomation, jint track, jlongArray meta, jlongArray frames, jfloatArray values) {
+J(void, setAutomation, jint track, jlongArray meta, jlongArray frames, jfloatArray values, jbyteArray shapes) {
     const int nm = env->GetArrayLength(meta) / 2;
-    std::vector<jlong> m(nm * 2), f(env->GetArrayLength(frames)); std::vector<jfloat> v(env->GetArrayLength(values));
-    env->GetLongArrayRegion(meta, 0, nm * 2, m.data()); env->GetLongArrayRegion(frames, 0, (jsize)f.size(), f.data()); env->GetFloatArrayRegion(values, 0, (jsize)v.size(), v.data());
+    std::vector<jlong> m(nm * 2), f(env->GetArrayLength(frames)); std::vector<jfloat> v(env->GetArrayLength(values)); std::vector<jbyte> sh(env->GetArrayLength(shapes));
+    env->GetLongArrayRegion(meta, 0, nm * 2, m.data()); env->GetLongArrayRegion(frames, 0, (jsize)f.size(), f.data()); env->GetFloatArrayRegion(values, 0, (jsize)v.size(), v.data()); env->GetByteArrayRegion(shapes, 0, (jsize)sh.size(), sh.data());
     std::vector<AutoLane> lanes; size_t o = 0;
     for (int i = 0; i < nm && i < kMaxLanes; i++) {
         AutoLane l; l.param = (int)m[i * 2]; const size_t c = (size_t)m[i * 2 + 1];
-        for (size_t k = 0; k < c && o + k < f.size(); k++) { l.frames.push_back(f[o + k]); l.values.push_back(v[o + k]); }
+        for (size_t k = 0; k < c && o + k < f.size(); k++) { l.frames.push_back(f[o + k]); l.values.push_back(v[o + k]); l.shapes.push_back(o + k < sh.size() ? (uint8_t)sh[o + k] : 0); }
         o += c; if (!l.frames.empty()) lanes.push_back(std::move(l));
     }
     eng().setAutomation(track, std::move(lanes));
