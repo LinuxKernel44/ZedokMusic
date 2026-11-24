@@ -1,0 +1,83 @@
+#include <jni.h>
+#include <cmath>
+#include "engine.h"
+#include "extract.h"
+using namespace zedok;
+static Engine& eng() { static Engine e; return e; }
+#define J(ret, name, ...) extern "C" JNIEXPORT ret JNICALL Java_com_zedokmusic_engine_NativeEngine_##name(JNIEnv* env, jobject, ##__VA_ARGS__)
+static std::string str(JNIEnv* env, jstring s) { const char* c = env->GetStringUTFChars(s, nullptr); std::string r(c); env->ReleaseStringUTFChars(s, c); return r; }
+
+J(jboolean, start) { return eng().start(); }
+J(void, stop) { eng().stop(); }
+J(jint, addTrack) { return eng().addTrack(); }
+J(jboolean, removeTrack, jint id) { return eng().removeTrack(id); }
+// Returns [clipId, frames] or null when the file cannot be read.
+J(jlongArray, loadClip, jint track, jstring path, jlong start) {
+    int64_t frames = 0; int id = eng().loadClip(track, str(env, path), start, &frames);
+    if (!id) return nullptr;
+    jlong v[2] = {id, frames}; jlongArray a = env->NewLongArray(2); env->SetLongArrayRegion(a, 0, 2, v); return a;
+}
+J(jboolean, removeClip, jint id) { return eng().removeClip(id); }
+J(jboolean, moveClip, jint id, jlong start) { return eng().moveClip(id, start); }
+J(jboolean, setClipGain, jint id, jfloat g) { return eng().setClipGain(id, g); }
+// Test helper: generates a sine clip (stereo) of `seconds` at `freq` Hz.
+J(jint, addToneClip, jint track, jlong start, jdouble seconds, jdouble freq, jdouble amp) {
+    int64_t n = (int64_t)(seconds * kProjectRate);
+    auto v = std::make_shared<std::vector<float>>(n * 2);
+    for (int64_t i = 0; i < n; i++) { float s = (float)(amp * sin(2 * M_PI * freq * i / kProjectRate)); (*v)[i * 2] = s; (*v)[i * 2 + 1] = s; }
+    return eng().addClip(track, v, start, 0, n, 1.f);
+}
+J(void, setTrackGain, jint id, jfloat g) { eng().setTrackGain(id, g); }
+J(void, setTrackPan, jint id, jfloat p) { eng().setTrackPan(id, p); }
+J(void, setTrackMute, jint id, jboolean m) { eng().setTrackMute(id, m); }
+J(void, setTrackSolo, jint id, jboolean s) { eng().setTrackSolo(id, s); }
+J(void, setMasterGain, jfloat g) { eng().setMasterGain(g); }
+J(void, setLoop, jboolean on, jlong s, jlong e) { eng().setLoop(on, s, e); }
+J(void, play) { eng().play(); }
+J(void, pause) { eng().pause(); }
+J(void, seek, jlong f) { eng().seek(f); }
+J(jboolean, isPlaying) { return eng().playing(); }
+J(jlong, position) { return eng().position(); }
+J(jlong, projectLength) { return eng().projectLength(); }
+J(jfloat, peak, jint track) { return eng().peak(track); }
+J(jboolean, renderToWav, jstring path, jlong from, jlong to, jint fmt) {
+    return eng().renderToWav(str(env, path), from, to, fmt == 0 ? WavFormat::Pcm16 : fmt == 1 ? WavFormat::Pcm24 : WavFormat::Float32);
+}
+J(jfloatArray, stats) {
+    auto s = eng().stats();
+    float v[8] = {(float)s.sampleRate, (float)s.burst, (float)s.bufferSize, (float)s.xruns, s.avgUs, s.maxUs, s.latencyMs, s.exclusive ? 1.f : 0.f};
+    jfloatArray a = env->NewFloatArray(8); env->SetFloatArrayRegion(a, 0, 8, v); return a;
+}
+
+J(jint, callbackFrames) { return kCallbackFrames; }
+J(jboolean, addNote, jint track, jlong start, jlong len, jint pitch, jint vel) { return eng().addNote(track, start, len, pitch, vel); }
+J(void, clearNotes, jint track) { eng().clearNotes(track); }
+J(jboolean, createPluginBridge, jint track, jstring path) { return eng().createPluginBridge(track, str(env, path), kCallbackFrames); }
+J(jboolean, detachPlugin, jint track) { return eng().detachPlugin(track); }
+J(jint, pluginState, jint track) { return eng().pluginState(track); }
+J(jstring, pluginName, jint track) { return env->NewStringUTF(eng().pluginName(track).c_str()); }
+J(void, liveNote, jint track, jboolean on, jint pitch, jint vel) { eng().liveNote(track, on, pitch, vel); }
+J(jlongArray, pluginStats, jint track) {
+    auto s = eng().pluginStats(track); jlong v[5] = {s.late, s.blocks, s.waited, s.waitNsTotal, s.waitNsMax};
+    jlongArray a = env->NewLongArray(5); env->SetLongArrayRegion(a, 0, 5, v); return a;
+}
+
+static std::atomic<int64_t> g_extractProgress{0};
+// Extracts an uncompressed .tar.zst asset (given as fd/offset/length) into destDir. Returns "" on success or an error message.
+J(jstring, extractTarZst, jint fd, jlong offset, jlong length, jstring dest) {
+    g_extractProgress.store(0);
+    return env->NewStringUTF(extractTarZst(fd, offset, length, str(env, dest), &g_extractProgress).c_str());
+}
+J(jlong, extractProgress) { return g_extractProgress.load(); }
+
+// data = 4 longs per note: startFrame, lengthFrames, pitch, velocity
+J(void, setNotes, jint track, jlongArray data) {
+    jsize n = env->GetArrayLength(data) / 4; std::vector<jlong> raw(n * 4);
+    env->GetLongArrayRegion(data, 0, n * 4, raw.data());
+    std::vector<Note> notes(n);
+    for (jsize i = 0; i < n; i++) {
+        notes[i].start = raw[i * 4]; notes[i].length = std::max<jlong>(1, raw[i * 4 + 1]);
+        notes[i].pitch = (uint8_t)std::clamp<jlong>(raw[i * 4 + 2], 0, 127); notes[i].velocity = (uint8_t)std::clamp<jlong>(raw[i * 4 + 3], 1, 127);
+    }
+    eng().setNotes(track, std::move(notes));
+}

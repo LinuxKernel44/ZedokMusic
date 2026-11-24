@@ -1,0 +1,17 @@
+build/
+.gradle/
+.idea/
+local.properties
+*.jks
+*.keystore
+keystore.properties
+app/build/
+app/.cxx/
+app/src/main/assets/root.tar.zst
+app/src/main/assets/root.version
+app/src/main/assets/zhost.exe
+native/**/*.exe
+native/**/*.dll
+native/spike/pingpong
+*.apk
+*.log
