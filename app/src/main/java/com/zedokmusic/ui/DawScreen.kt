@@ -23,7 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.zedokmusic.model.*
 
-private enum class Panel(val label: String) { Arrange("Tracks"), Piano("Piano roll"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
+private enum class Panel(val label: String) { Arrange("Tracks"), Piano("Piano"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
 
 @Composable
 fun DawScreen(vm: DawViewModel) {
@@ -124,16 +124,19 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 @Composable
 private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    // Phones: tighter sizes so the whole transport (stop, play, loop, rec, position, tempo) fits even on dense, narrow screens.
+    val bs = if (compact) 36.dp else 40.dp
+    val ps = if (compact) 40.dp else 46.dp
     val core: @Composable RowScope.() -> Unit = {
-        SquareButton(Glyph.Stop) { vm.stop() }
-        SquareButton(if (vm.playing) Glyph.Pause else Glyph.Play, active = vm.playing, size = 46.dp) { vm.togglePlay() }
-        SquareButton(Glyph.Loop, active = vm.loop) { vm.toggleLoop() }
-        SquareButton(Glyph.Rec, active = vm.recording, tint = Zk.danger, activeColor = Zk.danger, onClick = onRecord)
-        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.bg).padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Text(beatLabel(vm.playhead), color = Zk.accent, fontSize = 19.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, maxLines = 1)
+        SquareButton(Glyph.Stop, size = bs) { vm.stop() }
+        SquareButton(if (vm.playing) Glyph.Pause else Glyph.Play, active = vm.playing, size = ps) { vm.togglePlay() }
+        SquareButton(Glyph.Loop, active = vm.loop, size = bs) { vm.toggleLoop() }
+        SquareButton(Glyph.Rec, active = vm.recording, tint = Zk.danger, activeColor = Zk.danger, size = bs, onClick = onRecord)
+        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.bg).padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 8.dp)) {
+            Text(beatLabel(vm.playhead), color = Zk.accent, fontSize = if (compact) 16.sp else 19.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
         }
-        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable(onClick = onTempo).padding(horizontal = 10.dp, vertical = 9.dp)) {
-            Text("%.0f".format(vm.bpm) + " BPM", color = Zk.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable(onClick = onTempo).padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 9.dp)) {
+            Text("%.0f".format(vm.bpm) + " BPM", color = Zk.text, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
         }
     }
     val tools: @Composable RowScope.() -> Unit = {
@@ -158,13 +161,15 @@ private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecor
             Text("${vm.loopBars} bars", color = Zk.dim, fontSize = 12.sp, maxLines = 1)
             SquareButton(Glyph.Plus, size = 30.dp) { vm.changeLoopBars(vm.loopBars + 1) }
         }
-        Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1)
+        if (!compact) Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1)
     }
     Column(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
             core()
             if (!compact) tools()
         }
         if (compact) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { tools() }
+        // Phones: the engine status gets its own line so it is never cut off.
+        if (compact) Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
     }
 }
