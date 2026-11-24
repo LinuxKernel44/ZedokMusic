@@ -45,7 +45,10 @@ class PluginHost(private val ctx: Context) {
         val args = arrayOf(toWinPath(File(files, "zhost.exe").absolutePath), toWinPath(pluginPath), toWinPath(bridge.absolutePath))
         // Starting the X server can take a few seconds the first time: keep the UI thread free.
         Thread {
-            val guiOn = gui.ensureRunning()
+            // Developer switch (file files/guimode): "none" = no X server, "xvfb" = start Xvfb but run hosts without it, default = full GUI.
+            val mode = File(files, "guimode").takeIf { it.exists() }?.readText()?.trim() ?: "full"
+            val guiRunning = mode != "none" && gui.ensureRunning()
+            val guiOn = guiRunning && mode == "full"  // ("kill" mode also ends up here with guiRunning = false)
             val dbg = File(files, "winedebug").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null } ?: "-all"  // developer aid: a file holding a WINEDEBUG value
             val pb = env.wine(*(if (guiOn) gui.desktopArgs() + args else args), debug = dbg, extraEnv = if (guiOn) ({ e -> gui.wineEnv(e) }) else null)
             synchronized(processes) { processes[track] = pb.redirectOutput(File(files, "host_$track.log")).start() }

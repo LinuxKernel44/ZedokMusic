@@ -46,3 +46,16 @@ stdout of hosts started through explorer does not reach the app's log file; `WIN
 `files/winedebug` (debug aid).
 
 Ideas: keyboard and multi-touch, one X screen region per plugin so several editors can be open, lower idle CPU (the host spin loop).
+
+## OxygenOS "Security warning" (found on a OnePlus 15, Android 17)
+
+Symptom: a dialog "An attempt by a malicious app to damage the system has been stopped" (shown by `com.oplus.exsystemservice`)
+a few seconds after the first plugin host starts. Bisect (always wait for the dialog: it can lag by several seconds, and an
+undismissed dialog contaminates the next run): not Wine/Box64, not the shim's preloading, not any single library, not the file name;
+`Xvfb -help` alone triggered it. A small ptrace-based syscall counter (build it with `aarch64-linux-gnu-gcc`, patchelf the
+interpreter, run it from the debug `--es cmd` hook) showed `setresuid(-1, 0, -1)`: Xvfb calls `seteuid(0)` when it is not root.
+The kernel refuses it, but the vendor's guard reports the attempt. Fix: `native/xshim/xshim.c` interposes `setuid/seteuid/setreuid/
+setresuid` and the gid variants: a change that keeps the current id returns 0 (Xvfb does `setuid(getuid())` before running
+`xkbcomp` and aborts if it fails: "Failed to compile keymap"), anything else returns EPERM without any syscall.
+Developer aids: file `files/guimode` = `none` (no X server), `xvfb` (X server only), `kill` (clean-up step only); `files/winedebug`.
+Android 15+ also warns about native libraries that are not 16 KB aligned: `-Wl,-z,max-page-size=16384` is set in CMake.

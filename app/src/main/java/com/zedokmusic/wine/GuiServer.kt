@@ -42,6 +42,8 @@ class GuiServer(private val ctx: Context) {
         // A wineserver left over from an earlier run still refers to the old X screen's desktop window: end it first.
         runCatching { env.wineserver("-k").start().waitFor(10, TimeUnit.SECONDS) }
         runCatching { ProcessBuilder("pkill", "Xvfb").start().waitFor(2, TimeUnit.SECONDS) }
+        val devMode = File(ctx.filesDir, "guimode").takeIf { it.exists() }?.readText()?.trim()
+        if (devMode == "kill") return false  // developer bisect aid: stop after the clean-up above
         val bin = File(env.root, "usr/bin")
         listOf("Xvfb", "xkbcomp").forEach { File(bin, it).setExecutable(true) }
         listOf(".tX0-lock", ".X0-lock").forEach { File(bin, it).delete() }

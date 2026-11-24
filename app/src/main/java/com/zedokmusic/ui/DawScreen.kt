@@ -115,8 +115,8 @@ private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Fl
 
 @Composable
 private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.clip(RoundedCornerShape(18.dp)).background(if (active) Zk.accent.copy(alpha = .2f) else Zk.panel2).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = if (active) Zk.accent else Zk.dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    Box(modifier.clip(RoundedCornerShape(18.dp)).background(if (active) Zk.accent.copy(alpha = .2f) else Zk.panel2).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = if (active) Zk.accent else Zk.dim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 

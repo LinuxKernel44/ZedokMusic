@@ -67,3 +67,20 @@ static int with_addr(int fd, const struct sockaddr* a, socklen_t l, sock_fn fn) 
 }
 int bind(int fd, const struct sockaddr* a, socklen_t l) { REAL(sock_fn, "bind"); return with_addr(fd, a, l, real); }
 int connect(int fd, const struct sockaddr* a, socklen_t l) { REAL(sock_fn, "connect"); return with_addr(fd, a, l, real); }
+
+// 3. Privilege changes. Xvfb tries to become root (seteuid(0) = setresuid(-1, 0, -1)) when started as a regular user. The call always
+//    fails with EPERM, but OxygenOS' security guard reports it as "An attempt by a malicious app to damage the system has been
+//    stopped" and shows a warning dialog. So: a change that keeps the current id succeeds without a syscall (Xvfb does
+//    setuid(getuid()) before it runs xkbcomp and treats failure as fatal), anything else fails with EPERM without a syscall.
+#include <errno.h>
+#define SAME_UID(v) ((unsigned)(v) == (unsigned)-1 || (unsigned)(v) == getuid())
+#define SAME_GID(v) ((unsigned)(v) == (unsigned)-1 || (unsigned)(v) == getgid())
+static int idret(int ok) { if (ok) return 0; errno = EPERM; return -1; }
+int setuid(unsigned int u) { return idret(SAME_UID(u)); }
+int seteuid(unsigned int u) { return idret(SAME_UID(u)); }
+int setreuid(unsigned int r, unsigned int e) { return idret(SAME_UID(r) && SAME_UID(e)); }
+int setresuid(unsigned int r, unsigned int e, unsigned int s) { return idret(SAME_UID(r) && SAME_UID(e) && SAME_UID(s)); }
+int setgid(unsigned int g) { return idret(SAME_GID(g)); }
+int setegid(unsigned int g) { return idret(SAME_GID(g)); }
+int setregid(unsigned int r, unsigned int e) { return idret(SAME_GID(r) && SAME_GID(e)); }
+int setresgid(unsigned int r, unsigned int e, unsigned int s) { return idret(SAME_GID(r) && SAME_GID(e) && SAME_GID(s)); }

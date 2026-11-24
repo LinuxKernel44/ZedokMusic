@@ -11,4 +11,6 @@ set_target_properties(zstd_dec PROPERTIES POSITION_INDEPENDENT_CODE ON C_STANDAR
 add_library(zedokaudio SHARED jni.cpp engine.cpp wav.cpp extract.cpp recorder.cpp xclient.cpp)
 target_compile_options(zedokaudio PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 target_include_directories(zedokaudio PRIVATE ${ZK_COMMON})
+# Android 15+ devices may use 16 KB memory pages: native libraries must be aligned for them.
+target_link_options(zedokaudio PRIVATE -Wl,-z,max-page-size=16384)
 target_link_libraries(zedokaudio zstd_dec oboe::oboe log android jnigraphics)

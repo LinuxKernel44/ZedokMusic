@@ -36,5 +36,5 @@ RF="$WORK/rf" WORK="$WORK" "$HERE/tools/build-gui-overlay.sh"
 cp -a "$WORK/gui-overlay/." rf/
 chmod -R u+rwX rf
 tar --numeric-owner --owner=0 --group=0 -C rf -cf - . | zstd -19 -T0 -q -f -o "$OUT/root.tar.zst"
-echo "2" > "$OUT/root.version"
+echo "3" > "$OUT/root.version"
 ls -la "$OUT"
