@@ -308,7 +308,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var exporting by mutableStateOf(false); private set
     /**
      * Renders to Exports/. [range] 0 = whole project (+2 s tail), 1 = loop region. [format] 0 = WAV 16-bit, 1 = WAV 24-bit, 2 = WAV float,
-     * 3 = AAC (.m4a, 256 kbps). [stems]: one file per track instead of the mix.
+     * 3 = AAC (.m4a, 256 kbps), 4/5 = FLAC 16/24-bit, 6/7 = MP3 320/192 kbps. [stems]: one file per track instead of the mix.
      */
     fun exportAudio(range: Int, format: Int, name: String, stems: Boolean) {
         val dir = workspace?.let { File(it, "Exports") } ?: run { message = "No workspace folder."; return }
@@ -319,7 +319,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         e.pause(); playing = false
         dir.mkdirs()
         val base = name.trim().ifEmpty { "Mix" }.replace(Regex("[^A-Za-z0-9 _.-]"), "_")
-        val ext = if (format == 3) "m4a" else "wav"
+        val ext = when (format) { 3 -> "m4a"; 4, 5 -> "flac"; 6, 7 -> "mp3"; else -> "wav" }
         fun unique(stem: String): File { var f = File(dir, "$stem.$ext"); var n = 2; while (f.exists()) f = File(dir, "$stem ($n++).$ext"); return f }
         val jobs: List<Pair<File, Int>> = if (stems) tracks.filter { it.notes.isNotEmpty() || it.clips.isNotEmpty() }
             .map { unique("$base - " + it.name.replace(Regex("[^A-Za-z0-9 _.-]"), "_")) to it.id } else listOf(unique(base) to 0)
@@ -331,7 +331,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     val wav = if (format == 3) File(getApplication<Application>().cacheDir, "export_tmp.wav") else out
                     val wavFmt = if (format == 3) 0 else format
-                    val ok = if (track > 0) e.renderTrackToWav(wav.absolutePath, 0L, to, wavFmt, track) else e.renderToWav(wav.absolutePath, 0L, to, wavFmt)
+                    val ok = e.renderEncoded(wav.absolutePath, 0L, to, wavFmt, track)  // track 0 = the full mix
                     if (!ok) { err = "Render failed."; break }
                     if (format == 3) { err = AacEncoder.encode(wav, out); wav.delete(); if (err != null) break }
                     done++; bytes += out.length()
@@ -341,6 +341,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             message = if (err == null) (if (done == 1) "Exported ${jobs[0].first.name}" else "Exported $done files") + " (%.1f MB) to Exports".format(bytes / 1048576.0) else err
         }.start()
     }
+
+    /** Files in the workspace's Exports folder, newest first. */
+    fun exportedFiles(): List<File> = workspace?.let { File(it, "Exports") }?.listFiles { f -> f.isFile && f.extension.lowercase() in setOf("wav", "flac", "mp3", "m4a") }
+        ?.sortedByDescending { it.lastModified() } ?: emptyList()
 
     // ---------- persistence ----------
     fun save() {

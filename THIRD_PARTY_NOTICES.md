@@ -12,6 +12,9 @@ They run as separate programs inside the app's private runtime; none of them is 
 | Oboe | 1.10.0 | Apache-2.0 | https://github.com/google/oboe |
 | Zstandard (decoder only, `app/src/main/cpp/third_party/zstd`) | 1.5.7 | BSD-3-Clause | https://github.com/facebook/zstd |
 | Steinberg VST 3 interfaces (`vst3_pluginterfaces`, used to build `zhost.exe`) | 3.8+ | MIT | https://github.com/steinbergmedia/vst3_pluginterfaces |
+| Xvfb, xkbcomp, xkb-data, libXfont2, libxkbfile, libXau, libXdmcp (X server for plugin editors, `tools/build-gui-overlay.sh`) | Ubuntu 24.04 (noble) packages | X.Org licenses (MIT/BSD-style) | https://packages.ubuntu.com/noble/xvfb (source packages on the same site) |
+| libpixman, libunwind, libglvnd (libGL, libGLX, libGLdispatch), libselinux, liblz4, liblzma, libpcre2, libzstd, libcap, libcap-ng, libmd, libbsd (runtime libraries of Xvfb) | Ubuntu 24.04 (noble) packages | MIT / BSD / public domain / dual BSD-GPL | https://packages.ubuntu.com/noble/ |
+| libgcrypt, libgpg-error, libsystemd, libaudit (runtime libraries of Xvfb) | Ubuntu 24.04 (noble) packages | LGPL-2.1-or-later | https://packages.ubuntu.com/noble/ |
 | AndroidX / Jetpack Compose / Material 3 | see `app/build.gradle.kts` | Apache-2.0 | https://developer.android.com/jetpack |
 
 ## What is changed in the bundled runtime
@@ -23,3 +26,9 @@ the exact binaries come from the Winlator release linked in the table.
 
 VST is a trademark of Steinberg Media Technologies GmbH. Podolski and other plugins are the property of their authors
 and are **not** distributed with ZedokMusic.
+
+## LAME 3.100 (MP3 encoder)
+
+`libmp3lame` from https://lame.sourceforge.io/ (lame-3.100.tar.gz), unmodified, under the GNU LGPL 2.1 (full text in
+`app/src/main/cpp/third_party/lame/COPYING`). It is built as a separate shared library (`libmp3lame.so`) that the app links
+dynamically, so it can be replaced by a modified build. The source in this repository is the complete corresponding source.

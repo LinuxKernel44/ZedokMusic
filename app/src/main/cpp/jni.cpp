@@ -41,6 +41,8 @@ J(jboolean, isPlaying) { return eng().playing(); }
 J(jlong, position) { return eng().position(); }
 J(jlong, projectLength) { return eng().projectLength(); }
 J(jfloat, peak, jint track) { return eng().peak(track); }
+// Renders to WAV, FLAC or MP3 (see Engine::renderEncoded for the format codes); [track] > 0 renders a single track (a stem).
+J(jboolean, renderEncoded, jstring path, jlong from, jlong to, jint format, jint track) { return eng().renderEncoded(str(env, path), from, to, format, track); }
 // Renders one track on its own (a stem).
 J(jboolean, renderTrackToWav, jstring path, jlong from, jlong to, jint fmt, jint track) {
     return eng().renderToWav(str(env, path), from, to, fmt == 0 ? WavFormat::Pcm16 : fmt == 1 ? WavFormat::Pcm24 : WavFormat::Float32, track);

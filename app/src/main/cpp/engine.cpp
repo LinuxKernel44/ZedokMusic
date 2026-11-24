@@ -1,4 +1,6 @@
 #include "engine.h"
+#include "flac_enc.h"
+#include "mp3_enc.h"
 #include <android/log.h>
 #include <algorithm>
 #include <thread>
@@ -172,7 +174,7 @@ int64_t Engine::renderBlock(const Project& p, int64_t pos, int frames, float* ou
 }
 
 // ---------- offline render ----------
-bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt, int onlyTrack) {
+bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<float>& all) {
     playing_.store(false);
     std::shared_ptr<const Project> p;
     { std::lock_guard<std::mutex> lk(editMutex_); p = current_; }
@@ -195,7 +197,7 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
         ZkEvent off{0, ZK_ALL_NOTES_OFF, 0, 0, 0}; t.plugin->submit(&off, 1, plugFrames);
         t.plugin->collect(ms->plugOut[t.pluginSlot], plugFrames, kSyncWaitNs);
     }
-    std::vector<float> all; all.reserve((size_t)(to - from) * 2);
+    all.clear(); all.reserve((size_t)(to - from) * 2);
     std::vector<float> blk(plugFrames * 2);
     for (int64_t pos = from; pos < to; pos += plugFrames) {
         int n = (int)std::min<int64_t>(plugFrames, to - pos);
@@ -223,7 +225,24 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
         ZkEvent off{0, ZK_ALL_NOTES_OFF, 0, 0, 0}; t.plugin->submit(&off, 1, plugFrames);
         t.plugin->collect(ms->plugOut[t.pluginSlot], plugFrames, kSyncWaitNs);
     }
+    return true;
+}
+bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt, int onlyTrack) {
+    std::vector<float> all; if (!renderMix(from, to, onlyTrack, all)) return false;
     return writeWav(path, all, kProjectRate, fmt);
+}
+bool Engine::renderEncoded(const std::string& path, int64_t from, int64_t to, int format, int onlyTrack) {
+    std::vector<float> all; if (!renderMix(from, to, onlyTrack, all)) return false;
+    switch (format) {
+        case 0: return writeWav(path, all, kProjectRate, WavFormat::Pcm16);
+        case 1: return writeWav(path, all, kProjectRate, WavFormat::Pcm24);
+        case 2: return writeWav(path, all, kProjectRate, WavFormat::Float32);
+        case 4: return encodeFlac(all, kProjectRate, 16, path);
+        case 5: return encodeFlac(all, kProjectRate, 24, path);
+        case 6: return encodeMp3(all, kProjectRate, 320, path);
+        case 7: return encodeMp3(all, kProjectRate, 192, path);
+        default: return false;
+    }
 }
 
 // ---------- MIDI / plugins ----------
