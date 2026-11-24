@@ -93,6 +93,11 @@ J(jobjectArray, paramInfo, jint track, jint index, jfloatArray out) {
     env->SetObjectArrayElement(a, 0, env->NewStringUTF(name.c_str())); env->SetObjectArrayElement(a, 1, env->NewStringUTF(units.c_str())); return a;
 }
 J(jfloat, paramValue, jint track, jint index) { return eng().paramValue(track, index); }
+J(void, guiCommand, jint track, jint cmd) { eng().guiCommand(track, cmd); }
+J(jintArray, guiState, jint track) {  // [state, width, height]
+    int w, h; int st = eng().guiState(track, &w, &h); jint v[3] = {st, w, h};
+    jintArray a = env->NewIntArray(3); env->SetIntArrayRegion(a, 0, 3, v); return a;
+}
 J(jstring, paramText, jint track, jint index) { return env->NewStringUTF(eng().paramText(track, index).c_str()); }
 J(void, setParam, jint track, jint index, jfloat v) { eng().setParam(track, index, v); }
 

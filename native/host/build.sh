@@ -7,4 +7,4 @@ VST3PI=${VST3PI:-$HERE/../../build/vst3_pluginterfaces}
 INC=$HERE/../../build/vst3_inc; mkdir -p "$INC"; ln -sfn "$VST3PI" "$INC/pluginterfaces"
 x86_64-w64-mingw32-g++ -std=c++17 -O2 -I"$INC" -I"$HERE/../common" -o "${1:-$HERE/zhost.exe}" \
   "$HERE/zhost.cpp" "$HERE/vst3iids.cpp" "$VST3PI/base/funknown.cpp" "$VST3PI/base/ustring.cpp" "$VST3PI/base/conststringtable.cpp" \
-  -static -lole32
+  -static -lole32 -lgdi32 -luser32

@@ -103,6 +103,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val fpb get() = 48000.0 * 60.0 / bpm  // frames per beat
     private var dirty = false
 
+    // Declared before init: load() runs from init and fills it.
+    private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
     init {
         engineOk = e.start()
         midi.start()
@@ -196,6 +198,15 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun liveNote(t: TrackM, on: Boolean, pitch: Int) = keyEvent(t, on, pitch, 105)
 
+    // ---------- plugin editor (GUI) ----------
+    val guiAvailable get() = host.gui.available
+    fun openEditor(t: TrackM) {
+        for (o in tracks) if (o !== t && o.pluginPath != null) e.guiCommand(o.id, 2)  // one editor at a time: they share the screen
+        e.guiCommand(t.id, 1)
+    }
+    fun closeEditor(t: TrackM) = e.guiCommand(t.id, 2)
+    fun editorState(t: TrackM): IntArray = e.guiState(t.id)
+
     // ---------- plugin parameters ----------
     fun loadParams(t: TrackM): List<ParamM> {
         val n = e.paramCount(t.id); val out = FloatArray(2); val list = ArrayList<ParamM>(n)
@@ -213,7 +224,6 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val byName = loadParams(t).associateBy { it.name }
         for ((name, v) in pending) byName[name]?.let { e.setParam(t.id, it.index, v); t.paramOverrides[it.index] = v }
     }
-    private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
 
     // ---------- plugins ----------
     fun pluginDir(): File? = workspace?.let { File(it, "Plugins/VST3") }

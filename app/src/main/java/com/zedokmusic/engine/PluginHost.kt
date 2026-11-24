@@ -1,6 +1,7 @@
 package com.zedokmusic.engine
 
 import android.content.Context
+import com.zedokmusic.wine.GuiServer
 import com.zedokmusic.wine.PrefixManager
 import com.zedokmusic.wine.StorageFolder
 import com.zedokmusic.wine.WineEnv
@@ -13,14 +14,18 @@ import java.io.File
 class PluginHost(private val ctx: Context) {
     private val env = WineEnv(ctx)
     private val processes = HashMap<Int, Process>()
+    val gui = GuiServer(ctx)
     private val files get() = ctx.filesDir
 
     /** Maps an Android path to the Windows path Wine sees. */
-    fun toWinPath(unix: String): String {
-        val ws = StorageFolder.saved(ctx)
+    fun toWinPath(unixPath: String): String {
+        // /sdcard, /storage/emulated/0 and /storage/self/primary are aliases of the same folder: compare canonical paths.
+        val unix = runCatching { File(unixPath).canonicalPath }.getOrDefault(unixPath)
+        val ws = StorageFolder.saved(ctx)?.let { runCatching { it.canonicalFile }.getOrDefault(it) }
         if (ws != null && (unix == ws.path || unix.startsWith(ws.path + "/"))) return "D:" + unix.removePrefix(ws.path).replace('/', '\\')
-        if (unix.startsWith(files.absolutePath + "/")) return "E:" + unix.removePrefix(files.absolutePath).replace('/', '\\')
-        throw IllegalArgumentException("Path not reachable from Wine (must be inside the workspace folder): $unix")
+        val fl = files.canonicalPath
+        if (unix.startsWith("$fl/")) return "E:" + unix.removePrefix(fl).replace('/', '\\')
+        throw IllegalArgumentException("Path not reachable from Wine (must be inside the workspace folder): $unixPath")
     }
 
     /** Copies zhost.exe out of the APK whenever its content differs (a size check alone misses same-size rebuilds). */
@@ -37,15 +42,21 @@ class PluginHost(private val ctx: Context) {
         ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
         val bridge = File(files, "bridge_$track.bin")
         if (!NativeEngine.createPluginBridge(track, bridge.absolutePath)) return false
-        val pb = env.wine(File(files, "zhost.exe").absolutePath.let { toWinPath(it) }, toWinPath(pluginPath), toWinPath(bridge.absolutePath))
-        processes[track] = pb.redirectOutput(File(files, "host_$track.log")).start()
+        val args = arrayOf(toWinPath(File(files, "zhost.exe").absolutePath), toWinPath(pluginPath), toWinPath(bridge.absolutePath))
+        // Starting the X server can take a few seconds the first time: keep the UI thread free.
+        Thread {
+            val guiOn = gui.ensureRunning()
+            val dbg = File(files, "winedebug").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null } ?: "-all"  // developer aid: a file holding a WINEDEBUG value
+            val pb = env.wine(*(if (guiOn) gui.desktopArgs() + args else args), debug = dbg, extraEnv = if (guiOn) ({ e -> gui.wineEnv(e) }) else null)
+            synchronized(processes) { processes[track] = pb.redirectOutput(File(files, "host_$track.log")).start() }
+        }.start()
         return true
     }
 
     fun stop(track: Int) {
         NativeEngine.detachPlugin(track)  // the bridge sets quit once its last snapshot is retired
-        processes.remove(track)?.let { p -> Thread { if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly() }.start() }
+        synchronized(processes) { processes.remove(track) }?.let { p -> Thread { if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly() }.start() }
     }
 
-    fun stopAll() = processes.keys.toList().forEach { stop(it) }
+    fun stopAll() { synchronized(processes) { processes.keys.toList() }.forEach { stop(it) }; gui.stop() }
 }

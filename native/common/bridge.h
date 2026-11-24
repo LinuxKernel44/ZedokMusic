@@ -3,7 +3,7 @@
 #pragma once
 #include <stdint.h>
 #define ZK_MAGIC 0x5A4B4252u  // 'ZKBR'
-#define ZK_VERSION 2
+#define ZK_VERSION 3
 #define ZK_MAX_FRAMES 2048
 #define ZK_MAX_EVENTS 512
 #define ZK_MAX_PARAMS 2048
@@ -11,6 +11,8 @@
 
 enum ZkEventType : uint8_t { ZK_NOTE_ON = 1, ZK_NOTE_OFF = 2, ZK_ALL_NOTES_OFF = 3 };
 enum ZkHostState : uint32_t { ZK_HOST_STARTING = 0, ZK_HOST_READY = 1, ZK_HOST_ERROR = 2 };
+enum ZkGuiCmd : uint32_t { ZK_GUI_NONE = 0, ZK_GUI_OPEN = 1, ZK_GUI_CLOSE = 2 };
+enum ZkGuiState : uint32_t { ZK_GUI_CLOSED = 0, ZK_GUI_OPENED = 1, ZK_GUI_FAILED = 2 };
 
 #pragma pack(push, 4)
 struct ZkParamInfo { uint32_t id; float default_norm; uint32_t step_count; uint32_t flags; char name[48]; char units[16]; };  // flags: VST3 ParameterInfo flags
@@ -26,6 +28,12 @@ struct ZkBridge {
     uint32_t reserved0;
     char plugin_name[96];              // written by host
     char _pad0[64];
+    // --- plugin editor (GUI) ---
+    volatile uint32_t gui_cmd;         // ZkGuiCmd, set by the engine side, cleared by the host when handled
+    volatile uint32_t gui_state;       // ZkGuiState, written by the host
+    volatile uint32_t gui_w, gui_h;    // editor size in pixels while open
+    int32_t gui_x, gui_y;              // top-left of the editor window on the Wine desktop
+    uint32_t gui_x_pos_req, gui_y_pos_req;  // where the engine side wants the window (desktop coordinates)
     // --- block handshake (separate cache lines) ---
     volatile uint32_t req_seq; char _p1[60];   // engine -> host: "process one block"
     volatile uint32_t ack_seq; char _p2[60];   // host -> engine: "block done"

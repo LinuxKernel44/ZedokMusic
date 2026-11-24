@@ -59,6 +59,10 @@ object NativeEngine {
     external fun extractProgress(): Long
 
     // --- plugin parameters (normalized 0..1); valid once pluginState == 2 ---
+    /** Plugin editor: [cmd] 1 = open, 2 = close. */
+    external fun guiCommand(track: Int, cmd: Int)
+    /** [state (0 closed, 1 open, 2 failed), width, height]. */
+    external fun guiState(track: Int): IntArray
     external fun paramCount(track: Int): Int
     /** Returns [name, units] and writes [defaultValue, stepCount] into [out]; null if the index is invalid. */
     external fun paramInfo(track: Int, index: Int, out: FloatArray): Array<String>?

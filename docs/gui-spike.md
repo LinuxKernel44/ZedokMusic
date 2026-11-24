@@ -17,15 +17,32 @@ An unmodified **Xvfb** from Ubuntu 24.04 arm64 (glibc 2.39, the same glibc as th
 - A plain Xlib client connects (`XOpenDisplay -> OK`, 1024x768) and `winex11` loads under Box64. Wine's **virtual desktop**
   (`wine explorer /desktop=zedok,1024x768 ...`) renders its blue desktop and cursor into the framebuffer: no window manager needed.
 
-## What does not work yet
+## Solved (2026-11-24): Wine windows now render
 
-- A normal top-level Windows window never became visible in the framebuffer (without a window manager, managed windows stay unmapped).
-- Inside the virtual desktop, `notepad.exe` and `winefile.exe` did not show up either; the cause is not identified (they were not
-  running a minute later and no Wine error was logged).
+Root cause of the "windows never appear" problem: winex11 calls `XShmCreateImage` for every window surface. On Android there is no
+SysV shm / usable MIT-SHM, so the call returns NULL, and Box64's wrapper of that function dereferences the NULL result
+(`SIGSEGV @ XShmCreateImage+0x13` -> Wine's `handle_syscall_fault`, `CreateWindowEx` returned `0xc0000005`). The window was created
+but never mapped. Fix (no Wine rebuild): `native/xshim/zshmstub.c`, a tiny x86_64 library preloaded into Box64 with
+`BOX64_LD_PRELOAD=<root>/usr/lib/libzshmstub.so` that makes `XShmCreateImage` return NULL, so winex11 falls back to plain `XPutImage`.
+Build with host `gcc -shared -nostdlib -fPIC`. Xvfb is started with `-extension MIT-SHM`.
 
-## Still to build once that is solved
+Verified: a minimal Win32 window (`CreateWindowEx` + `WM_PAINT`) shows up in the Xvfb framebuffer inside
+`wine explorer /desktop=zedok,1024x768`. A window manager is not needed in virtual-desktop mode (`native/xshim/zwm.c`, a 60-line
+WM, is kept for non-desktop mode but was not required).
+Debug recipe: `BOX64_LOG=1 BOX64_SHOWSEGV=1 BOX64_SHOWBT=1` + `WINEDEBUG=+seh,+x11drv,+win`.
 
-1. `zhost.exe`: create the editor with `IPlugView` (`attached(HWND)`), implement `IPlugFrame::resizeView`.
-2. Show the framebuffer region in the app (`mmap` the XWD file, ~30 fps).
-3. Forward touches to the plugin window from inside `zhost.exe` (`SendInput`/`PostMessage`) through the shared-memory bridge.
-4. Package the Xvfb overlay (about 15 MB) in `tools/build-rootfs.sh`.
+## Shipped in 0.3.0
+
+All four steps were built: `zhost.exe` opens the editor on its own GUI thread (`IPlugView::attached(HWND)`, `IPlugFrame::resizeView`,
+`IComponentHandler` so knob moves inside the editor reach the DSP and the app's parameter table); the app mirrors the framebuffer
+(`xclient.cpp`, ~30 fps) and injects pointer events through XTEST over the X socket; the Xvfb overlay and both shims are built by
+`tools/build-gui-overlay.sh` and merged into the rootfs by `tools/build-rootfs.sh`.
+Hosts are started as `wine explorer /desktop=zedok,1600x1000 zhost.exe ...` so every editor lands on one shared virtual desktop.
+(Setting the desktop in the registry instead gave `BadWindow` for windows whose parent belonged to a dead explorer.)
+A stale `wineserver` from an earlier run must be killed before restarting Xvfb (`GuiServer.start`).
+
+Gotchas: u-he plugins look for `<Plugin>.data` next to the `.vst3` (then in the registry) and block on a modal dialog otherwise;
+stdout of hosts started through explorer does not reach the app's log file; `WINEDEBUG` for hosts can be set by putting a value in
+`files/winedebug` (debug aid).
+
+Ideas: keyboard and multi-touch, one X screen region per plugin so several editors can be open, lower idle CPU (the host spin loop).

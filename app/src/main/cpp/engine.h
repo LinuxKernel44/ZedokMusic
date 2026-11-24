@@ -102,6 +102,9 @@ public:
     float paramValue(int track, int index);
     std::string paramText(int track, int index);
     void setParam(int track, int index, float value);  // any thread; applied at the next block
+    // --- plugin editor window (hosted by Wine, shown through the X framebuffer) ---
+    void guiCommand(int track, int cmd);   // 1 open, 2 close
+    int guiState(int track, int* w, int* h);  // 0 closed, 1 open, 2 failed
     struct PluginStats { int64_t late, blocks, waited, waitNsTotal, waitNsMax; };
     PluginStats pluginStats(int track);
 

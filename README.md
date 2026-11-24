@@ -2,12 +2,13 @@
 
 A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 
-> **Status: alpha (0.1.0).** It works end to end on a Galaxy S10 (Android 12), but it is young. Expect rough edges — see *Known limitations*.
+> **Status: alpha (0.3.0).** It works end to end on a Galaxy S10 (Android 12), but it is young. Expect rough edges — see *Known limitations*.
 
 ## What it does
 
 - Multitrack arrangement, piano roll, mixer (gain, pan, mute/solo, level meters), tempo and looping, on-screen keyboard.
 - **Plugin parameters**: every VST3 parameter is listed with the plugin's own value text, searchable, and saved with the project.
+- **Plugin editors**: open a plugin's own window from the **Plugin → Editor** button. Wine draws it on an embedded X server (Xvfb) and the app mirrors it live and forwards your touches.
 - **Audio recording** from the device microphone or a USB audio interface (stereo float WAV, latency-compensated), and **MIDI input** from USB and Bluetooth LE keyboards, recorded live into the piano roll.
 - Audio engine in C++ on [Oboe](https://github.com/google/oboe) (AAudio, exclusive mode when available), WAV import and offline WAV export.
 - **Windows VST3 plugins (64-bit)** are hosted by a small Windows program running under **Wine + Box64** inside the app. Audio and MIDI travel
@@ -26,7 +27,7 @@ A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 1. Download the APK from the [Releases](../../releases) page and install it (allow installs from your browser or file manager).
 2. Open ZedokMusic, tap **Install**, allow storage access, then choose or create a folder (not the top level of your storage).
    The first start takes about a minute and a half.
-3. Copy your `.vst3` plugins into `<your folder>/Plugins/VST3`.
+3. Copy your `.vst3` plugins into `<your folder>/Plugins/VST3`. Plugins that keep resources in a data folder (for example u-he's `Podolski.data`) need that folder **next to the `.vst3` file**, otherwise they show a "data missing" dialog and their editor cannot open.
 4. **Add → Instrument track (VST3)…**, pick a plugin, wait for the green dot, tap the pattern and write notes.
 
 Every release APK is signed with the same key. Certificate SHA-256: see the release notes.
@@ -68,7 +69,7 @@ Debug builds contain adb test hooks (`DebugHooks`); release builds do not.
 
 ## Known limitations
 
-- Plugin windows (GUIs) are not shown yet: parameters are edited through a generic list. See `docs/gui-spike.md` for the state of the work.
+- Plugin editors are mirrored at about 30 fps with single-touch input only (no keyboard, scroll wheel or multi-touch yet), one editor at a time. Each plugin host currently keeps one CPU core busy while the engine runs.
 - MIDI input and audio recording are implemented but only the microphone path has been tested on hardware; USB and Bluetooth MIDI devices are untested (the MIDI parser has unit tests).
 - Parameter automation over time is not available yet.
 - VST3 only (no VST2, no CLAP). Plugins that need a GPU, an installer-based license (iLok, etc.) or Windows-only drivers may not work.

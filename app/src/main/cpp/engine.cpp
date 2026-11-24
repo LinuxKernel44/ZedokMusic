@@ -275,6 +275,11 @@ bool Engine::paramInfo(int track, int index, std::string* name, std::string* uni
 }
 float Engine::paramValue(int track, int index) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->paramValue(index) : 0.f; }
 std::string Engine::paramText(int track, int index) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->paramText(index) : ""; }
+void Engine::guiCommand(int track, int cmd) { std::lock_guard<std::mutex> lk(editMutex_); if (auto b = bridgeOf(current_, track)) b->guiCommand((uint32_t)cmd); }
+int Engine::guiState(int track, int* w, int* h) {
+    std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track);
+    *w = *h = 0; if (!b) return 0; b->guiSize(w, h); return (int)b->guiState();
+}
 void Engine::setParam(int track, int index, float value) {
     value = std::clamp(value, 0.f, 1.f);
     { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); if (b) b->setParamValue(index, value); }

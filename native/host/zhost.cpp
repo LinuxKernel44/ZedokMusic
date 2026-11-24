@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 #include "bridge.h"
 #include "pluginterfaces/base/ipluginbase.h"
@@ -15,6 +16,7 @@
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/gui/iplugview.h"
 using namespace Steinberg; using namespace Steinberg::Vst;
 
 namespace {
@@ -72,6 +74,98 @@ static void utf8(const TChar* src, char* dst, size_t cap) {  // UTF-16 (BMP) -> 
     }
     dst[o] = 0;
 }
+
+// --- plugin editor support -------------------------------------------------------------------------------------------
+ZkBridge* gB = nullptr; IEditController* gCtrl = nullptr;
+std::unordered_map<ParamID, int> gParamIndex;  // VST3 parameter id -> index in the bridge's parameter table
+
+// Receives edits made inside the plugin's own GUI: they are mirrored to the bridge and queued for the next audio block.
+struct Handler : IComponentHandler {
+    struct Item { ParamID id; ParamValue v; };
+    static const int N = 512;
+    Item q[N]; volatile LONG head = 0, tail = 0;  // single producer (GUI thread) / single consumer (audio loop)
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, IComponentHandler::iid) || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) { *obj = this; return kResultOk; }
+        *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; } uint32 PLUGIN_API release() override { return 1; }
+    tresult PLUGIN_API beginEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API restartComponent(int32) override { return kResultOk; }
+    tresult PLUGIN_API performEdit(ParamID id, ParamValue v) override {
+        LONG h = head, next = (h + 1) % N;
+        if (next != tail) { q[h] = {id, v}; MemoryBarrier(); head = next; }
+        auto it = gParamIndex.find(id);
+        if (it != gParamIndex.end() && gB) {
+            gB->values[it->second] = (float)v;
+            String128 str{}; if (gCtrl && gCtrl->getParamStringByValue(id, v, str) == kResultOk) { char t[96]; utf8(str, t, sizeof t); snprintf(gB->texts[it->second], sizeof gB->texts[0], "%s", t); }
+        }
+        return kResultOk;
+    }
+    bool pop(Item& o) { if (tail == head) return false; o = q[tail]; MemoryBarrier(); tail = (tail + 1) % N; return true; }
+};
+Handler gHandler;
+
+struct Frame : IPlugFrame {
+    HWND hwnd = nullptr; bool inResize = false;
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, IPlugFrame::iid) || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) { *obj = this; return kResultOk; }
+        *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; } uint32 PLUGIN_API release() override { return 1; }
+    tresult PLUGIN_API resizeView(IPlugView* v, ViewRect* r) override {
+        if (!r || !hwnd || inResize) return kResultFalse;
+        inResize = true;
+        const int w = r->right - r->left, h = r->bottom - r->top;
+        SetWindowPos(hwnd, nullptr, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        ViewRect nr{0, 0, w, h}; v->onSize(&nr);
+        gB->gui_w = w; gB->gui_h = h;
+        inResize = false; return kResultOk;
+    }
+};
+
+// Owns the editor window. Windows requires the window and its message loop to live on one thread: this is it.
+DWORD WINAPI guiThread(LPVOID) {
+    WNDCLASSA wc{}; wc.lpfnWndProc = DefWindowProcA; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "ZedokEditor"; wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassA(&wc);
+    IPlugView* view = nullptr; HWND hwnd = nullptr; Frame frame;
+    auto closeView = [&]() {
+        if (view) { view->setFrame(nullptr); view->removed(); view->release(); view = nullptr; }
+        if (hwnd) { DestroyWindow(hwnd); hwnd = nullptr; frame.hwnd = nullptr; }
+        gB->gui_w = gB->gui_h = 0; InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_CLOSED);
+    };
+    while (!gB->quit) {
+        MSG m; while (PeekMessageA(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageA(&m); }
+        const uint32_t cmd = gB->gui_cmd;
+        if (cmd == ZK_GUI_OPEN) {
+            InterlockedExchange((volatile LONG*)&gB->gui_cmd, ZK_GUI_NONE);
+            if (!view) {
+                view = gCtrl ? gCtrl->createView(ViewType::kEditor) : nullptr;
+                ViewRect r{};
+                if (!view || view->isPlatformTypeSupported(kPlatformTypeHWND) != kResultTrue || view->getSize(&r) != kResultOk) {
+                    if (view) { view->release(); view = nullptr; }
+                    InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_FAILED);
+                } else {
+                    const int w = std::max(1, (int)(r.right - r.left)), h = std::max(1, (int)(r.bottom - r.top));
+                    hwnd = CreateWindowExA(WS_EX_TOOLWINDOW, "ZedokEditor", "Editor", WS_POPUP, 0, 0, w, h, nullptr, nullptr, wc.hInstance, nullptr);
+                    frame.hwnd = hwnd; view->setFrame(&frame);
+                    if (!hwnd || view->attached(hwnd, kPlatformTypeHWND) != kResultOk) { closeView(); InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_FAILED); }
+                    else {
+                        ViewRect nr{0, 0, w, h}; view->onSize(&nr);
+                        SetWindowPos(hwnd, HWND_TOP, 0, 0, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                        gB->gui_x = 0; gB->gui_y = 0; gB->gui_w = w; gB->gui_h = h;
+                        InterlockedExchange((volatile LONG*)&gB->gui_state, ZK_GUI_OPENED);
+                    }
+                }
+            }
+        } else if (cmd == ZK_GUI_CLOSE) {
+            InterlockedExchange((volatile LONG*)&gB->gui_cmd, ZK_GUI_NONE);
+            closeView();
+        }
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, 8, QS_ALLINPUT);
+    }
+    closeView();
+    return 0;
+}
+
 int fail(ZkBridge* b, uint32_t code, const char* msg) {
     fprintf(stderr, "zhost error %u: %s\n", code, msg); fflush(stderr);
     if (b) { b->host_error = code; InterlockedExchange((volatile LONG*)&b->host_state, ZK_HOST_ERROR); }
@@ -141,6 +235,9 @@ int main(int argc, char** argv) {
         }
     }
     B->n_params = np;
+    gB = B; gCtrl = ctrl;
+    for (uint32_t i = 0; i < np; i++) gParamIndex[B->params[i].id] = (int)i;
+    if (ctrl) ctrl->setComponentHandler(&gHandler);
     ParamChanges pcIn, pcOut;
     B->in_channels = nIn ? 2 : 0; B->out_channels = 2;
 
@@ -153,6 +250,7 @@ int main(int argc, char** argv) {
     auto render = [&](int n, const ZkEvent* ev, int nev, const ZkParamChange* ch = nullptr, int nch = 0) {
         evl.ev.clear(); pcIn.clear(); pcOut.clear();
         for (int i = 0; i < nch && ch; i++) if (ch[i].index < np) { int ix; if (auto* q = pcIn.addParameterData(B->params[ch[i].index].id, ix)) q->addPoint(0, ch[i].value, ix); }
+        { Handler::Item it; while (gHandler.pop(it)) { int ix; if (auto* q = pcIn.addParameterData(it.id, ix)) q->addPoint(0, it.v, ix); } }
         for (int i = 0; i < nev; i++) {
             Event e{}; e.sampleOffset = (int32)std::min<uint32_t>(ev[i].offset, (uint32_t)n - 1);
             if (ev[i].type == ZK_NOTE_ON) { e.type = Event::kNoteOnEvent; e.noteOn.channel = ev[i].channel; e.noteOn.pitch = ev[i].pitch; e.noteOn.velocity = ev[i].velocity / 127.f; e.noteOn.noteId = -1; }
@@ -184,6 +282,7 @@ int main(int argc, char** argv) {
 
     printf("zhost ready: %s, frames=%d rate=%.0f in=%d out=%d events=%d params=%u\n", name, frames, rate, nIn, nOut, nEv, np); fflush(stdout);
     InterlockedExchange((volatile LONG*)&B->host_state, ZK_HOST_READY);
+    if (ctrl) CreateThread(nullptr, 0, guiThread, nullptr, 0, nullptr);
 
     // --- main loop: spin while active, back off when the engine is idle ---
     uint32_t last = B->req_seq;

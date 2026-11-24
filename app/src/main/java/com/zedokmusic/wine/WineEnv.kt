@@ -13,7 +13,7 @@ class WineEnv(ctx: Context) {
     val wineBin = File(root, "opt/wine/bin/wine")
 
     /** Builds a process running `wine <args>` under Box64 in this environment. Caller starts it. */
-    fun wine(vararg args: String, debug: String = "-all"): ProcessBuilder {
+    fun wine(vararg args: String, debug: String = "-all", extraEnv: ((MutableMap<String, String>) -> Unit)? = null): ProcessBuilder {
         home.mkdirs(); File(root, "tmp").mkdirs()
         val pb = ProcessBuilder(listOf(box64.absolutePath, wineBin.absolutePath) + args)
         val e = pb.environment()
@@ -27,6 +27,7 @@ class WineEnv(ctx: Context) {
         e["WINEDEBUG"] = debug
         e["WINEDLLOVERRIDES"] = "mscoree,mshtml="
         e["WINESERVER"] = File(root, "opt/wine/bin/wineserver").absolutePath
+        extraEnv?.invoke(e)
         pb.redirectErrorStream(true)
         return pb
     }

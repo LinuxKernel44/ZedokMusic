@@ -6,3 +6,4 @@
 #include "pluginterfaces/vst/ivstevents.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
+#include "pluginterfaces/gui/iplugview.h"

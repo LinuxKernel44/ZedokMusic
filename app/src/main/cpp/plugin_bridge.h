@@ -41,6 +41,11 @@ public:
     void setParamValue(int i, float v) { if (b_ && i >= 0 && i < paramCount()) b_->values[i] = v; }
     std::string paramText(int i) const { return (b_ && i >= 0 && i < paramCount()) ? std::string(b_->texts[i], strnlen(b_->texts[i], sizeof b_->texts[i])) : ""; }
 
+    // --- plugin editor ---
+    void guiCommand(uint32_t cmd) { if (b_) __atomic_store_n(&b_->gui_cmd, cmd, __ATOMIC_RELEASE); }
+    uint32_t guiState() const { return b_ ? __atomic_load_n(&b_->gui_state, __ATOMIC_ACQUIRE) : (uint32_t)ZK_GUI_CLOSED; }
+    void guiSize(int* w, int* h) const { *w = b_ ? (int)b_->gui_w : 0; *h = b_ ? (int)b_->gui_h : 0; }
+
     // Real-time safe. Hands one block (events for the window about to be rendered by the host) to the Wine host.
     void submit(const ZkEvent* ev, int n, int frames, const ZkParamChange* ch = nullptr, int nch = 0) {
         n = n > ZK_MAX_EVENTS ? ZK_MAX_EVENTS : n;
