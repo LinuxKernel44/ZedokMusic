@@ -3,11 +3,12 @@
 #pragma once
 #include <stdint.h>
 #define ZK_MAGIC 0x5A4B4252u  // 'ZKBR'
-#define ZK_VERSION 3
+#define ZK_VERSION 4
 #define ZK_MAX_FRAMES 2048
 #define ZK_MAX_EVENTS 512
 #define ZK_MAX_PARAMS 2048
 #define ZK_MAX_PARAM_CHANGES 64
+#define ZK_EDIT_RING 64
 
 enum ZkEventType : uint8_t { ZK_NOTE_ON = 1, ZK_NOTE_OFF = 2, ZK_ALL_NOTES_OFF = 3 };
 enum ZkHostState : uint32_t { ZK_HOST_STARTING = 0, ZK_HOST_READY = 1, ZK_HOST_ERROR = 2 };
@@ -34,6 +35,9 @@ struct ZkBridge {
     volatile uint32_t gui_w, gui_h;    // editor size in pixels while open
     int32_t gui_x, gui_y;              // top-left of the editor window on the Wine desktop
     uint32_t gui_x_pos_req, gui_y_pos_req;  // where the engine side wants the window (desktop coordinates)
+    // Parameter edits made inside the plugin editor, for automation recording (host = producer, app = consumer).
+    volatile uint32_t edit_head;
+    ZkParamChange edits[ZK_EDIT_RING];
     // --- block handshake (separate cache lines) ---
     volatile uint32_t req_seq; char _p1[60];   // engine -> host: "process one block"
     volatile uint32_t ack_seq; char _p2[60];   // host -> engine: "block done"

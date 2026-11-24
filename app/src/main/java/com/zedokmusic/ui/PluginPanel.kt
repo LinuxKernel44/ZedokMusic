@@ -27,6 +27,7 @@ fun PluginPanel(vm: DawViewModel) {
         return
     }
     var editor by remember(t.id) { mutableStateOf(false) }
+    var keys by remember(t.id) { mutableStateOf(false) }
     var query by remember(t.id) { mutableStateOf("") }
     var onlyChanged by remember(t.id) { mutableStateOf(false) }
     val params = remember(t.id, t.pluginState) { vm.loadParams(t) }
@@ -39,10 +40,11 @@ fun PluginPanel(vm: DawViewModel) {
                 Text(t.pluginName.ifBlank { t.name }, color = t.color, fontSize = 14.sp, maxLines = 1)
                 Text("${params.size} parameters · ${t.paramOverrides.size} changed", color = Zk.dim, fontSize = 11.sp)
             }
+            if (editor) LabelButton("Keys", keys, w = 60.dp) { keys = !keys }
             LabelButton("Editor", editor, w = 70.dp) { editor = !editor }
             if (!editor) LabelButton("Changed", onlyChanged, w = 76.dp) { onlyChanged = !onlyChanged }
         }
-        if (editor) { Box(Modifier.weight(1f).fillMaxWidth()) { PluginEditor(vm, t) }; return@Column }
+        if (editor) { Box(Modifier.weight(1f).fillMaxWidth()) { PluginEditor(vm, t, keys) }; return@Column }
         OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search parameters") },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp))
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {

@@ -35,10 +35,15 @@ struct Note {
 
 constexpr int kMaxPlugins = 16;
 
+// Parameter automation: piecewise-linear lane of a plugin parameter, points sorted by frame.
+struct AutoLane { int param = 0; std::vector<int64_t> frames; std::vector<float> values; };
+constexpr int kMaxLanes = 32;
+
 struct TrackState {
     int id = 0;
     std::vector<Clip> clips;
     std::vector<Note> notes;                        // MIDI notes driving the track's plugin
+    std::vector<AutoLane> lanes;                    // parameter automation
     std::shared_ptr<PluginBridge> plugin;           // optional Wine-hosted instrument
     int pluginSlot = -1;                            // index into MixState::plugOut
     float gain = 1.f, pan = 0.f;
@@ -102,6 +107,9 @@ public:
     float paramValue(int track, int index);
     std::string paramText(int track, int index);
     void setParam(int track, int index, float value);  // any thread; applied at the next block
+    // --- parameter automation ---
+    void setAutomation(int track, std::vector<AutoLane> lanes);
+    int pollEdits(int track, ZkParamChange* out, int max);  // edits made inside the plugin editor
     // --- plugin editor window (hosted by Wine, shown through the X framebuffer) ---
     void guiCommand(int track, int cmd);   // 1 open, 2 close
     int guiState(int track, int* w, int* h);  // 0 closed, 1 open, 2 failed
@@ -171,6 +179,7 @@ private:
     struct ParamEvt { int track, index; float value; };
     std::mutex paramMutex_;
     std::array<ParamEvt, 512> paramQ_;
+    float autoLast_[kMaxPlugins][kMaxLanes];  // audio thread: last automation value sent per (plugin slot, lane); NaN = unsent
     std::atomic<uint32_t> paramHead_{0}, paramTail_{0};
     std::atomic<int64_t> lateTotal_{0};
     bool pluginWasPlaying_ = false;   // audio-thread-only

@@ -35,6 +35,19 @@ object PluginSelfTest {
         log("live arpeggio: peak=%.3f activeWindows=%d/40 position=%d xruns=%d avgCb=%.0fus maxCb=%.0fus".format(peak, nonSilent, e.position(), s[3].toInt(), s[4], s[5]))
         log("bridge: late=${ps[0]} blocks=${ps[1]} waitedFor=${ps[2]} avgWait=%.0fus maxWait=%.0fus".format(if (ps[2] > 0) ps[3] / ps[2] / 1000.0 else 0.0, ps[4] / 1000.0))
 
+        // automation: Output = 0 for the first 1.6 s, then 0.5 -> the first half must be silent and the second half audible
+        if (volIdx >= 0) {
+            val fr = longArrayOf(0, (1.6 * rate).toLong(), (1.62 * rate).toLong()); val va = floatArrayOf(0f, 0f, 0.5f)
+            e.setAutomation(tr, longArrayOf(volIdx.toLong(), 3), fr, va); e.seek(0); e.play()
+            var firstHalf = 0f; var secondHalf = 0f
+            for (i in 0 until 34) { Thread.sleep(100); val pk = e.peak(tr); if (i in 4..14) firstHalf = maxOf(firstHalf, pk); if (i in 20..30) secondHalf = maxOf(secondHalf, pk) }
+            e.pause(); e.setAutomation(tr, LongArray(0), LongArray(0), FloatArray(0)); e.setParam(tr, volIdx, 0.5f); Thread.sleep(200)
+            log("automation: peak in first half=%.4f (expect ~0), second half=%.4f (expect >0)".format(firstHalf, secondHalf))
+        }
+        // steady state: 20 s of looping notes, count late blocks
+        e.setLoop(true, 0, (3.2 * rate).toLong()); e.seek(0); e.play()
+        val l0 = e.pluginStats(tr); Thread.sleep(20000); val l1 = e.pluginStats(tr); e.pause(); e.setLoop(false, 0, 0)
+        log("steady 20s: late=${l1[0] - l0[0]} of blocks=${l1[1] - l0[1]} xruns=${e.stats()[3].toInt()}")
         if (volIdx >= 0) {
             val orig = e.paramValue(tr, volIdx)
             e.setParam(tr, volIdx, 0f); Thread.sleep(300)

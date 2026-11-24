@@ -98,6 +98,25 @@ J(jintArray, guiState, jint track) {  // [state, width, height]
     int w, h; int st = eng().guiState(track, &w, &h); jint v[3] = {st, w, h};
     jintArray a = env->NewIntArray(3); env->SetIntArrayRegion(a, 0, 3, v); return a;
 }
+// meta = [param, pointCount] per lane; frames/values are the concatenated points.
+J(void, setAutomation, jint track, jlongArray meta, jlongArray frames, jfloatArray values) {
+    const int nm = env->GetArrayLength(meta) / 2;
+    std::vector<jlong> m(nm * 2), f(env->GetArrayLength(frames)); std::vector<jfloat> v(env->GetArrayLength(values));
+    env->GetLongArrayRegion(meta, 0, nm * 2, m.data()); env->GetLongArrayRegion(frames, 0, (jsize)f.size(), f.data()); env->GetFloatArrayRegion(values, 0, (jsize)v.size(), v.data());
+    std::vector<AutoLane> lanes; size_t o = 0;
+    for (int i = 0; i < nm && i < kMaxLanes; i++) {
+        AutoLane l; l.param = (int)m[i * 2]; const size_t c = (size_t)m[i * 2 + 1];
+        for (size_t k = 0; k < c && o + k < f.size(); k++) { l.frames.push_back(f[o + k]); l.values.push_back(v[o + k]); }
+        o += c; if (!l.frames.empty()) lanes.push_back(std::move(l));
+    }
+    eng().setAutomation(track, std::move(lanes));
+}
+// Edits made in the plugin editor since the last call: [index, value, index, value, ...].
+J(jfloatArray, pollEdits, jint track) {
+    ZkParamChange ch[ZK_EDIT_RING]; int n = eng().pollEdits(track, ch, ZK_EDIT_RING);
+    std::vector<jfloat> v(n * 2); for (int i = 0; i < n; i++) { v[i * 2] = (float)ch[i].index; v[i * 2 + 1] = ch[i].value; }
+    jfloatArray a = env->NewFloatArray(n * 2); if (n) env->SetFloatArrayRegion(a, 0, n * 2, v.data()); return a;
+}
 J(jstring, paramText, jint track, jint index) { return env->NewStringUTF(eng().paramText(track, index).c_str()); }
 J(void, setParam, jint track, jint index, jfloat v) { eng().setParam(track, index, v); }
 

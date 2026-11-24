@@ -59,6 +59,10 @@ object NativeEngine {
     external fun extractProgress(): Long
 
     // --- plugin parameters (normalized 0..1); valid once pluginState == 2 ---
+    /** Automation lanes: [meta] = (param index, point count) per lane; [frames]/[values] = all points, lane after lane. */
+    external fun setAutomation(track: Int, meta: LongArray, frames: LongArray, values: FloatArray)
+    /** Parameter edits made inside the plugin editor since the last call: index, value, index, value... */
+    external fun pollEdits(track: Int): FloatArray
     /** Plugin editor: [cmd] 1 = open, 2 = close. */
     external fun guiCommand(track: Int, cmd: Int)
     /** [state (0 closed, 1 open, 2 failed), width, height]. */

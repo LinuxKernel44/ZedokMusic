@@ -103,7 +103,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val fpb get() = 48000.0 * 60.0 / bpm  // frames per beat
     private var dirty = false
 
-    // Declared before init: load() runs from init and fills it.
+    // Declared before init: load() runs from init and fills them.
+    private val pendingLanes = HashMap<Int, List<Pair<String, List<AutoPoint>>>>()
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
     init {
         engineOk = e.start()
@@ -122,6 +123,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             playhead = (e.position() / fpb).toFloat()
             for (t in tracks) { t.meter = maxOf(e.peak(t.id), t.meter * 0.86f) }
             masterMeter = maxOf(e.peak(-1), masterMeter * 0.86f)
+            for (t in tracks) if (t.pluginState == 2) pollEditorEdits(t)
+            if (!playing) for (t in tracks) for (l in t.lanes) l.lastWrite = -1f
             if (recording && !recMidi) recLevel = maxOf(e.recLevel(), recLevel * 0.86f)
             if (++n % 15 == 0) {
                 for (t in tracks) if (t.pluginPath != null && t.pluginState < 2) {
@@ -146,7 +149,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val old = bpm; bpm = v.coerceIn(30f, 300f)
         if (old == bpm) return
         val beat = playhead
-        tracks.forEach { syncNotes(it); it.clips.forEach { c -> e.moveClip(c.engineId, (c.start * fpb).toLong()) } }
+        tracks.forEach { syncNotes(it); syncLanes(it); it.clips.forEach { c -> e.moveClip(c.engineId, (c.start * fpb).toLong()) } }
         applyLoop(); e.seek((beat * fpb).toLong()); dirty = true
     }
 
@@ -216,12 +219,65 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun paramValue(t: TrackM, i: Int) = e.paramValue(t.id, i)
     fun paramText(t: TrackM, i: Int) = e.paramText(t.id, i)
-    fun setParam(t: TrackM, i: Int, v: Float) { e.setParam(t.id, i, v); t.paramOverrides[i] = v; dirty = true }
+    fun setParam(t: TrackM, i: Int, v: Float) { e.setParam(t.id, i, v); t.paramOverrides[i] = v; dirty = true; recordAutomation(t, i, v) }
     fun resetParam(t: TrackM, p: ParamM) { e.setParam(t.id, p.index, p.default); t.paramOverrides.remove(p.index); dirty = true }
+    // ---------- parameter automation ----------
+    var laneSelected by mutableStateOf<AutoLane?>(null)
+    private fun paramNameOf(t: TrackM, index: Int): String? {
+        if (t.paramNames.isEmpty()) loadParams(t)
+        return t.paramNames[index]
+    }
+    /** Creates the lane (seeded with the parameter's current value at beat 0) or returns the existing one. */
+    fun addLane(t: TrackM, index: Int): AutoLane? {
+        val name = paramNameOf(t, index) ?: return null
+        t.lanes.firstOrNull { it.paramIndex == index }?.let { return it }
+        if (t.lanes.size >= 32) { message = "At most 32 automation lanes per track."; return null }
+        val l = AutoLane(name, index); l.points.add(AutoPoint(0f, e.paramValue(t.id, index)))
+        t.lanes.add(l); syncLanes(t); dirty = true; return l
+    }
+    fun removeLane(t: TrackM, l: AutoLane) { t.lanes.remove(l); if (laneSelected == l) laneSelected = null; syncLanes(t); dirty = true }
+    fun setLanePoints(t: TrackM, l: AutoLane, pts: List<AutoPoint>) {
+        val sorted = pts.sortedBy { it.beat }
+        l.points.clear(); l.points.addAll(sorted); syncLanes(t); dirty = true
+    }
+    private fun syncLanes(t: TrackM) {
+        val lanes = t.lanes.filter { it.points.isNotEmpty() }
+        val meta = LongArray(lanes.size * 2); val frames = ArrayList<Long>(); val values = ArrayList<Float>()
+        lanes.forEachIndexed { i, l -> meta[i * 2] = l.paramIndex.toLong(); meta[i * 2 + 1] = l.points.size.toLong()
+            l.points.forEach { frames.add((it.beat * fpb).toLong()); values.add(it.value) } }
+        e.setAutomation(t.id, meta, frames.toLongArray(), values.toFloatArray())
+    }
+    /** While recording (transport running), writes the touched parameter into its lane at the playhead. */
+    private fun recordAutomation(t: TrackM, index: Int, v: Float) {
+        if (!recording || !e.isPlaying()) return
+        val l = addLane(t, index) ?: return
+        val b = playhead
+        val last = l.points.lastOrNull { it.beat <= b }
+        if (last != null && b - last.beat < 0.06f && kotlin.math.abs(last.value - v) < 0.004f) return
+        // Overwrite what lies just ahead of the playhead (older points are eaten as the pass advances); keep everything behind it.
+        val kept = l.points.filter { !(it.beat > b - 0.001f && it.beat <= b + 0.25f) }.toMutableList()
+        kept.add(AutoPoint(b, v)); l.lastWrite = b
+        setLanePoints(t, l, kept.distinctBy { it.beat })
+    }
+    /** Drains the edits made inside the plugin's own editor: they count as changed parameters and are recorded when armed. */
+    private fun pollEditorEdits(t: TrackM) {
+        val ed = e.pollEdits(t.id)
+        var i = 0
+        while (i + 1 < ed.size) {
+            val idx = ed[i].toInt(); val v = ed[i + 1]; i += 2
+            t.paramOverrides[idx] = v; dirty = true
+            recordAutomation(t, idx, v)
+        }
+    }
     /** Re-applies saved values once the plugin is up (matching by name, so a plugin update that shifts indices stays safe). */
     private fun applyPending(t: TrackM) {
-        val pending = pendingParams.remove(t.id) ?: return
+        val lanes = pendingLanes.remove(t.id)
+        val pending = pendingParams.remove(t.id)
+        if (lanes == null && pending == null) return
         val byName = loadParams(t).associateBy { it.name }
+        lanes?.forEach { (name, pts) -> byName[name]?.let { p -> val l = AutoLane(name, p.index); l.points.addAll(pts); t.lanes.add(l) } }
+        if (lanes != null) syncLanes(t)
+        if (pending == null) return
         for ((name, v) in pending) byName[name]?.let { e.setParam(t.id, it.index, v); t.paramOverrides[it.index] = v }
     }
 
@@ -248,6 +304,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
             .put("params", JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } })
+            .put("lanes", JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble())) } })) } })
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", c.path).put("start", c.start.toDouble())) } }))
         root.put("tracks", arr)
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
@@ -274,6 +331,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 val na = o.getJSONArray("notes")
                 for (k in 0 until na.length()) { val n = na.getJSONArray(k); t.notes.add(NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3))) }
                 syncNotes(t)
+                o.optJSONArray("lanes")?.let { la -> pendingLanes[t.id] = (0 until la.length()).map { k -> val lo = la.getJSONObject(k); val pa = lo.getJSONArray("points")
+                    lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat()) } } } }
                 o.optJSONArray("params")?.let { pa -> pendingParams[t.id] = (0 until pa.length()).map { k -> pa.getJSONArray(k).let { x -> x.getString(0) to x.getDouble(1).toFloat() } } }
                 val ca = o.getJSONArray("clips")
                 for (k in 0 until ca.length()) { val c = ca.getJSONObject(k); val w = File(c.getString("path")); if (w.exists()) importClip(t, w, c.getDouble("start").toFloat()) }

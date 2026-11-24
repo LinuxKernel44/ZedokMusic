@@ -41,6 +41,14 @@ public:
     void setParamValue(int i, float v) { if (b_ && i >= 0 && i < paramCount()) b_->values[i] = v; }
     std::string paramText(int i) const { return (b_ && i >= 0 && i < paramCount()) ? std::string(b_->texts[i], strnlen(b_->texts[i], sizeof b_->texts[i])) : ""; }
 
+    // Parameter edits made in the plugin editor since the last call (index into the parameter table, normalized value).
+    int pollEdits(ZkParamChange* out, int max) {
+        if (!b_) return 0;
+        uint32_t head = __atomic_load_n(&b_->edit_head, __ATOMIC_ACQUIRE); int n = 0;
+        if (head - editTail_ > ZK_EDIT_RING) editTail_ = head - ZK_EDIT_RING;  // overrun: skip the oldest
+        while (editTail_ != head && n < max) out[n++] = b_->edits[editTail_++ % ZK_EDIT_RING];
+        return n;
+    }
     // --- plugin editor ---
     void guiCommand(uint32_t cmd) { if (b_) __atomic_store_n(&b_->gui_cmd, cmd, __ATOMIC_RELEASE); }
     uint32_t guiState() const { return b_ ? __atomic_load_n(&b_->gui_state, __ATOMIC_ACQUIRE) : (uint32_t)ZK_GUI_CLOSED; }
@@ -96,6 +104,7 @@ public:
 
 private:
     ZkBridge* b_ = nullptr; int fd_ = -1, frames_ = 0;
+    uint32_t editTail_ = 0;
     uint32_t seq_ = 0; bool pending_ = false, skipped_ = false;
     std::atomic<int64_t> late_{0}, blocks_{0}, waitedBlocks_{0}, waitNsTotal_{0}, waitNsMax_{0};
 };

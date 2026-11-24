@@ -32,6 +32,7 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     var paramNames: Map<Int, String> = emptyMap()
     val notes = mutableStateListOf<NoteM>()
     val clips = mutableStateListOf<ClipM>()
+    val lanes = mutableStateListOf<AutoLane>()
 
     /** End of the content in beats, rounded up to whole bars (min 1 bar). */
     fun lengthBeats(bpm: Float): Float {
@@ -40,6 +41,15 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
         clips.forEach { end = maxOf(end, it.start + it.lengthFrames / 48000f * bpm / 60f) }
         return maxOf(4f, kotlin.math.ceil(end / 4f) * 4f)
     }
+}
+
+/** One automation breakpoint: [value] is the normalized parameter value (0..1) at [beat]. */
+data class AutoPoint(val beat: Float, val value: Float)
+
+/** Automation of one plugin parameter over the timeline (linear between points). */
+class AutoLane(val paramName: String, var paramIndex: Int) {
+    val points = androidx.compose.runtime.mutableStateListOf<AutoPoint>()
+    var lastWrite = -1f  // recording: beat of the last point written in the current pass
 }
 
 class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int)

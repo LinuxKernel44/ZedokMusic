@@ -24,6 +24,7 @@ uint32_t be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2
 
 struct XConn {
     int fd = -1; uint32_t root = 0; uint8_t xtestOpcode = 0; uint16_t seq = 0;
+    int minKey = 8, maxKey = 255, perKey = 0; std::vector<uint32_t> keysyms;  // keyboard mapping: keysyms[(code - minKey) * perKey + column]
     std::mutex m;
     bool readFull(void* buf, size_t n) {
         auto* p = static_cast<uint8_t*>(buf);
@@ -57,7 +58,41 @@ struct XConn {
         if (!writeFull(q, 16)) { close_(); return false; }
         uint8_t rep[32]; if (!readFull(rep, 32) || rep[0] != 1 || !rep[8]) { close_(); return false; }
         xtestOpcode = rep[9];
+        minKey = d[26]; maxKey = d[27];
+        loadKeymap();
         return true;
+    }
+    void loadKeymap() {  // GetKeyboardMapping: lets us turn characters into key presses
+        keysyms.clear(); perKey = 0;
+        const int count = maxKey - minKey + 1;
+        uint8_t q[8] = {101, 0, 2, 0, (uint8_t)minKey, (uint8_t)count, 0, 0};
+        if (!writeFull(q, 8)) return;
+        uint8_t h[32]; if (!readFull(h, 32) || h[0] != 1) return;
+        perKey = h[1]; const size_t words = h[4] | h[5] << 8 | h[6] << 16 | (uint32_t)h[7] << 24;
+        std::vector<uint8_t> b(words * 4); if (!readFull(b.data(), b.size())) { perKey = 0; return; }
+        keysyms.resize(words);
+        for (size_t i = 0; i < words; i++) keysyms[i] = b[i * 4] | b[i * 4 + 1] << 8 | b[i * 4 + 2] << 16 | (uint32_t)b[i * 4 + 3] << 24;
+    }
+    // Finds the key producing [sym]: returns keycode (0 = none) and whether Shift is needed.
+    int findKey(uint32_t sym, bool* shift) {
+        *shift = false;
+        for (int c = 0; c < maxKey - minKey + 1 && perKey > 0; c++) for (int col = 0; col < std::min(perKey, 2); col++)
+            if (keysyms[(size_t)c * perKey + col] == sym) { *shift = col == 1; return c + minKey; }
+        return 0;
+    }
+    bool fakeKey(int code, bool down) {
+        if (fd < 0 || !code) return false;
+        uint8_t r[36] = {0}; r[0] = xtestOpcode; r[1] = 2; r[2] = 9; r[4] = down ? 2 : 3; r[5] = (uint8_t)code;
+        drain(); return writeFull(r, sizeof r);
+    }
+    // Types a key by keysym (Latin-1 keysym == code point; others are 0x1000000 + code point).
+    bool tapSym(uint32_t sym) {
+        bool shift; int code = findKey(sym, &shift); if (!code) return false;
+        int shiftCode = 0; bool dummy; if (shift) shiftCode = findKey(0xffe1, &dummy);
+        if (shiftCode) fakeKey(shiftCode, true);
+        bool ok = fakeKey(code, true) && fakeKey(code, false);
+        if (shiftCode) fakeKey(shiftCode, false);
+        return ok;
     }
     // XTEST FakeInput: type 4 ButtonPress, 5 ButtonRelease, 6 MotionNotify (absolute: detail 0, coordinates relative to root)
     bool fake(uint8_t type, uint8_t detail, int x, int y) {
@@ -113,13 +148,26 @@ JNIEXPORT jboolean JNICALL Java_com_zedokmusic_engine_XDisplay_inputConnect(JNIE
     return xc.connectTo(path) ? JNI_TRUE : JNI_FALSE;
 }
 JNIEXPORT void JNICALL Java_com_zedokmusic_engine_XDisplay_inputClose(JNIEnv*, jobject) { std::lock_guard<std::mutex> lk(xc.m); xc.close_(); }
-// action: 0 = move, 1 = button 1 down, 2 = button 1 up
-JNIEXPORT jboolean JNICALL Java_com_zedokmusic_engine_XDisplay_pointer(JNIEnv*, jobject, jint action, jint x, jint y) {
+// action: 0 = move, 1 = button down, 2 = button up; button 1 left, 2 middle, 3 right, 4/5 wheel up/down
+JNIEXPORT jboolean JNICALL Java_com_zedokmusic_engine_XDisplay_pointer(JNIEnv*, jobject, jint action, jint x, jint y, jint button) {
     std::lock_guard<std::mutex> lk(xc.m);
     if (xc.fd < 0) return JNI_FALSE;
     bool ok = xc.fake(6, 0, x, y);
-    if (ok && action == 1) ok = xc.fake(4, 1, x, y);
-    if (ok && action == 2) ok = xc.fake(5, 1, x, y);
+    if (ok && action == 1) ok = xc.fake(4, (uint8_t)button, x, y);
+    if (ok && action == 2) ok = xc.fake(5, (uint8_t)button, x, y);
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+// Types one Unicode character (shifted when needed). Returns false when the keyboard has no such key.
+JNIEXPORT jboolean JNICALL Java_com_zedokmusic_engine_XDisplay_typeChar(JNIEnv*, jobject, jint cp) {
+    std::lock_guard<std::mutex> lk(xc.m);
+    if (xc.fd < 0) return JNI_FALSE;
+    const uint32_t sym = (cp >= 0x20 && cp <= 0x7e) || (cp >= 0xa0 && cp <= 0xff) ? (uint32_t)cp : 0x1000000u + (uint32_t)cp;
+    return xc.tapSym(sym) ? JNI_TRUE : JNI_FALSE;
+}
+// Taps a key by X keysym (e.g. 0xff08 BackSpace, 0xff0d Return, 0xff09 Tab, 0xff1b Escape, 0xff51..0xff54 arrows).
+JNIEXPORT jboolean JNICALL Java_com_zedokmusic_engine_XDisplay_tapKeysym(JNIEnv*, jobject, jint sym) {
+    std::lock_guard<std::mutex> lk(xc.m);
+    if (xc.fd < 0) return JNI_FALSE;
+    return xc.tapSym((uint32_t)sym) ? JNI_TRUE : JNI_FALSE;
 }
 }

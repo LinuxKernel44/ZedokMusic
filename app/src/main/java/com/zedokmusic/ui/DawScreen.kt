@@ -23,7 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.zedokmusic.model.*
 
-private enum class Panel(val label: String) { Arrange("Arrange"), Piano("Piano roll"), Mixer("Mixer"), Plugin("Plugin") }
+private enum class Panel(val label: String) { Arrange("Tracks"), Piano("Piano roll"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
 
 @Composable
 fun DawScreen(vm: DawViewModel) {
@@ -56,7 +56,7 @@ fun DawScreen(vm: DawViewModel) {
                     HorizontalDivider(color = Zk.line)
                     Column(Modifier.weight(0.9f)) {
                         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (p in listOf(Panel.Piano, Panel.Mixer, Panel.Plugin)) PanelChip(p.label, bottom == p) { bottom = p }
+                            for (p in listOf(Panel.Piano, Panel.Mixer, Panel.Plugin, Panel.Auto)) PanelChip(p.label, bottom == p) { bottom = p }
                         }
                         Box(Modifier.weight(1f)) { PanelContent(vm, bottom, ppb, { ppb = it }, {}, {}) }
                     }
@@ -104,6 +104,7 @@ private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Fl
         }
         Panel.Mixer -> MixerView(vm)
         Panel.Plugin -> PluginPanel(vm)
+        Panel.Auto -> AutomationView(vm)
     }
 }
 

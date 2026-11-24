@@ -97,6 +97,7 @@ struct Handler : IComponentHandler {
         auto it = gParamIndex.find(id);
         if (it != gParamIndex.end() && gB) {
             gB->values[it->second] = (float)v;
+            { uint32_t h = gB->edit_head; gB->edits[h % ZK_EDIT_RING] = ZkParamChange{(uint32_t)it->second, (float)v}; MemoryBarrier(); gB->edit_head = h + 1; }
             String128 str{}; if (gCtrl && gCtrl->getParamStringByValue(id, v, str) == kResultOk) { char t[96]; utf8(str, t, sizeof t); snprintf(gB->texts[it->second], sizeof gB->texts[0], "%s", t); }
         }
         return kResultOk;
@@ -284,22 +285,42 @@ int main(int argc, char** argv) {
     InterlockedExchange((volatile LONG*)&B->host_state, ZK_HOST_READY);
     if (ctrl) CreateThread(nullptr, 0, guiThread, nullptr, 0, nullptr);
 
-    // --- main loop: spin while active, back off when the engine is idle ---
+    // --- main loop ---
+    // The engine submits one block per audio callback (every `frames/rate` seconds) and only needs the result one callback later,
+    // so the host sleeps through most of the interval and spins only around the predicted arrival (a pure spin kept a core at 100%).
+    typedef LONG (NTAPI* NtDelayFn)(BOOLEAN, PLARGE_INTEGER);
+    NtDelayFn ntDelay = (NtDelayFn)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtDelayExecution");
+    auto sleepTicks = [&](LONGLONG ticks, LONGLONG freq) {  // sub-millisecond sleep (Sleep(1) would be too coarse)
+        LARGE_INTEGER li; li.QuadPart = -(ticks * 10000000LL / freq); if (li.QuadPart > -100) li.QuadPart = -100;
+        if (ntDelay) ntDelay(FALSE, &li); else Sleep(1);
+    };
     uint32_t last = B->req_seq;
-    LARGE_INTEGER qf, lastWork; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&lastWork);
-    const LONGLONG spinTicks = qf.QuadPart / 20;  // spin for 50 ms after the last block, then sleep (engine stopped / paused)
-    int poll = 0;
+    LARGE_INTEGER qf, lastWork, nowT; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&lastWork);
+    const LONGLONG idleTicks = qf.QuadPart / 20;                         // no block for 50 ms: engine paused/stopped -> plain sleeping
+    const LONGLONG nominal = (LONGLONG)(qf.QuadPart * (double)frames / rate);
+    bool regular = false;                                                // true while requests arrive at the audio callback cadence
+    LONGLONG period = nominal, lastReq = lastWork.QuadPart;              // observed request interval, time of the last request
+    LONGLONG margin = qf.QuadPart * 35 / 100000;                         // wake this long before the predicted arrival (adapts)
+    const LONGLONG marginMin = qf.QuadPart * 2 / 10000, marginMax = qf.QuadPart * 15 / 10000;
     while (!B->quit) {
         uint32_t r = B->req_seq;
         if (r == last) {
-            _mm_pause();
-            if ((++poll & 255) == 0) {  // check the clock only now and then: QPC is not free under emulation
-                LARGE_INTEGER now; QueryPerformanceCounter(&now);
-                if (now.QuadPart - lastWork.QuadPart > spinTicks) Sleep(1);
-            }
+            QueryPerformanceCounter(&nowT);
+            if (nowT.QuadPart - lastWork.QuadPart > idleTicks) { Sleep(1); continue; }
+            const LONGLONG untilNext = period - (nowT.QuadPart - lastReq);
+            if (regular && untilNext > margin + qf.QuadPart / 20000) sleepTicks(untilNext - margin, qf.QuadPart);
+            else for (int i = 0; i < 256 && B->req_seq == last; i++) _mm_pause();
             continue;
         }
-        QueryPerformanceCounter(&lastWork);
+        QueryPerformanceCounter(&nowT);
+        const LONGLONG iv = nowT.QuadPart - lastReq;
+        if (iv > nominal / 2 && iv < nominal * 3) {                      // regular cadence: learn it and check how late we woke up
+            period = (period * 15 + iv) / 16;
+            if (iv - period > qf.QuadPart * 3 / 10000) margin = std::min(marginMax, margin + qf.QuadPart / 10000);
+            else margin = std::max(marginMin, margin - qf.QuadPart / 200000);
+            regular = true;
+        } else { period = nominal; regular = false; }  // bursts (offline render) or a restart: stay on the spin path
+        lastReq = nowT.QuadPart; lastWork = nowT;
         const int n = (int)std::min<uint32_t>(B->frames, (uint32_t)frames);
         const int nev = (int)std::min<uint32_t>(B->n_events, ZK_MAX_EVENTS);
         if (nIn) { memcpy(inL.data(), B->in[0], n * 4); memcpy(inR.data(), B->in[1], n * 4); }

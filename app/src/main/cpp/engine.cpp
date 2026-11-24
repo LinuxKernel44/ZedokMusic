@@ -9,6 +9,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace zedok {
+static void appendAutomation(const TrackState& t, int64_t pos, float* last, ZkParamChange* ch, int& nc);
 
 Engine::Engine() {
     auto p = std::make_shared<Project>();
@@ -200,6 +201,11 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
             ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;  // replay the UI's current parameter values, 64 per block
             { int total = t.plugin->paramCount(); int blk = (int)((pos - from) / plugFrames);
               for (int i = blk * ZK_MAX_PARAM_CHANGES; i < total && nc < ZK_MAX_PARAM_CHANGES; i++) ch[nc++] = ZkParamChange{(uint32_t)i, t.plugin->paramValue(i)}; }
+            if (!t.lanes.empty()) {
+                static thread_local float last[kMaxLanes];
+                if (pos == from) for (int k = 0; k < kMaxLanes; k++) last[k] = NAN;
+                appendAutomation(t, pos, last, ch, nc);
+            }
             t.plugin->submit(ev, ne, plugFrames, ch, nc);
             t.plugin->collect(dst, plugFrames, kSyncWaitNs);
         }
@@ -321,6 +327,30 @@ void Engine::pluginCollect(const Project& p, MixState& ms, int frames, int64_t m
     }
 }
 
+static float laneValueAt(const AutoLane& l, int64_t pos) {
+    const size_t n = l.frames.size();
+    if (n == 0) return 0.f;
+    if (pos <= l.frames[0]) return l.values[0];
+    if (pos >= l.frames[n - 1]) return l.values[n - 1];
+    size_t hi = std::upper_bound(l.frames.begin(), l.frames.end(), pos) - l.frames.begin(), lo = hi - 1;
+    const double span = (double)(l.frames[hi] - l.frames[lo]);
+    return span <= 0 ? l.values[hi] : l.values[lo] + (float)((l.values[hi] - l.values[lo]) * ((double)(pos - l.frames[lo]) / span));
+}
+// Appends the automation changes for the block starting at [pos]. [last] holds the last value sent per lane (NaN = send now).
+static void appendAutomation(const TrackState& t, int64_t pos, float* last, ZkParamChange* ch, int& nc) {
+    for (size_t i = 0; i < t.lanes.size() && i < (size_t)kMaxLanes; i++) {
+        if (nc >= ZK_MAX_PARAM_CHANGES) break;
+        const float v = laneValueAt(t.lanes[i], pos);
+        if (std::isnan(last[i]) || std::fabs(v - last[i]) > 0.0005f) { ch[nc++] = ZkParamChange{(uint32_t)t.lanes[i].param, v}; last[i] = v; }
+    }
+}
+void Engine::setAutomation(int track, std::vector<AutoLane> lanes) {
+    edit([&](Project& p) { for (auto& t : p.tracks) if (t.id == track) t.lanes = std::move(lanes); });
+}
+int Engine::pollEdits(int track, ZkParamChange* out, int max) {
+    std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->pollEdits(out, max) : 0;
+}
+
 void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool playing, bool jumped, bool) {
     // drain live MIDI (consumer side)
     LiveEvt le[64]; int nl = 0;
@@ -335,6 +365,8 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
         ZkEvent ev[ZK_MAX_EVENTS]; int n = 0;
         ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
         for (int i = 0; i < np; i++) if (pe[i].track == t.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe[i].index, pe[i].value};
+        if (!playing || jumped) for (int k = 0; k < kMaxLanes; k++) autoLast_[t.pluginSlot][k] = NAN;  // re-send values when playback (re)starts
+        if (playing) appendAutomation(t, windowPos, autoLast_[t.pluginSlot], ch, nc);
         if (jumped) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)
