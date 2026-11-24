@@ -2,7 +2,7 @@
 
 A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 
-> **Status: alpha (0.5.0).** It works end to end on a Galaxy S10 (Android 12), but it is young. Expect rough edges — see *Known limitations*.
+> **Status: alpha (0.6.0).** It works end to end on a Galaxy S10 (Android 12), but it is young. Expect rough edges — see *Known limitations*.
 
 ## What it does
 
@@ -10,6 +10,7 @@ A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 - **Plugin parameters**: every VST3 parameter is listed with the plugin's own value text, searchable, and saved with the project.
 - **Plugin editors**: open a plugin's own window from the **Plugin → Editor** button. Wine draws it on an embedded X server (Xvfb) and the app mirrors it live and forwards your touches.
 - **Parameter automation**: the **Auto** tab draws a lane per plugin parameter (tap = add or select a point, drag = move, double-tap = delete; each point sets the curve after it: line, step or smooth). With REC armed and the transport running, moving a knob in the plugin editor or the parameter list records into the lane. Lanes are saved with the project and play back (also in the offline export).
+- **Audio export**: **Add → Export audio…** renders the whole project (plugins included, plus a 2 s tail) or the loop region to a 16/24-bit or float WAV in `Exports/`.
 - **Audio recording** from the device microphone or a USB audio interface (stereo float WAV, latency-compensated), and **MIDI input** from USB and Bluetooth LE keyboards, recorded live into the piano roll.
 - Audio engine in C++ on [Oboe](https://github.com/google/oboe) (AAudio, exclusive mode when available), WAV import and offline WAV export.
 - **Windows VST3 plugins (64-bit)** are hosted by a small Windows program running under **Wine + Box64** inside the app. Audio and MIDI travel
@@ -70,13 +71,13 @@ Debug builds contain adb test hooks (`DebugHooks`); release builds do not.
 
 ## Known limitations
 
-- Plugin editors are mirrored at about 30 fps; up to three stay open at once (opening a fourth closes the oldest). Input: one finger = mouse, two-finger drag = mouse wheel, two-finger tap = right click, the **Keys** button opens the keyboard. (The two-finger gestures and typing are implemented but only lightly tested.)
+- Plugin editors are mirrored at about 30 fps; up to three stay open at once (opening a fourth closes the oldest), and on wide screens two editors are shown side by side. Input: one finger = mouse, two-finger drag = mouse wheel, two-finger tap = right click, the **Keys** button opens the keyboard. (The two-finger gestures and typing are implemented but only lightly tested.)
 - Each plugin host uses roughly 40% of a CPU core while playing (about 13% when idle).
 - MIDI input and audio recording are implemented but only the microphone path has been tested on hardware; USB and Bluetooth MIDI devices are untested (the MIDI parser has unit tests).
 - Automation curves are line, step or smooth only, and are stored per parameter in beats.
 - VST3 only (no VST2, no CLAP). Plugins that need a GPU, an installer-based license (iLok, etc.) or Windows-only drivers may not work.
 - Heavy plugins can exceed the CPU budget on older phones. The status line shows xruns.
-- Tested on one device so far. Tablet layout, SD cards and Android 13+ storage behaviour with `targetSdk 28` are untested.
+- Tested on one device so far (the wide layout only on the same phone with an emulated large screen). SD cards and Android 13+ storage behaviour with `targetSdk 28` are untested.
 - The tempo passed to plugins is fixed at 120 BPM.
 
 ## License

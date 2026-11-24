@@ -84,3 +84,39 @@ fun MidiDialog(midi: com.zedokmusic.engine.MidiInput, onScan: () -> Unit, onDism
         },
         confirmButton = { TextButton(onDismiss) { Text("Close") } })
 }
+
+@Composable
+fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String) -> Unit, onDismiss: () -> Unit) {
+    var range by remember { mutableIntStateOf(0) }
+    var format by remember { mutableIntStateOf(1) }
+    var name by remember { mutableStateOf("Mix") }
+    @Composable fun option(label: String, selected: Boolean, onClick: () -> Unit) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 2.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            RadioButton(selected, onClick); Text(label, fontSize = 14.sp)
+        }
+    }
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Export audio") }, text = {
+        Column {
+            OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("File name") }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Text("Range", color = Zk.dim, fontSize = 12.sp)
+            option("Whole project", range == 0) { range = 0 }
+            option("Loop region ($loopBars bars)", range == 1) { range = 1 }
+            Spacer(Modifier.height(4.dp))
+            Text("Format", color = Zk.dim, fontSize = 12.sp)
+            option("WAV 16-bit", format == 0) { format = 0 }
+            option("WAV 24-bit", format == 1) { format = 1 }
+            option("WAV 32-bit float", format == 2) { format = 2 }
+            Text("Saved in the Exports folder of your workspace.", color = Zk.dim, fontSize = 11.sp)
+        }
+    }, confirmButton = { TextButton({ onExport(range, format, name); onDismiss() }) { Text("Export") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+fun ExportingDialog() {
+    AlertDialog(onDismissRequest = {}, containerColor = Zk.panel, title = { Text("Exporting…") }, text = {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator(Modifier.size(28.dp)); Text("Rendering the mix with your plugins. This can take a while.", fontSize = 13.sp)
+        }
+    }, confirmButton = {})
+}

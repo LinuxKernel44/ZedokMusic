@@ -301,6 +301,29 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun samples(): List<File> = workspace?.let { File(it, "Samples").walkTopDown().filter { f -> f.isFile && f.extension.equals("wav", true) }.sortedBy { f -> f.name.lowercase() }.toList() } ?: emptyList()
 
+    // ---------- export ----------
+    var exporting by mutableStateOf(false); private set
+    /** Renders the mix (plugins included) to Exports/<name>.wav. [range] 0 = whole project (+2 s tail), 1 = loop region; [format] 0 = 16-bit, 1 = 24-bit, 2 = 32-bit float. */
+    fun exportWav(range: Int, format: Int, name: String) {
+        val dir = workspace?.let { File(it, "Exports") } ?: run { message = "No workspace folder."; return }
+        if (exporting) return
+        val to = if (range == 1) (loopBars * 4 * fpb).toLong()
+            else (tracks.maxOfOrNull { it.lengthBeats(bpm) }?.let { (it * fpb).toLong() + 2 * 48000L } ?: 0L)
+        if (to <= 0 || tracks.all { it.notes.isEmpty() && it.clips.isEmpty() }) { message = "Nothing to export: add notes or clips first."; return }
+        e.pause(); playing = false
+        dir.mkdirs()
+        val base = name.trim().ifEmpty { "Mix" }.replace(Regex("[^A-Za-z0-9 _.-]"), "_")
+        var f = File(dir, "$base.wav"); var n = 2
+        while (f.exists()) f = File(dir, "$base ($n++).wav")
+        exporting = true; message = null
+        val out = f
+        Thread {
+            val ok = try { e.renderToWav(out.absolutePath, 0L, to, format) } catch (ex: Throwable) { false }
+            exporting = false
+            message = if (ok) "Exported ${out.name} (%.1f MB) to Exports".format(out.length() / 1048576.0) else "Export failed."
+        }.start()
+    }
+
     // ---------- persistence ----------
     fun save() {
         val f = projectFile ?: return

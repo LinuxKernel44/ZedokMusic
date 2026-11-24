@@ -50,7 +50,7 @@ fun DawScreen(vm: DawViewModel) {
             val wide = maxWidth >= 840.dp
             Column(Modifier.fillMaxSize()) {
                 Transport(vm, !wide, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
-                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" })
+                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" })
                 if (wide) {
                     Box(Modifier.weight(1f)) { ArrangeView(vm, ppb, { ppb = it }, { panel = Panel.Piano; bottom = Panel.Piano }, { vm.selected = it; dialog = "samples" }) }
                     HorizontalDivider(color = Zk.line)
@@ -84,7 +84,9 @@ fun DawScreen(vm: DawViewModel) {
             val t = vm.selected?.takeIf { it.kind == TrackKind.Audio } ?: vm.addAudioTrack(); if (t != null) vm.importClip(t, f, vm.playhead.let { Math.floor(it.toDouble()).toFloat() }); dialog = null }, { dialog = null })
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })
+        "export" -> ExportDialog(vm.loopBars, { r, f, n -> vm.exportWav(r, f, n) }, { dialog = null })
     }
+    if (vm.exporting) ExportingDialog()
 }
 
 @Composable
@@ -116,7 +118,7 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit) {
+private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val core: @Composable RowScope.() -> Unit = {
         SquareButton(Glyph.Stop) { vm.stop() }
@@ -140,6 +142,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecor
                 DropdownMenuItem(text = { Text("Audio track") }, onClick = { menu = false; onAddAudio() })
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("Save project") }, onClick = { menu = false; onSave() })
+                DropdownMenuItem(text = { Text("Export audio…") }, onClick = { menu = false; onExport() })
             }
         }
         SquareButton(Glyph.Keys, active = keys, size = 38.dp, onClick = onKeys)

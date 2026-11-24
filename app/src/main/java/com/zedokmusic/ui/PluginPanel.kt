@@ -44,7 +44,18 @@ fun PluginPanel(vm: DawViewModel) {
             LabelButton("Editor", editor, w = 70.dp) { if (editor) vm.closeEditor(t) else vm.openEditor(t) }
             if (!editor) LabelButton("Changed", onlyChanged, w = 76.dp) { onlyChanged = !onlyChanged }
         }
-        if (editor) { Box(Modifier.weight(1f).fillMaxWidth()) { PluginEditor(vm, t, keys) }; return@Column }
+        if (editor) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                // On wide screens a second open editor is shown next to this one.
+                val other = vm.tracks.firstOrNull { it !== t && it.editorOpen && it.kind == TrackKind.Instrument }
+                if (maxWidth >= 840.dp && other != null) Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1f).fillMaxHeight()) { Text(t.name, color = t.color, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp)); Box(Modifier.weight(1f)) { PluginEditor(vm, t, keys) } }
+                    VerticalDivider(color = Zk.line)
+                    Column(Modifier.weight(1f).fillMaxHeight()) { Text(other.name, color = other.color, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp)); Box(Modifier.weight(1f)) { PluginEditor(vm, other, false) } }
+                } else PluginEditor(vm, t, keys)
+            }
+            return@Column
+        }
         OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search parameters") },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp))
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
