@@ -23,10 +23,11 @@ class PluginHost(private val ctx: Context) {
         throw IllegalArgumentException("Path not reachable from Wine (must be inside the workspace folder): $unix")
     }
 
+    /** Copies zhost.exe out of the APK whenever its content differs (a size check alone misses same-size rebuilds). */
     private fun ensureHostExe(): File {
         val exe = File(files, "zhost.exe")
-        val len = ctx.assets.openFd("zhost.exe").use { it.length }
-        if (!exe.exists() || exe.length() != len) ctx.assets.open("zhost.exe").use { i -> exe.outputStream().use { o -> i.copyTo(o) } }
+        val bundled = ctx.assets.open("zhost.exe").use { it.readBytes() }
+        if (!exe.exists() || !exe.readBytes().contentEquals(bundled)) exe.writeBytes(bundled)
         return exe
     }
 

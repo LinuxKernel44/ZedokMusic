@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class Glyph { Play, Pause, Stop, Loop, Plus, Minus, Keys, Close }
+enum class Glyph { Play, Pause, Stop, Loop, Plus, Minus, Keys, Close, Rec }
 
 /** Small vector icons drawn directly so the app needs no icon library. */
 @Composable
@@ -37,6 +37,7 @@ fun GlyphIcon(g: Glyph, color: Color, size: Dp = 20.dp) {
                 drawRoundRect(color, Offset(w * .08f, h * .22f), Size(w * .84f, h * .56f), androidx.compose.ui.geometry.CornerRadius(w * .28f), style = st)
                 drawPath(Path().apply { moveTo(w * .62f, h * .1f); lineTo(w * .86f, h * .22f); lineTo(w * .62f, h * .36f); close() }, color)
             }
+            Glyph.Rec -> drawCircle(color, w * .34f, Offset(w / 2, h / 2))
             Glyph.Plus -> { drawRect(color, Offset(w * .44f, h * .12f), Size(w * .12f, h * .76f)); drawRect(color, Offset(w * .12f, h * .44f), Size(w * .76f, h * .12f)) }
             Glyph.Minus -> drawRect(color, Offset(w * .12f, h * .44f), Size(w * .76f, h * .12f))
             Glyph.Close -> { val st = Stroke(width = w * .12f); drawLine(color, Offset(w * .2f, h * .2f), Offset(w * .8f, h * .8f), st.width); drawLine(color, Offset(w * .8f, h * .2f), Offset(w * .2f, h * .8f), st.width) }

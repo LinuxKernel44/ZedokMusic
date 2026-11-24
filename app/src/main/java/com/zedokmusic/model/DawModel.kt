@@ -27,6 +27,9 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     var pluginState by mutableIntStateOf(0)
     var pluginName by mutableStateOf("")
     var meter by mutableFloatStateOf(0f)
+    /** Parameter values the user changed (index -> normalized value); saved with the project and re-applied when the plugin starts. */
+    val paramOverrides = androidx.compose.runtime.mutableStateMapOf<Int, Float>()
+    var paramNames: Map<Int, String> = emptyMap()
     val notes = mutableStateListOf<NoteM>()
     val clips = mutableStateListOf<ClipM>()
 
@@ -38,6 +41,8 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
         return maxOf(4f, kotlin.math.ceil(end / 4f) * 4f)
     }
 }
+
+class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int)
 
 class PluginInfo(val name: String, val path: String)
 

@@ -96,6 +96,12 @@ public:
     int pluginState(int track);  // 0 none, 1 starting, 2 ready, 3 error
     std::string pluginName(int track);
     void liveNote(int track, bool on, int pitch, int velocity);  // MIDI keyboard / on-screen keys (any thread)
+    // --- plugin parameters (normalized 0..1) ---
+    int paramCount(int track);
+    bool paramInfo(int track, int index, std::string* name, std::string* units, float* def, int* steps);
+    float paramValue(int track, int index);
+    std::string paramText(int track, int index);
+    void setParam(int track, int index, float value);  // any thread; applied at the next block
     struct PluginStats { int64_t late, blocks, waited, waitNsTotal, waitNsMax; };
     PluginStats pluginStats(int track);
 
@@ -159,6 +165,10 @@ private:
     std::mutex liveMutex_;
     std::array<LiveEvt, 256> live_;
     std::atomic<uint32_t> liveHead_{0}, liveTail_{0};
+    struct ParamEvt { int track, index; float value; };
+    std::mutex paramMutex_;
+    std::array<ParamEvt, 512> paramQ_;
+    std::atomic<uint32_t> paramHead_{0}, paramTail_{0};
     std::atomic<int64_t> lateTotal_{0};
     bool pluginWasPlaying_ = false;   // audio-thread-only
     int64_t pluginExpectedPos_ = 0;   // audio-thread-only

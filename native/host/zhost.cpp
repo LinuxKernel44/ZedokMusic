@@ -11,6 +11,8 @@
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivsteditcontroller.h"
+#include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 using namespace Steinberg; using namespace Steinberg::Vst;
@@ -34,6 +36,42 @@ struct EvList : IEventList {
     tresult PLUGIN_API getEvent(int32 i, Event& e) override { if (i < 0 || i >= (int)ev.size()) return kResultFalse; e = ev[i]; return kResultOk; }
     tresult PLUGIN_API addEvent(Event&) override { return kResultOk; }
 };
+// Minimal IParameterChanges / IParamValueQueue: one point per parameter, at sample offset 0.
+struct ValueQueue : IParamValueQueue {
+    ParamID id = 0; ParamValue value = 0; bool used = false;
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, IParamValueQueue::iid) || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) { *obj = this; return kResultOk; }
+        *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; } uint32 PLUGIN_API release() override { return 1; }
+    ParamID PLUGIN_API getParameterId() override { return id; }
+    int32 PLUGIN_API getPointCount() override { return 1; }
+    tresult PLUGIN_API getPoint(int32 i, int32& offset, ParamValue& v) override { if (i != 0) return kResultFalse; offset = 0; v = value; return kResultOk; }
+    tresult PLUGIN_API addPoint(int32, ParamValue v, int32& index) override { value = v; index = 0; return kResultOk; }
+};
+struct ParamChanges : IParameterChanges {
+    ValueQueue q[ZK_MAX_PARAM_CHANGES + 8]; int n = 0;
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, IParameterChanges::iid) || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) { *obj = this; return kResultOk; }
+        *obj = nullptr; return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return 1; } uint32 PLUGIN_API release() override { return 1; }
+    int32 PLUGIN_API getParameterCount() override { return n; }
+    IParamValueQueue* PLUGIN_API getParameterData(int32 i) override { return (i >= 0 && i < n) ? &q[i] : nullptr; }
+    IParamValueQueue* PLUGIN_API addParameterData(const ParamID& id, int32& index) override {
+        for (int i = 0; i < n; i++) if (q[i].id == id) { index = i; return &q[i]; }
+        if (n >= (int)(sizeof q / sizeof q[0])) return nullptr;
+        q[n].id = id; index = n; return &q[n++]; }
+    void clear() { n = 0; }
+};
+static void utf8(const TChar* src, char* dst, size_t cap) {  // UTF-16 (BMP) -> UTF-8, enough for parameter names
+    size_t o = 0;
+    for (int i = 0; src[i] && o + 4 < cap; i++) {
+        unsigned c = src[i];
+        if (c < 0x80) dst[o++] = (char)c;
+        else if (c < 0x800) { dst[o++] = (char)(0xC0 | (c >> 6)); dst[o++] = (char)(0x80 | (c & 63)); }
+        else { dst[o++] = (char)(0xE0 | (c >> 12)); dst[o++] = (char)(0x80 | ((c >> 6) & 63)); dst[o++] = (char)(0x80 | (c & 63)); }
+    }
+    dst[o] = 0;
+}
 int fail(ZkBridge* b, uint32_t code, const char* msg) {
     fprintf(stderr, "zhost error %u: %s\n", code, msg); fflush(stderr);
     if (b) { b->host_error = code; InterlockedExchange((volatile LONG*)&b->host_state, ZK_HOST_ERROR); }
@@ -82,6 +120,28 @@ int main(int argc, char** argv) {
     for (int i = 0; i < nEv; i++) comp->activateBus(kEvent, kInput, i, true);
     if (comp->setActive(true) != kResultOk) return fail(B, 27, "setActive failed");
     proc->setProcessing(true);
+    // --- edit controller: enumerate parameters ---
+    IEditController* ctrl = nullptr;
+    if (comp->queryInterface(IEditController::iid, (void**)&ctrl) != kResultOk || !ctrl) {
+        TUID cc = {};
+        if (comp->getControllerClassId(cc) == kResultOk && fac->createInstance(cc, IEditController::iid, (void**)&ctrl) == kResultOk && ctrl) ctrl->initialize(&host);
+        else ctrl = nullptr;
+    }
+    uint32_t np = 0;
+    if (ctrl) {
+        int total = ctrl->getParameterCount();
+        for (int i = 0; i < total && np < ZK_MAX_PARAMS; i++) {
+            ParameterInfo pi{}; if (ctrl->getParameterInfo(i, pi) != kResultOk) continue;
+            if (pi.flags & (ParameterInfo::kIsReadOnly | ParameterInfo::kIsHidden | ParameterInfo::kIsProgramChange)) continue;
+            ZkParamInfo& o = B->params[np]; o.id = pi.id; o.default_norm = (float)pi.defaultNormalizedValue; o.step_count = pi.stepCount; o.flags = pi.flags;
+            utf8(pi.title, o.name, sizeof o.name); utf8(pi.units, o.units, sizeof o.units);
+            B->values[np] = (float)ctrl->getParamNormalized(pi.id);
+            String128 str{}; if (ctrl->getParamStringByValue(pi.id, B->values[np], str) == kResultOk) { char t[96]; utf8(str, t, sizeof t); snprintf(B->texts[np], sizeof B->texts[np], "%s", t); }
+            np++;
+        }
+    }
+    B->n_params = np;
+    ParamChanges pcIn, pcOut;
     B->in_channels = nIn ? 2 : 0; B->out_channels = 2;
 
     std::vector<float> inL(frames), inR(frames), oL(frames), oR(frames);
@@ -90,8 +150,9 @@ int main(int argc, char** argv) {
     AudioBusBuffers outB{}; outB.numChannels = 2; outB.channelBuffers32 = outCh;
     EvList evl; ProcessContext pc{}; pc.state = ProcessContext::kPlaying | ProcessContext::kTempoValid; pc.tempo = 120; pc.sampleRate = rate;
 
-    auto render = [&](int n, const ZkEvent* ev, int nev) {
-        evl.ev.clear();
+    auto render = [&](int n, const ZkEvent* ev, int nev, const ZkParamChange* ch = nullptr, int nch = 0) {
+        evl.ev.clear(); pcIn.clear(); pcOut.clear();
+        for (int i = 0; i < nch && ch; i++) if (ch[i].index < np) { int ix; if (auto* q = pcIn.addParameterData(B->params[ch[i].index].id, ix)) q->addPoint(0, ch[i].value, ix); }
         for (int i = 0; i < nev; i++) {
             Event e{}; e.sampleOffset = (int32)std::min<uint32_t>(ev[i].offset, (uint32_t)n - 1);
             if (ev[i].type == ZK_NOTE_ON) { e.type = Event::kNoteOnEvent; e.noteOn.channel = ev[i].channel; e.noteOn.pitch = ev[i].pitch; e.noteOn.velocity = ev[i].velocity / 127.f; e.noteOn.noteId = -1; }
@@ -104,8 +165,12 @@ int main(int argc, char** argv) {
         }
         ProcessData d{}; d.processMode = kRealtime; d.symbolicSampleSize = kSample32; d.numSamples = n;
         d.numInputs = nIn ? 1 : 0; d.inputs = nIn ? &inB : nullptr; d.numOutputs = 1; d.outputs = &outB;
-        d.inputEvents = &evl; d.processContext = &pc;
-        proc->process(d); pc.projectTimeSamples += n;
+        d.inputEvents = &evl; d.processContext = &pc; d.inputParameterChanges = &pcIn; d.outputParameterChanges = &pcOut;
+        proc->process(d);
+        for (int i = 0; i < nch && ch; i++) if (ch[i].index < np && ctrl) {  // keep the controller (and the display text) in sync
+            ctrl->setParamNormalized(B->params[ch[i].index].id, ch[i].value);
+            String128 str{}; if (ctrl->getParamStringByValue(B->params[ch[i].index].id, ch[i].value, str) == kResultOk) { char t[96]; utf8(str, t, sizeof t); snprintf(B->texts[ch[i].index], sizeof B->texts[0], "%s", t); }
+        } pc.projectTimeSamples += n;
     };
 
     // Box64's dynarec compiles code on first execution (a cold first block can take ~50 ms): warm the hot paths up front.
@@ -117,7 +182,7 @@ int main(int argc, char** argv) {
     ZkEvent panic{0, ZK_ALL_NOTES_OFF, 0, 0, 0}; render(frames, &panic, 1);
     for (int b = 0; b < 100; b++) render(frames, nullptr, 0);  // let release tails die
 
-    printf("zhost ready: %s, frames=%d rate=%.0f in=%d out=%d events=%d\n", name, frames, rate, nIn, nOut, nEv); fflush(stdout);
+    printf("zhost ready: %s, frames=%d rate=%.0f in=%d out=%d events=%d params=%u\n", name, frames, rate, nIn, nOut, nEv, np); fflush(stdout);
     InterlockedExchange((volatile LONG*)&B->host_state, ZK_HOST_READY);
 
     // --- main loop: spin while active, back off when the engine is idle ---
@@ -139,7 +204,8 @@ int main(int argc, char** argv) {
         const int n = (int)std::min<uint32_t>(B->frames, (uint32_t)frames);
         const int nev = (int)std::min<uint32_t>(B->n_events, ZK_MAX_EVENTS);
         if (nIn) { memcpy(inL.data(), B->in[0], n * 4); memcpy(inR.data(), B->in[1], n * 4); }
-        render(n, B->events, nev);
+        const int nch = (int)std::min<uint32_t>(B->n_changes, ZK_MAX_PARAM_CHANGES);
+        render(n, B->events, nev, B->changes, nch);
         memcpy(B->out[0], oL.data(), n * 4); memcpy(B->out[1], oR.data(), n * 4);
         last = r; InterlockedExchange((volatile LONG*)&B->ack_seq, (LONG)r);
     }

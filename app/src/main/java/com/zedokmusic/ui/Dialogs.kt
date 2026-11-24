@@ -59,3 +59,28 @@ fun TempoDialog(bpm: Float, onChange: (Float) -> Unit, onDismiss: () -> Unit) {
         confirmButton = { TextButton({ onChange(Math.round(v).toFloat()); onDismiss() }) { Text("OK") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
+
+@Composable
+fun MidiDialog(midi: com.zedokmusic.engine.MidiInput, onScan: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("MIDI input") },
+        text = {
+            Column(Modifier.heightIn(max = 380.dp)) {
+                if (midi.devices.isEmpty()) Text("No USB MIDI device detected. Plug in a keyboard (USB-OTG) or scan for a Bluetooth one.", color = Zk.dim, fontSize = 13.sp)
+                midi.devices.forEach { d ->
+                    Row(Modifier.fillMaxWidth().clickable { d.info?.let { midi.connect(it) } }.padding(vertical = 10.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(d.name, color = Zk.text, modifier = Modifier.weight(1f)); Text(if (d.connected) "connected" else "tap to connect", color = if (d.connected) Zk.accent else Zk.dim, fontSize = 12.sp)
+                    }
+                    HorizontalDivider(color = Zk.line)
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onScan) { Text(if (midi.scanning) "Scanning…" else "Scan Bluetooth MIDI") }
+                midi.bleFound.forEach { d ->
+                    Row(Modifier.fillMaxWidth().clickable { midi.connectBle(d) }.padding(vertical = 10.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(d.name, color = Zk.text, modifier = Modifier.weight(1f)); Text(if (d.connected) "connected" else "tap to connect", color = if (d.connected) Zk.accent else Zk.dim, fontSize = 12.sp)
+                    }
+                }
+                if (midi.status.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(midi.status, color = Zk.dim, fontSize = 12.sp) }
+            }
+        },
+        confirmButton = { TextButton(onDismiss) { Text("Close") } })
+}

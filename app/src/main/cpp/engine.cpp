@@ -197,7 +197,10 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
             ZkEvent ev[ZK_MAX_EVENTS]; int ne = 0;
             if (pos == from) ev[ne++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
             windowEvents(q, t, pos, n, ev, ne);
-            t.plugin->submit(ev, ne, plugFrames);
+            ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;  // replay the UI's current parameter values, 64 per block
+            { int total = t.plugin->paramCount(); int blk = (int)((pos - from) / plugFrames);
+              for (int i = blk * ZK_MAX_PARAM_CHANGES; i < total && nc < ZK_MAX_PARAM_CHANGES; i++) ch[nc++] = ZkParamChange{(uint32_t)i, t.plugin->paramValue(i)}; }
+            t.plugin->submit(ev, ne, plugFrames, ch, nc);
             t.plugin->collect(dst, plugFrames, kSyncWaitNs);
         }
         mix(q, pos, n, blk.data(), *ms, nullptr, 0);
@@ -259,6 +262,28 @@ Engine::PluginStats Engine::pluginStats(int track) {
     for (auto& t : current_->tracks) if (t.id == track && t.plugin) return {t.plugin->late(), t.plugin->blocks(), t.plugin->waitedBlocks(), t.plugin->waitNsTotal(), t.plugin->waitNsMax()};
     return {0, 0, 0, 0, 0};
 }
+static std::shared_ptr<PluginBridge> bridgeOf(const std::shared_ptr<const Project>& p, int track) {
+    for (auto& t : p->tracks) if (t.id == track) return t.plugin;
+    return nullptr;
+}
+int Engine::paramCount(int track) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b && b->ready() ? b->paramCount() : 0; }
+bool Engine::paramInfo(int track, int index, std::string* name, std::string* units, float* def, int* steps) {
+    std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); if (!b) return false;
+    const ZkParamInfo* pi = b->paramInfo(index); if (!pi) return false;
+    *name = std::string(pi->name, strnlen(pi->name, sizeof pi->name)); *units = std::string(pi->units, strnlen(pi->units, sizeof pi->units));
+    *def = pi->default_norm; *steps = (int)pi->step_count; return true;
+}
+float Engine::paramValue(int track, int index) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->paramValue(index) : 0.f; }
+std::string Engine::paramText(int track, int index) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->paramText(index) : ""; }
+void Engine::setParam(int track, int index, float value) {
+    value = std::clamp(value, 0.f, 1.f);
+    { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); if (b) b->setParamValue(index, value); }
+    std::lock_guard<std::mutex> lk(paramMutex_);
+    uint32_t h = paramHead_.load(std::memory_order_relaxed);
+    if (h - paramTail_.load(std::memory_order_acquire) >= paramQ_.size()) return;  // queue full: drop (UI will resend on next move)
+    paramQ_[h % paramQ_.size()] = ParamEvt{track, index, value};
+    paramHead_.store(h + 1, std::memory_order_release);
+}
 void Engine::liveNote(int track, bool on, int pitch, int velocity) {
     std::lock_guard<std::mutex> lk(liveMutex_);
     uint32_t h = liveHead_.load(std::memory_order_relaxed);
@@ -297,13 +322,19 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
     uint32_t tail = liveTail_.load(std::memory_order_relaxed), head = liveHead_.load(std::memory_order_acquire);
     while (tail != head && nl < 64) le[nl++] = live_[tail++ % live_.size()];
     liveTail_.store(tail, std::memory_order_release);
+    ParamEvt pe[ZK_MAX_PARAM_CHANGES * 2]; int np = 0;
+    { uint32_t pt = paramTail_.load(std::memory_order_relaxed), ph = paramHead_.load(std::memory_order_acquire);
+      while (pt != ph && np < ZK_MAX_PARAM_CHANGES * 2) pe[np++] = paramQ_[pt++ % paramQ_.size()];
+      paramTail_.store(pt, std::memory_order_release); }
     for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0 && t.plugin->ready()) {
         ZkEvent ev[ZK_MAX_EVENTS]; int n = 0;
+        ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
+        for (int i = 0; i < np; i++) if (pe[i].track == t.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe[i].index, pe[i].value};
         if (jumped) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)
             ev[n++] = ZkEvent{0, le[i].on ? (uint8_t)ZK_NOTE_ON : (uint8_t)ZK_NOTE_OFF, 0, le[i].pitch, le[i].vel};
-        t.plugin->submit(ev, n, frames);
+        t.plugin->submit(ev, n, frames, ch, nc);
     }
 }
 

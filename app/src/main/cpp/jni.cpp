@@ -2,6 +2,7 @@
 #include <cmath>
 #include "engine.h"
 #include "extract.h"
+#include "recorder.h"
 using namespace zedok;
 static Engine& eng() { static Engine e; return e; }
 #define J(ret, name, ...) extern "C" JNIEXPORT ret JNICALL Java_com_zedokmusic_engine_NativeEngine_##name(JNIEnv* env, jobject, ##__VA_ARGS__)
@@ -81,3 +82,27 @@ J(void, setNotes, jint track, jlongArray data) {
     }
     eng().setNotes(track, std::move(notes));
 }
+
+J(jint, paramCount, jint track) { return eng().paramCount(track); }
+// Returns [name, units] or null; def/steps go to the out array [default, steps].
+J(jobjectArray, paramInfo, jint track, jint index, jfloatArray out) {
+    std::string name, units; float def = 0; int steps = 0;
+    if (!eng().paramInfo(track, index, &name, &units, &def, &steps)) return nullptr;
+    jfloat v[2] = {def, (jfloat)steps}; env->SetFloatArrayRegion(out, 0, 2, v);
+    jclass sc = env->FindClass("java/lang/String"); jobjectArray a = env->NewObjectArray(2, sc, nullptr);
+    env->SetObjectArrayElement(a, 0, env->NewStringUTF(name.c_str())); env->SetObjectArrayElement(a, 1, env->NewStringUTF(units.c_str())); return a;
+}
+J(jfloat, paramValue, jint track, jint index) { return eng().paramValue(track, index); }
+J(jstring, paramText, jint track, jint index) { return env->NewStringUTF(eng().paramText(track, index).c_str()); }
+J(void, setParam, jint track, jint index, jfloat v) { eng().setParam(track, index, v); }
+
+static Recorder& rec() { static Recorder r; return r; }
+// Returns "" on success or an error message.
+J(jstring, recStart, jstring path, jint deviceId) { return env->NewStringUTF(rec().start(str(env, path), kProjectRate, deviceId).c_str()); }
+// Returns [frames, dropped, inputBufferFrames, channels, ok].
+J(jlongArray, recStop) {
+    auto r = rec().stop(); jlong v[5] = {r.frames, r.dropped, r.inputBufferFrames, r.channels, r.ok ? 1 : 0};
+    jlongArray a = env->NewLongArray(5); env->SetLongArrayRegion(a, 0, 5, v); return a;
+}
+J(jboolean, recActive) { return rec().active(); }
+J(jfloat, recLevel) { return rec().level(); }

@@ -7,6 +7,8 @@ A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 ## What it does
 
 - Multitrack arrangement, piano roll, mixer (gain, pan, mute/solo, level meters), tempo and looping, on-screen keyboard.
+- **Plugin parameters**: every VST3 parameter is listed with the plugin's own value text, searchable, and saved with the project.
+- **Audio recording** from the device microphone or a USB audio interface (stereo float WAV, latency-compensated), and **MIDI input** from USB and Bluetooth LE keyboards, recorded live into the piano roll.
 - Audio engine in C++ on [Oboe](https://github.com/google/oboe) (AAudio, exclusive mode when available), WAV import and offline WAV export.
 - **Windows VST3 plugins (64-bit)** are hosted by a small Windows program running under **Wine + Box64** inside the app. Audio and MIDI travel
   through shared memory, one block ahead, so the audio thread never waits on Wine.
@@ -66,8 +68,9 @@ Debug builds contain adb test hooks (`DebugHooks`); release builds do not.
 
 ## Known limitations
 
-- Plugin windows (GUIs) are not shown yet, and plugin parameters are not exposed: you play and automate notes only.
-- No audio input / recording yet; no MIDI hardware input yet.
+- Plugin windows (GUIs) are not shown yet: parameters are edited through a generic list. See `docs/gui-spike.md` for the state of the work.
+- MIDI input and audio recording are implemented but only the microphone path has been tested on hardware; USB and Bluetooth MIDI devices are untested (the MIDI parser has unit tests).
+- Parameter automation over time is not available yet.
 - VST3 only (no VST2, no CLAP). Plugins that need a GPU, an installer-based license (iLok, etc.) or Windows-only drivers may not work.
 - Heavy plugins can exceed the CPU budget on older phones. The status line shows xruns.
 - Tested on one device so far. Tablet layout, SD cards and Android 13+ storage behaviour with `targetSdk 28` are untested.

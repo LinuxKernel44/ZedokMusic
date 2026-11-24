@@ -4,6 +4,7 @@ import android.content.Intent
 import android.util.Log
 import com.zedokmusic.engine.EngineSelfTest
 import com.zedokmusic.engine.PluginSelfTest
+import com.zedokmusic.engine.RecordSelfTest
 import java.io.File
 
 /** Development-only hooks driven by adb intent extras. This file exists only in debug builds. */
@@ -15,6 +16,8 @@ object DebugHooks {
         val files = activity.filesDir
         if (intent?.getBooleanExtra("engine_test", false) == true)
             Thread { File(files, "engine_test.log").writeText(EngineSelfTest.run(files) + "[done]\n") }.start()
+        if (intent?.getBooleanExtra("rec_test", false) == true)
+            Thread { File(files, "rec_test.log").writeText(try { RecordSelfTest.run(files) } catch (t: Throwable) { "EXCEPTION $t" } + "[done]\n") }.start()
         if (intent?.getBooleanExtra("plugin_test", false) == true)
             Thread {
                 File(files, "plugin_test.log").writeText(try { PluginSelfTest.run(activity.applicationContext) } catch (t: Throwable) { "EXCEPTION $t" } + "[done]\n")

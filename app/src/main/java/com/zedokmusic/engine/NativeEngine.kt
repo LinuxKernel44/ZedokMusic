@@ -57,4 +57,21 @@ object NativeEngine {
     external fun extractTarZst(fd: Int, offset: Long, length: Long, dest: String): String
     /** Compressed bytes consumed so far by the running extraction. */
     external fun extractProgress(): Long
+
+    // --- plugin parameters (normalized 0..1); valid once pluginState == 2 ---
+    external fun paramCount(track: Int): Int
+    /** Returns [name, units] and writes [defaultValue, stepCount] into [out]; null if the index is invalid. */
+    external fun paramInfo(track: Int, index: Int, out: FloatArray): Array<String>?
+    external fun paramValue(track: Int, index: Int): Float
+    external fun paramText(track: Int, index: Int): String
+    external fun setParam(track: Int, index: Int, value: Float)
+
+    // --- audio input recording (stereo float32 WAV, mono inputs are duplicated) ---
+    /** Starts recording the default input (or [deviceId]) to [path]; returns "" on success, else an error message. */
+    external fun recStart(path: String, deviceId: Int): String
+    /** [frames, droppedFrames, inputBufferFrames, channels, ok(1/0)] */
+    external fun recStop(): LongArray
+    external fun recActive(): Boolean
+    /** Input peak since the last call. */
+    external fun recLevel(): Float
 }

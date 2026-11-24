@@ -34,12 +34,20 @@ public:
     uint32_t hostError() const { return b_ ? b_->host_error : 0; }
     std::string pluginName() const { return b_ ? std::string(b_->plugin_name, strnlen(b_->plugin_name, sizeof b_->plugin_name)) : ""; }
     int frames() const { return frames_; }
+    // --- parameters (published by the host once ready) ---
+    int paramCount() const { return b_ ? (int)__atomic_load_n(&b_->n_params, __ATOMIC_ACQUIRE) : 0; }
+    const ZkParamInfo* paramInfo(int i) const { return (b_ && i >= 0 && i < paramCount()) ? &b_->params[i] : nullptr; }
+    float paramValue(int i) const { return (b_ && i >= 0 && i < paramCount()) ? b_->values[i] : 0.f; }
+    void setParamValue(int i, float v) { if (b_ && i >= 0 && i < paramCount()) b_->values[i] = v; }
+    std::string paramText(int i) const { return (b_ && i >= 0 && i < paramCount()) ? std::string(b_->texts[i], strnlen(b_->texts[i], sizeof b_->texts[i])) : ""; }
 
     // Real-time safe. Hands one block (events for the window about to be rendered by the host) to the Wine host.
-    void submit(const ZkEvent* ev, int n, int frames) {
+    void submit(const ZkEvent* ev, int n, int frames, const ZkParamChange* ch = nullptr, int nch = 0) {
         n = n > ZK_MAX_EVENTS ? ZK_MAX_EVENTS : n;
+        nch = nch > ZK_MAX_PARAM_CHANGES ? ZK_MAX_PARAM_CHANGES : nch;
         if (n > 0) memcpy(b_->events, ev, n * sizeof(ZkEvent));
-        b_->n_events = n; b_->frames = frames;
+        if (nch > 0) memcpy(b_->changes, ch, nch * sizeof(ZkParamChange));
+        b_->n_events = n; b_->n_changes = nch; b_->frames = frames;
         __atomic_store_n(&b_->req_seq, ++seq_, __ATOMIC_RELEASE);
         pending_ = true;
     }
