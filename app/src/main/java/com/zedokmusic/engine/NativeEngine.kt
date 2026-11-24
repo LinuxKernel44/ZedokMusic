@@ -35,6 +35,8 @@ object NativeEngine {
     /** Peak since last call; track -1 (or any invalid id) = master. */
     external fun peak(track: Int): Float
     external fun renderToWav(path: String, fromFrame: Long, toFrame: Long, format: Int): Boolean
+    /** Renders a single track (a stem); [track] is its engine id. */
+    external fun renderTrackToWav(path: String, fromFrame: Long, toFrame: Long, format: Int, track: Int): Boolean
     /** [sampleRate, burst, bufferSize, xruns, avgCallbackUs, maxCallbackUs, latencyMs, exclusive] */
     external fun stats(): FloatArray
 

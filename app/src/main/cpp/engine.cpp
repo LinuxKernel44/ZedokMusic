@@ -172,13 +172,14 @@ int64_t Engine::renderBlock(const Project& p, int64_t pos, int frames, float* ou
 }
 
 // ---------- offline render ----------
-bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt) {
+bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt, int onlyTrack) {
     playing_.store(false);
     std::shared_ptr<const Project> p;
     { std::lock_guard<std::mutex> lk(editMutex_); p = current_; }
     if (to <= from) to = std::max<int64_t>(from, projectLength());
     if (to <= from) return false;
     Project q = *p; q.loop = false;  // offline render ignores loop
+    if (onlyTrack > 0) for (auto& t : q.tracks) if (t.id != onlyTrack) t.mute = true;
     auto ms = std::make_unique<MixState>();
     ms->playClips = true;
     constexpr int64_t kSyncWaitNs = 5'000'000'000;
@@ -200,7 +201,7 @@ bool Engine::renderToWav(const std::string& path, int64_t from, int64_t to, WavF
         int n = (int)std::min<int64_t>(plugFrames, to - pos);
         for (auto& t : q.tracks) if (t.plugin && t.pluginSlot >= 0) {
             float* dst = ms->plugOut[t.pluginSlot];
-            if (!t.plugin->ready()) { memset(dst, 0, sizeof(float) * 2 * plugFrames); continue; }
+            if (!t.plugin->ready() || (onlyTrack > 0 && t.id != onlyTrack)) { memset(dst, 0, sizeof(float) * 2 * plugFrames); continue; }
             ZkEvent ev[ZK_MAX_EVENTS]; int ne = 0;
             if (pos == from) ev[ne++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
             windowEvents(q, t, pos, n, ev, ne);

@@ -40,6 +40,7 @@ fun PluginPanel(vm: DawViewModel) {
                 Text(t.pluginName.ifBlank { t.name }, color = t.color, fontSize = 14.sp, maxLines = 1)
                 Text("${params.size} parameters · ${t.paramOverrides.size} changed", color = Zk.dim, fontSize = 11.sp)
             }
+            if (editor && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 840) LabelButton(if (vm.panelExpanded) "Shrink" else "Full", vm.panelExpanded, w = 64.dp) { vm.panelExpanded = !vm.panelExpanded }
             if (editor) LabelButton("Keys", keys, w = 60.dp) { keys = !keys }
             LabelButton("Editor", editor, w = 70.dp) { if (editor) vm.closeEditor(t) else vm.openEditor(t) }
             if (!editor) LabelButton("Changed", onlyChanged, w = 76.dp) { onlyChanged = !onlyChanged }

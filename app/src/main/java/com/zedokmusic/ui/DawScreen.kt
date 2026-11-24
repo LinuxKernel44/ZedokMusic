@@ -52,9 +52,12 @@ fun DawScreen(vm: DawViewModel) {
                 Transport(vm, !wide, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
                     onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" })
                 if (wide) {
-                    Box(Modifier.weight(1f)) { ArrangeView(vm, ppb, { ppb = it }, { panel = Panel.Piano; bottom = Panel.Piano }, { vm.selected = it; dialog = "samples" }) }
-                    HorizontalDivider(color = Zk.line)
-                    Column(Modifier.weight(0.9f)) {
+                    val expanded = vm.panelExpanded && bottom == Panel.Plugin
+                    if (!expanded) {
+                        Box(Modifier.weight(1f)) { ArrangeView(vm, ppb, { ppb = it }, { panel = Panel.Piano; bottom = Panel.Piano }, { vm.selected = it; dialog = "samples" }) }
+                        HorizontalDivider(color = Zk.line)
+                    }
+                    Column(Modifier.weight(if (expanded) 1f else 0.9f)) {
                         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (p in listOf(Panel.Piano, Panel.Mixer, Panel.Plugin, Panel.Auto)) PanelChip(p.label, bottom == p) { bottom = p }
                         }
@@ -84,7 +87,7 @@ fun DawScreen(vm: DawViewModel) {
             val t = vm.selected?.takeIf { it.kind == TrackKind.Audio } ?: vm.addAudioTrack(); if (t != null) vm.importClip(t, f, vm.playhead.let { Math.floor(it.toDouble()).toFloat() }); dialog = null }, { dialog = null })
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })
-        "export" -> ExportDialog(vm.loopBars, { r, f, n -> vm.exportWav(r, f, n) }, { dialog = null })
+        "export" -> ExportDialog(vm.loopBars, { r, f, n, st -> vm.exportAudio(r, f, n, st) }, { dialog = null })
     }
     if (vm.exporting) ExportingDialog()
 }

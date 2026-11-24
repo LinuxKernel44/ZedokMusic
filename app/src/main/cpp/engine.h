@@ -126,7 +126,7 @@ public:
     int64_t projectLength() const;
 
     // --- offline render (any thread but the audio thread) ---
-    bool renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt);
+    bool renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt, int onlyTrack = 0);  // onlyTrack > 0: render just that track (a stem)
 
     struct Stats { int sampleRate, burst, bufferSize, xruns; float avgUs, maxUs, latencyMs; bool exclusive; int64_t callbacks; };
     Stats stats();

@@ -86,10 +86,11 @@ fun MidiDialog(midi: com.zedokmusic.engine.MidiInput, onScan: () -> Unit, onDism
 }
 
 @Composable
-fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String) -> Unit, onDismiss: () -> Unit) {
+fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String, stems: Boolean) -> Unit, onDismiss: () -> Unit) {
     var range by remember { mutableIntStateOf(0) }
     var format by remember { mutableIntStateOf(1) }
     var name by remember { mutableStateOf("Mix") }
+    var stems by remember { mutableStateOf(false) }
     @Composable fun option(label: String, selected: Boolean, onClick: () -> Unit) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 2.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             RadioButton(selected, onClick); Text(label, fontSize = 14.sp)
@@ -107,9 +108,14 @@ fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String
             option("WAV 16-bit", format == 0) { format = 0 }
             option("WAV 24-bit", format == 1) { format = 1 }
             option("WAV 32-bit float", format == 2) { format = 2 }
+            option("AAC .m4a (256 kbps, small)", format == 3) { format = 3 }
+            Spacer(Modifier.height(4.dp))
+            Text("Content", color = Zk.dim, fontSize = 12.sp)
+            option("Full mix", !stems) { stems = false }
+            option("Each track separately (stems)", stems) { stems = true }
             Text("Saved in the Exports folder of your workspace.", color = Zk.dim, fontSize = 11.sp)
         }
-    }, confirmButton = { TextButton({ onExport(range, format, name); onDismiss() }) { Text("Export") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+    }, confirmButton = { TextButton({ onExport(range, format, name, stems); onDismiss() }) { Text("Export") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
 
 @Composable

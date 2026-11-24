@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zedokmusic.engine.NativeEngine
 import com.zedokmusic.engine.MidiInput
+import com.zedokmusic.engine.AacEncoder
 import com.zedokmusic.engine.PluginHost
 import com.zedokmusic.wine.StorageFolder
 import kotlinx.coroutines.delay
@@ -202,6 +203,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun liveNote(t: TrackM, on: Boolean, pitch: Int) = keyEvent(t, on, pitch, 105)
 
     // ---------- plugin editor (GUI) ----------
+    /** Wide screens: the plugin panel takes the whole area under the transport (the arrangement is hidden). */
+    var panelExpanded by mutableStateOf(false)
     val guiAvailable get() = host.gui.available
     private val editorSlots = LinkedHashMap<Int, Int>()  // track id -> slot (vertical band of the shared X screen), oldest first
     /** Opens the plugin's editor; up to three stay open at once (the oldest is closed to make room). */
@@ -303,8 +306,11 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- export ----------
     var exporting by mutableStateOf(false); private set
-    /** Renders the mix (plugins included) to Exports/<name>.wav. [range] 0 = whole project (+2 s tail), 1 = loop region; [format] 0 = 16-bit, 1 = 24-bit, 2 = 32-bit float. */
-    fun exportWav(range: Int, format: Int, name: String) {
+    /**
+     * Renders to Exports/. [range] 0 = whole project (+2 s tail), 1 = loop region. [format] 0 = WAV 16-bit, 1 = WAV 24-bit, 2 = WAV float,
+     * 3 = AAC (.m4a, 256 kbps). [stems]: one file per track instead of the mix.
+     */
+    fun exportAudio(range: Int, format: Int, name: String, stems: Boolean) {
         val dir = workspace?.let { File(it, "Exports") } ?: run { message = "No workspace folder."; return }
         if (exporting) return
         val to = if (range == 1) (loopBars * 4 * fpb).toLong()
@@ -313,14 +319,26 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         e.pause(); playing = false
         dir.mkdirs()
         val base = name.trim().ifEmpty { "Mix" }.replace(Regex("[^A-Za-z0-9 _.-]"), "_")
-        var f = File(dir, "$base.wav"); var n = 2
-        while (f.exists()) f = File(dir, "$base ($n++).wav")
+        val ext = if (format == 3) "m4a" else "wav"
+        fun unique(stem: String): File { var f = File(dir, "$stem.$ext"); var n = 2; while (f.exists()) f = File(dir, "$stem ($n++).$ext"); return f }
+        val jobs: List<Pair<File, Int>> = if (stems) tracks.filter { it.notes.isNotEmpty() || it.clips.isNotEmpty() }
+            .map { unique("$base - " + it.name.replace(Regex("[^A-Za-z0-9 _.-]"), "_")) to it.id } else listOf(unique(base) to 0)
+        if (jobs.isEmpty()) { message = "No track has anything to export."; return }
         exporting = true; message = null
-        val out = f
         Thread {
-            val ok = try { e.renderToWav(out.absolutePath, 0L, to, format) } catch (ex: Throwable) { false }
+            var done = 0; var err: String? = null; var bytes = 0L
+            for ((out, track) in jobs) {
+                try {
+                    val wav = if (format == 3) File(getApplication<Application>().cacheDir, "export_tmp.wav") else out
+                    val wavFmt = if (format == 3) 0 else format
+                    val ok = if (track > 0) e.renderTrackToWav(wav.absolutePath, 0L, to, wavFmt, track) else e.renderToWav(wav.absolutePath, 0L, to, wavFmt)
+                    if (!ok) { err = "Render failed."; break }
+                    if (format == 3) { err = AacEncoder.encode(wav, out); wav.delete(); if (err != null) break }
+                    done++; bytes += out.length()
+                } catch (ex: Throwable) { err = "Export failed: ${ex.message}"; break }
+            }
             exporting = false
-            message = if (ok) "Exported ${out.name} (%.1f MB) to Exports".format(out.length() / 1048576.0) else "Export failed."
+            message = if (err == null) (if (done == 1) "Exported ${jobs[0].first.name}" else "Exported $done files") + " (%.1f MB) to Exports".format(bytes / 1048576.0) else err
         }.start()
     }
 
