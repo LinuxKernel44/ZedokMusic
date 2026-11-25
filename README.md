@@ -29,7 +29,7 @@ A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 1. Download the APK from the [Releases](../../releases) page and install it (allow installs from your browser or file manager).
 2. Open ZedokMusic, tap **Install**, allow storage access, then choose or create a folder (not the top level of your storage).
    The first start takes about a minute and a half.
-3. Copy your `.vst3` plugins into `<your folder>/Plugins/VST3`. Plugins that keep resources in a data folder (for example u-he's `Podolski.data`) need that folder **next to the `.vst3` file**, otherwise they show a "data missing" dialog and their editor cannot open.
+3. Either run the plugin's Windows installer: **Add → Install plugin (.exe)…**, **Import…** the `.exe`/`.msi` (it is copied to `<your folder>/Installers`), **Run** it, and use its windows with touch (**Keys** brings up the keyboard). Plugins installed to `C:\Program Files\Common Files\VST3` are found automatically. Or copy your `.vst3` plugins into `<your folder>/Plugins/VST3`. Plugins that keep resources in a data folder (for example u-he's `Podolski.data`) need that folder **next to the `.vst3` file**, otherwise they show a "data missing" dialog and their editor cannot open.
 4. **Add → Instrument track (VST3)…**, pick a plugin, wait for the green dot, tap the pattern and write notes.
 
 Every release APK is signed with the same key. Certificate SHA-256: see the release notes.
@@ -75,6 +75,7 @@ Debug builds contain adb test hooks (`DebugHooks`); release builds do not.
 - Each plugin host uses roughly 40% of a CPU core while playing (about 13% when idle).
 - MIDI input and audio recording are implemented but only the microphone path has been tested on hardware; USB and Bluetooth MIDI devices are untested (the MIDI parser has unit tests).
 - Automation curves are line, step or smooth only, and are stored per parameter in beats.
+- Installers run under Wine on a 1024×768 virtual desktop; anything that needs a driver, a license service or a GPU may fail. If an installer asks to restart Windows, just close it.
 - VST3 only (no VST2, no CLAP). Plugins that need a GPU, an installer-based license (iLok, etc.) or Windows-only drivers may not work.
 - Heavy plugins can exceed the CPU budget on older phones. The status line shows xruns.
 - Tested on one device so far (the wide layout only on the same phone with an emulated large screen). SD cards and Android 13+ storage behaviour with `targetSdk 28` are untested.

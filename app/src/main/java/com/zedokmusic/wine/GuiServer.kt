@@ -16,7 +16,10 @@ class GuiServer(private val ctx: Context) {
     private val socket = File(env.root, "tmp/.X11-unix/X0")
     private val xvfbBin = File(env.root, "usr/bin/Xvfb")
 
-    companion object { const val WIDTH = 1600; const val HEIGHT = 3000; const val SLOT_HEIGHT = 1000 }  // three editors fit, one per slot
+    companion object {
+        const val WIDTH = 1600; const val HEIGHT = 3000; const val SLOT_HEIGHT = 1000  // three editors fit, one per slot
+        const val INSTALLER_W = 1024; const val INSTALLER_H = 768  // the installer's own desktop, at the top-left of the X screen
+    }  // three editors fit, one per slot
 
     val available get() = xvfbBin.exists() && File(env.root, "usr/lib/libxshim.so").exists()
 
@@ -73,7 +76,7 @@ class GuiServer(private val ctx: Context) {
     }
 
     /** Wine arguments that put a program on the shared virtual desktop (no window manager is needed there). */
-    fun desktopArgs() = arrayOf("explorer", "/desktop=zedok,${WIDTH}x$HEIGHT")
+    fun desktopArgs(name: String = "zedok", w: Int = WIDTH, h: Int = HEIGHT) = arrayOf("explorer", "/desktop=$name,${w}x$h")
 
     /** An earlier experiment set the desktop in the registry for every process; remove it (explicit launch is used instead). Once per prefix. */
     private fun clearDesktopRegistry() {

@@ -40,6 +40,7 @@ fun DawScreen(vm: DawViewModel) {
     fun begin() { vm.startRecording()?.let { vm.message = it } }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) begin() else vm.message = "Microphone permission is needed to record audio." }
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.midi.startScan() else vm.message = "Location permission is needed by Android to scan for Bluetooth devices." }
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) vm.importInstaller(uri) }
     fun onRecord() {
         if (vm.recording) { vm.stopRecording(); return }
         if (vm.selected?.kind == TrackKind.Audio && ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) micPermission.launch(Manifest.permission.RECORD_AUDIO) else begin()
@@ -54,7 +55,7 @@ fun DawScreen(vm: DawViewModel) {
             CompositionLocalProvider(LocalShort provides short) {
             Column(Modifier.fillMaxSize()) {
                 Transport(vm, !wide && !short, short, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
-                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" })
+                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" })
                 if (short) {
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         Column(Modifier.width(74.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -103,9 +104,11 @@ fun DawScreen(vm: DawViewModel) {
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })
         "exports" -> ExportsDialog(vm) { dialog = null }
+        "installers" -> InstallersDialog(vm, { importPicker.launch(arrayOf("*/*")) }, { dialog = null })
         "export" -> ExportDialog(vm.loopBars, { r, f, n, st -> vm.exportAudio(r, f, n, st) }, { dialog = null })
     }
     if (vm.exporting) ExportingDialog()
+    InstallerScreen(vm)
 }
 
 @Composable
@@ -137,7 +140,7 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit) {
+private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     // Phones: tighter sizes so the whole transport (stop, play, loop, rec, position, tempo) fits even on dense, narrow screens.
     val bs = if (compact || oneRow) 36.dp else 40.dp
@@ -162,6 +165,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(text = { Text("Instrument track (VST3)…") }, onClick = { menu = false; onAddInstrument() })
                 DropdownMenuItem(text = { Text("Audio track") }, onClick = { menu = false; onAddAudio() })
+                DropdownMenuItem(text = { Text("Install plugin (.exe)…") }, onClick = { menu = false; onInstallers() })
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("Save project") }, onClick = { menu = false; onSave() })
                 DropdownMenuItem(text = { Text("Export audio…") }, onClick = { menu = false; onExport() })

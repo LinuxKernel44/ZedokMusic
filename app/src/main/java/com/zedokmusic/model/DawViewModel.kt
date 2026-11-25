@@ -294,16 +294,63 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- plugins ----------
     fun pluginDir(): File? = workspace?.let { File(it, "Plugins/VST3") }
+    /** Where Windows installers put VST3 plugins: C:\Program Files\Common Files\VST3. */
+    private fun installedPluginDir(): File? = workspace?.let { File(it, "C/Program Files/Common Files/VST3") }
     fun scanPlugins(): List<PluginInfo> {
-        val dir = pluginDir() ?: return emptyList()
         val out = ArrayList<PluginInfo>()
-        dir.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { f ->
-            if (!f.name.endsWith(".vst3", true)) return@forEach
-            val dll = if (f.isFile) f else f.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".vst3", true) && it.path.contains("x86_64-win") }
-            if (dll != null) out.add(PluginInfo(f.nameWithoutExtension, dll.path))
+        for (dir in listOfNotNull(pluginDir(), installedPluginDir())) {
+            dir.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { f ->
+                if (!f.name.endsWith(".vst3", true)) return@forEach
+                val dll = if (f.isFile) f else f.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".vst3", true) && it.path.contains("x86_64-win") }
+                if (dll != null && out.none { it.path == dll.path }) out.add(PluginInfo(f.nameWithoutExtension, dll.path))
+            }
         }
         return out
     }
+
+    // ---------- Windows plugin installers ----------
+    /** Name of the installer whose screen is shown (null = none). */
+    var installerName by mutableStateOf<String?>(null); private set
+    var installerRunning by mutableStateOf(false); private set
+    var installerCopying by mutableStateOf(false); private set
+    fun installersDir(): File? = workspace?.let { File(it, "Installers") }
+    fun installerFiles(): List<File> = installersDir()?.listFiles { f -> f.isFile && f.extension.lowercase() in setOf("exe", "msi") }?.sortedBy { it.name.lowercase() } ?: emptyList()
+
+    /** Copies a file chosen with the system picker into the Installers folder (Wine can only reach the workspace). */
+    fun importInstaller(uri: android.net.Uri) {
+        val dir = installersDir() ?: run { message = "No workspace folder."; return }
+        if (installerCopying) return
+        installerCopying = true
+        Thread {
+            try {
+                dir.mkdirs()
+                val cr = getApplication<android.app.Application>().contentResolver
+                val name = cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    ?: uri.lastPathSegment?.substringAfterLast('/') ?: "installer.exe"
+                val safe = name.replace(Regex("[^A-Za-z0-9 _.()+-]"), "_")
+                if (safe.substringAfterLast('.', "").lowercase() !in setOf("exe", "msi")) { message = "Choose a Windows installer (.exe or .msi)."; return@Thread }
+                val out = File(dir, safe)
+                cr.openInputStream(uri)?.use { i -> out.outputStream().use { o -> i.copyTo(o, 1 shl 20) } } ?: run { message = "Cannot read that file."; return@Thread }
+                message = "Copied $safe to the Installers folder."
+            } catch (e: Exception) { message = "Could not copy the installer: ${e.message}" }
+            finally { installerCopying = false }
+        }.start()
+    }
+
+    fun deleteInstaller(f: File) { f.delete() }
+
+    fun runInstaller(f: File) {
+        if (installerRunning) return
+        e.pause(); playing = false
+        tracks.filter { it.editorOpen }.forEach { closeEditor(it) }  // the installer's desktop uses the top of the same X screen
+        installerName = f.name; installerRunning = true
+        host.runInstaller(f,
+            onStarted = { ok -> if (!ok) { installerRunning = false; installerName = null; message = "Could not start the installer. Is the Windows runtime installed?" } },
+            onExit = { code -> installerRunning = false; message = if (code == 0) "Installer finished. Plugins it installed appear in Add → Instrument track." else "Installer ended (code $code)." })
+    }
+    fun stopInstaller() { host.stopInstaller() }
+    /** Leaves the installer screen (only once it has ended). */
+    fun closeInstaller() { if (!installerRunning) installerName = null }
     fun samples(): List<File> = workspace?.let { File(it, "Samples").walkTopDown().filter { f -> f.isFile && f.extension.equals("wav", true) }.sortedBy { f -> f.name.lowercase() }.toList() } ?: emptyList()
 
     // ---------- export ----------

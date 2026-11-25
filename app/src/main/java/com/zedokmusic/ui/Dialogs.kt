@@ -20,7 +20,7 @@ fun PluginPickerDialog(plugins: List<PluginInfo>, folder: String, onRescan: () -
         title = { Text("Add instrument") },
         text = {
             Column {
-                if (plugins.isEmpty()) Text("No VST3 plugins found.\n\nCopy your Windows .vst3 files into:\n$folder\n\nthen tap Rescan.", color = Zk.dim, fontSize = 13.sp)
+                if (plugins.isEmpty()) Text("No VST3 plugins found.\n\nCopy your Windows .vst3 files into:\n$folder\n\nthen tap Rescan.\n\nOr use Add → Install plugin (.exe) to run the plugin's Windows installer.", color = Zk.dim, fontSize = 13.sp)
                 else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
                     items(plugins) { p -> Text(p.name, color = Zk.text, modifier = Modifier.fillMaxWidth().clickable { onPick(p) }.padding(vertical = 12.dp)); HorizontalDivider(color = Zk.line) }
                 }

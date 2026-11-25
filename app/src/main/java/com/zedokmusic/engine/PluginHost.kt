@@ -61,5 +61,36 @@ class PluginHost(private val ctx: Context) {
         synchronized(processes) { processes.remove(track) }?.let { p -> Thread { if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly() }.start() }
     }
 
+    // ---------- Windows installers (.exe / .msi) ----------
+    @Volatile private var installer: Process? = null
+    val installerRunning get() = installer?.isAlive == true
+
+    /**
+     * Runs a Windows installer from the workspace on its own virtual desktop of the shared X screen (see [GuiServer]); the UI shows
+     * and drives that screen. [onStarted] tells whether it launched; [onExit] gets its exit code when it ends. Returns at once.
+     */
+    fun runInstaller(file: File, onStarted: (Boolean) -> Unit, onExit: (Int) -> Unit) {
+        Thread {
+            val win = try { toWinPath(file.absolutePath) } catch (e: Exception) { onStarted(false); return@Thread }
+            if (!gui.ensureRunning()) { onStarted(false); return@Thread }
+            val args = if (file.extension.equals("msi", true)) arrayOf("msiexec", "/i", win) else arrayOf(win)
+            val pb = env.wine(*(gui.desktopArgs("zinst", GuiServer.INSTALLER_W, GuiServer.INSTALLER_H) + args), extraEnv = { e -> gui.wineEnv(e) })
+            file.parentFile?.let { pb.directory(it) }
+            pb.redirectOutput(File(files, "installer.log"))
+            val p = try { pb.start() } catch (e: Exception) { onStarted(false); return@Thread }
+            installer = p
+            onStarted(true)
+            val code = p.waitFor()
+            installer = null
+            onExit(code)
+        }.start()
+    }
+
+    /** Ends the running installer. With no plugin running, the whole Wine session is reset so nothing it started lingers. */
+    fun stopInstaller() {
+        installer?.destroyForcibly()
+        Thread { if (synchronized(processes) { processes.isEmpty() }) runCatching { env.wineserver("-k").start().waitFor(10, java.util.concurrent.TimeUnit.SECONDS) } }.start()
+    }
+
     fun stopAll() { synchronized(processes) { processes.keys.toList() }.forEach { stop(it) }; gui.stop() }
 }

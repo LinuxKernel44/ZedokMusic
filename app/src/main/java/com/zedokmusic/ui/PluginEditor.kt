@@ -59,7 +59,7 @@ fun PluginEditor(vm: DawViewModel, t: TrackM, keyboard: Boolean = false) {
 private fun Message(text: String) = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(text, color = Zk.dim, fontSize = 13.sp) }
 
 @Composable
-private fun EditorSurface(w: Int, h: Int, ox: Int, oy: Int, keyboard: Boolean) {
+fun EditorSurface(w: Int, h: Int, ox: Int, oy: Int, keyboard: Boolean) {
     val bmp = remember(w, h) { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }
     var tick by remember(bmp) { mutableIntStateOf(0) }
     LaunchedEffect(bmp, ox, oy) {
