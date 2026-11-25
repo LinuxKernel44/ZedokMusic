@@ -56,7 +56,7 @@ fun TempoDialog(bpm: Float, onChange: (Float) -> Unit, onDismiss: () -> Unit) {
         text = {
             Column {
                 Text("%.0f BPM".format(v), fontSize = 28.sp, color = Zk.accent)
-                Slider(v, { v = it }, valueRange = 30f..300f)
+                Slider(v, { v = it }, valueRange = 30f..300f, modifier = Modifier.doubleTapReset { v = 120f })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton({ v = (v - 1).coerceAtLeast(30f) }) { Text("−1") }; OutlinedButton({ v = (v + 1).coerceAtMost(300f) }) { Text("+1") }
                 }

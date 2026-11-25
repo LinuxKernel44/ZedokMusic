@@ -48,11 +48,11 @@ private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: F
         .pointerInput(Unit) { detectTapGestures { onSelect() } }.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(name, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (pan != null) {
-            Slider(pan, onPan, valueRange = -1f..1f, modifier = Modifier.height(28.dp), colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = Zk.line, inactiveTrackColor = Zk.line))
+            Slider(pan, onPan, valueRange = -1f..1f, modifier = Modifier.height(28.dp).doubleTapReset { onPan(0f) }, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = Zk.line, inactiveTrackColor = Zk.line))
             Text(if (pan == 0f) "C" else if (pan < 0) "L${(-pan * 100).toInt()}" else "R${(pan * 100).toInt()}", color = Zk.dim, fontSize = 10.sp)
         } else Spacer(Modifier.height(40.dp))
         Row(Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight())
+            Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight().doubleTapReset { onGain(1f) })  // double tap = 0 dB
             Meter(meter, Modifier.width(14.dp).fillMaxHeight())
         }
         Text(gainToDb(gain) + " dB", color = Zk.dim, fontSize = 10.sp)

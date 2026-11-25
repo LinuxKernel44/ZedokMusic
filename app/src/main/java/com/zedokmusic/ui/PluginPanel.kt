@@ -83,6 +83,6 @@ private fun ParamRow(vm: DawViewModel, t: TrackM, p: ParamM) {
         Slider(value, { v ->
             val nv = if (p.steps > 0) Math.round(v * p.steps) / p.steps.toFloat() else v
             value = nv; vm.setParam(t, p.index, nv); text = vm.paramText(t, p.index)
-        }, modifier = Modifier.height(30.dp), colors = SliderDefaults.colors(thumbColor = if (changed) Zk.accent else Zk.dim, activeTrackColor = if (changed) Zk.accent else Zk.line, inactiveTrackColor = Zk.line))
+        }, modifier = Modifier.height(30.dp).doubleTapReset { vm.resetParam(t, p); value = p.default; text = vm.paramText(t, p.index) }, colors = SliderDefaults.colors(thumbColor = if (changed) Zk.accent else Zk.dim, activeTrackColor = if (changed) Zk.accent else Zk.line, inactiveTrackColor = Zk.line))
     }
 }

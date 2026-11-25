@@ -122,3 +122,32 @@ fun Modifier.scrubRuler(pxPerBeat: Float, onSeek: (Float) -> Unit): Modifier =
             } while (e.changes.any { it.pressed })
         }
     }
+
+/**
+ * Double tap (two quick taps close together) resets a control to its default. It only watches the touches: the slider underneath
+ * keeps working normally, so the first tap may still move it a little before the second one puts it back.
+ */
+fun Modifier.doubleTapReset(onReset: () -> Unit): Modifier = this.pointerInput(Unit) {
+    val slop = viewConfiguration.touchSlop
+    val near = 64.dp.toPx()
+    var lastTapAt = 0L; var lastTapPos = androidx.compose.ui.geometry.Offset.Unspecified
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+        val t0 = System.currentTimeMillis()
+        while (true) {
+            val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            val c = ev.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+            if ((c.position - down.position).getDistance() > slop) return@awaitEachGesture  // a drag, not a tap
+            if (!c.pressed) {
+                val now = System.currentTimeMillis()
+                if (now - t0 > 300) { lastTapAt = 0L; return@awaitEachGesture }
+                if (lastTapAt != 0L && now - lastTapAt < 350 && lastTapPos != androidx.compose.ui.geometry.Offset.Unspecified && (c.position - lastTapPos).getDistance() < near) {
+                    lastTapAt = 0L
+                    // a moment later: controls that apply the touch on release (the faders) would otherwise overwrite the reset
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ onReset() }, 40)
+                } else { lastTapAt = now; lastTapPos = c.position }
+                return@awaitEachGesture
+            }
+        }
+    }
+}
