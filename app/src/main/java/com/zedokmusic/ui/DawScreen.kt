@@ -169,8 +169,16 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
         SquareButton(if (vm.playing) Glyph.Pause else Glyph.Play, active = vm.playing, size = ps) { vm.togglePlay() }
         SquareButton(Glyph.Loop, active = vm.loop, size = bs) { vm.toggleLoop() }
         SquareButton(Glyph.Rec, active = vm.recording, tint = Zk.danger, activeColor = Zk.danger, size = bs, onClick = onRecord)
-        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.bg).padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 8.dp)) {
-            Text(beatLabel(vm.playhead), color = Zk.accent, fontSize = if (compact) 16.sp else 19.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+        // The box is as wide as the widest possible reading (every digit is as wide as the widest one), so the counter ticking
+        // never changes its width and never pushes the buttons to its right around.
+        val timeSize = if (compact) 16.sp else 19.sp
+        val tm = androidx.compose.ui.text.rememberTextMeasurer()
+        val timeStyle = androidx.compose.ui.text.TextStyle(fontSize = timeSize, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum")
+        val widest = remember(timeSize) { tm.measure("0000.0.00", timeStyle).size.width }   // up to bar 9999
+        val digits = beatLabel(vm.playhead)
+        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.bg).padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 8.dp)
+            .width(with(androidx.compose.ui.platform.LocalDensity.current) { widest.toDp() }), contentAlignment = Alignment.CenterEnd) {
+            Text(digits, color = Zk.accent, style = timeStyle, maxLines = 1, softWrap = false)
         }
         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable(onClick = onTempo).padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 9.dp)) {
             Text("%.0f".format(vm.bpm) + " BPM", color = Zk.text, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
