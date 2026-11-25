@@ -26,7 +26,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val e = NativeEngine
     private val host = PluginHost(app)
     val workspace: File? = StorageFolder.saved(app)
-    private val projectFile get() = workspace?.let { File(it, "Projects/Untitled.zedok") }
+    private val projectName = "Untitled"
+    private val projectFile get() = workspace?.let { File(it, "Projects/$projectName.zedok") }
+    /** This project's own folder, next to its .zedok file: Projects/<name>/ (samples, recordings). */
+    fun projectDir(): File? = workspace?.let { File(it, "Projects/$projectName") }
+    /** Samples that belong to this project: imports and recordings are stored here, not in the shared library. */
+    fun projectSamplesDir(): File? = projectDir()?.let { File(it, "Samples") }
 
     val tracks = mutableStateListOf<TrackM>()
     var bpm by mutableFloatStateOf(120f); private set
@@ -75,7 +80,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (t.kind == TrackKind.Instrument) { recMidi = true }
         else {
             recMidi = false
-            val dir = workspace?.let { File(it, "Samples/Recordings") } ?: return "No workspace folder."
+            val dir = projectSamplesDir()?.let { File(it, "Recordings") } ?: return "No workspace folder."
             dir.mkdirs()
             val f = File(dir, "Take_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".wav")
             val err = e.recStart(f.absolutePath, AppSettings.inputDevice.value)
@@ -325,7 +330,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             dir.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { f ->
                 if (!f.name.endsWith(".vst3", true)) return@forEach
                 val dll = if (f.isFile) f else f.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".vst3", true) && it.path.contains("x86_64-win") }
-                if (dll != null && out.none { it.path == dll.path }) out.add(PluginInfo(f.nameWithoutExtension, dll.path))
+                if (dll != null && out.none { it.path == dll.path }) out.add(PluginInfo(f.nameWithoutExtension.replace(Regex("\\s*\\((x64|64-?bit)\\)$", RegexOption.IGNORE_CASE), ""), dll.path))  // u-he installers name the 64-bit file "Name(x64).vst3"
             }
         }
         return out
@@ -374,7 +379,36 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun stopInstaller() { host.stopInstaller() }
     /** Leaves the installer screen (only once it has ended). */
     fun closeInstaller() { if (!installerRunning) installerName = null }
-    fun samples(): List<File> = workspace?.let { File(it, "Samples").walkTopDown().filter { f -> f.isFile && f.extension.equals("wav", true) }.sortedBy { f -> f.name.lowercase() }.toList() } ?: emptyList()
+    /** Bumped when files are copied into the project's Samples folder, so open lists refresh. */
+    var samplesVersion by mutableIntStateOf(0); private set
+    private fun wavs(dir: File?) = dir?.takeIf { it.isDirectory }?.walkTopDown()?.filter { f -> f.isFile && f.extension.equals("wav", true) }?.sortedBy { f -> f.name.lowercase() }?.toList() ?: emptyList()
+    /** WAV files of this project (its own Samples folder, recordings included). */
+    fun projectSamples(): List<File> { samplesVersion; return wavs(projectSamplesDir()) }
+    /** WAV files of the shared library (workspace/Samples), kept from before samples became per project. */
+    fun sharedSamples(): List<File> { samplesVersion; return wavs(workspace?.let { File(it, "Samples") }) }
+
+    /** Copies the chosen files into this project's Samples folder (the originals are left where they are). */
+    fun importSamples(uris: List<android.net.Uri>) {
+        val dir = projectSamplesDir() ?: run { message = "No workspace folder."; return }
+        Thread {
+            var ok = 0; var skipped = 0
+            try {
+                dir.mkdirs()
+                val cr = getApplication<Application>().contentResolver
+                for (uri in uris) {
+                    val name = cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                        ?: uri.lastPathSegment?.substringAfterLast('/') ?: "sample.wav"
+                    val safe = name.replace(Regex("[^A-Za-z0-9 _.()+-]"), "_")
+                    if (!safe.endsWith(".wav", true)) { skipped++; continue }
+                    var out = File(dir, safe); var n = 2
+                    while (out.exists()) out = File(dir, safe.substringBeforeLast('.') + " ($n)." + safe.substringAfterLast('.')).also { n++ }
+                    cr.openInputStream(uri)?.use { i -> out.outputStream().use { o -> i.copyTo(o, 1 shl 20) } }?.let { ok++ }
+                }
+            } catch (e: Exception) { message = "Could not copy the sample: ${e.message}"; return@Thread }
+            samplesVersion++
+            message = when { ok > 0 && skipped == 0 -> "Copied $ok sample(s) into this project."; ok > 0 -> "Copied $ok; $skipped skipped (only WAV files are supported)."; else -> "Only WAV files are supported." }
+        }.start()
+    }
 
     // ---------- export ----------
     var exporting by mutableStateOf(false); private set

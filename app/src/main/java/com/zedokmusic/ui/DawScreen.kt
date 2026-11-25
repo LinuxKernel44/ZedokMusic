@@ -41,6 +41,7 @@ fun DawScreen(vm: DawViewModel) {
     fun begin() { vm.startRecording()?.let { vm.message = it } }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) begin() else vm.message = "Microphone permission is needed to record audio." }
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.midi.startScan() else vm.message = "Location permission is needed by Android to scan for Bluetooth devices." }
+    val samplePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) vm.importSamples(uris) }
     val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) vm.importInstaller(uri) }
     fun onRecord() {
         if (vm.recording) { vm.stopRecording(); return }
@@ -100,7 +101,7 @@ fun DawScreen(vm: DawViewModel) {
     }
     when (dialog) {
         "plugins" -> PluginPickerDialog(plugins, vm.pluginDir()?.path ?: "", { plugins = vm.scanPlugins() }, { vm.addInstrument(it); dialog = null }, { dialog = null })
-        "samples" -> SamplePickerDialog(vm.samples(), (vm.workspace?.path ?: "") + "/Samples", { f ->
+        "samples" -> SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { samplePicker.launch(arrayOf("audio/*", "application/octet-stream")) }, { f ->
             val t = vm.selected?.takeIf { it.kind == TrackKind.Audio } ?: vm.addAudioTrack(); if (t != null) vm.importClip(t, f, vm.playhead.let { Math.floor(it.toDouble()).toFloat() }); dialog = null }, { dialog = null })
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })

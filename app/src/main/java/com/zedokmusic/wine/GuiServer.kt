@@ -18,7 +18,10 @@ class GuiServer(private val ctx: Context) {
 
     companion object {
         const val WIDTH = 1600; const val HEIGHT = 3000; const val SLOT_HEIGHT = 1000  // three editors fit, one per slot
-        const val INSTALLER_W = 1024; const val INSTALLER_H = 768  // the installer's own desktop, at the top-left of the X screen
+        // The installer gets its own full-size desktop (Wine only accepts a desktop as big as the X screen, otherwise the monitor
+        // metrics are wrong). Windows centre themselves on it, i.e. around the middle of the screen: that is the part we show.
+        const val INSTALLER_VIEW_W = 1100; const val INSTALLER_VIEW_H = 820        // the whole middle area
+        const val INSTALLER_ZOOM_W = 760; const val INSTALLER_ZOOM_H = 570         // closer, easier to touch on a phone
     }  // three editors fit, one per slot
 
     val available get() = xvfbBin.exists() && File(env.root, "usr/lib/libxshim.so").exists()

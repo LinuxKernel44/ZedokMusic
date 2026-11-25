@@ -203,7 +203,7 @@ private fun fmt(b: Long) = if (b >= 1L shl 30) "%.1f GB".format(b / 1073741824.0
     LaunchedEffect(refresh) {
         sizes = null
         sizes = withContext(Dispatchers.IO) {
-            if (ws == null) emptyList() else listOf("Projects" to "Projects", "Samples" to "Samples", "Exports" to "Exports", "Installers" to "Installers", "Plugins" to "Plugins", "Windows C: drive" to "C")
+            if (ws == null) emptyList() else listOf("Projects (with their samples)" to "Projects", "Shared samples" to "Samples", "Exports" to "Exports", "Installers" to "Installers", "Plugins" to "Plugins", "Windows C: drive" to "C")
                 .map { (label, dir) -> label to dirSize(File(ws, dir)) }
         }
     }

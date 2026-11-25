@@ -57,6 +57,7 @@ fun InstallersDialog(vm: DawViewModel, onImport: () -> Unit, onDismiss: () -> Un
 fun InstallerScreen(vm: DawViewModel) {
     val name = vm.installerName ?: return
     var keys by remember { mutableStateOf(false) }
+    var zoom by remember { mutableStateOf(true) }
     var confirmStop by remember { mutableStateOf(false) }
     BackHandler { if (vm.installerRunning) confirmStop = true else vm.closeInstaller() }
     Surface(Modifier.fillMaxSize(), color = Zk.bg) {
@@ -66,12 +67,18 @@ fun InstallerScreen(vm: DawViewModel) {
                     Text(name, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(if (vm.installerRunning) "Running — tap and type like on a Windows PC" else "Finished", color = if (vm.installerRunning) Zk.accent else Zk.dim, fontSize = 11.sp)
                 }
+                LabelButton("Zoom", zoom, w = 64.dp, h = 32.dp) { zoom = !zoom }
                 LabelButton("Keys", keys, w = 60.dp, h = 32.dp) { keys = !keys }
                 if (vm.installerRunning) LabelButton("Stop", false, Zk.danger, w = 60.dp, h = 32.dp) { confirmStop = true }
                 else LabelButton("Close", true, w = 64.dp, h = 32.dp) { vm.closeInstaller() }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (vm.installerRunning) EditorSurface(GuiServer.INSTALLER_W, GuiServer.INSTALLER_H, 0, 0, keys)
+                if (vm.installerRunning) {
+                    // Windows centre themselves on the 1600x3000 desktop: show the middle of it, closer or wider.
+                    val w = if (zoom) GuiServer.INSTALLER_ZOOM_W else GuiServer.INSTALLER_VIEW_W
+                    val h = if (zoom) GuiServer.INSTALLER_ZOOM_H else GuiServer.INSTALLER_VIEW_H
+                    key(w) { EditorSurface(w, h, (GuiServer.WIDTH - w) / 2, GuiServer.HEIGHT / 2 - h / 2, keys) }
+                }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("The installer has ended.", color = Zk.text, fontSize = 15.sp) }
             }
         }

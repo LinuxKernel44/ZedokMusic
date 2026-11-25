@@ -79,7 +79,7 @@ class PluginHost(private val ctx: Context) {
             val win = try { toWinPath(file.absolutePath) } catch (e: Exception) { onStarted(false); return@Thread }
             if (!gui.ensureRunning()) { onStarted(false); return@Thread }
             val args = if (file.extension.equals("msi", true)) arrayOf("msiexec", "/i", win) else arrayOf(win)
-            val pb = env.wine(*(gui.desktopArgs("zinst", GuiServer.INSTALLER_W, GuiServer.INSTALLER_H) + args), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
+            val pb = env.wine(*(gui.desktopArgs("zinst") + args), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
             file.parentFile?.let { pb.directory(it) }
             pb.redirectOutput(File(files, "installer.log"))
             val p = try { pb.start() } catch (e: Exception) { onStarted(false); return@Thread }

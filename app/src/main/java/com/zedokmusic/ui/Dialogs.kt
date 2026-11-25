@@ -30,19 +30,23 @@ fun PluginPickerDialog(plugins: List<PluginInfo>, folder: String, onRescan: () -
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
 
+/** Samples of this project first, then the shared library; [onImport] copies new files into the project's own Samples folder. */
 @Composable
-fun SamplePickerDialog(samples: List<File>, folder: String, onPick: (File) -> Unit, onDismiss: () -> Unit) {
+fun SamplePickerDialog(project: List<File>, shared: List<File>, projectFolder: String, onImport: () -> Unit, onPick: (File) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel,
         title = { Text("Add sample") },
         text = {
             Column {
-                if (samples.isEmpty()) Text("No WAV files found.\n\nCopy .wav files into:\n$folder", color = Zk.dim, fontSize = 13.sp)
+                if (project.isEmpty() && shared.isEmpty()) Text("No WAV files yet.\n\nTap Import to copy a sample into this project's own Samples folder:\n$projectFolder", color = Zk.dim, fontSize = 13.sp)
                 else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
-                    items(samples) { f -> Text(f.name, color = Zk.text, modifier = Modifier.fillMaxWidth().clickable { onPick(f) }.padding(vertical = 12.dp)); HorizontalDivider(color = Zk.line) }
+                    if (project.isNotEmpty()) item { Text("THIS PROJECT", color = Zk.accent, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 4.dp)) }
+                    items(project) { f -> Text(f.name, color = Zk.text, modifier = Modifier.fillMaxWidth().clickable { onPick(f) }.padding(vertical = 12.dp)); HorizontalDivider(color = Zk.line) }
+                    if (shared.isNotEmpty()) item { Text("SHARED LIBRARY (ALL PROJECTS)", color = Zk.dim, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 12.dp)) }
+                    items(shared) { f -> Text(f.name, color = Zk.text, modifier = Modifier.fillMaxWidth().clickable { onPick(f) }.padding(vertical = 12.dp)); HorizontalDivider(color = Zk.line) }
                 }
             }
         },
-        confirmButton = {}, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+        confirmButton = { TextButton(onImport) { Text("Import…") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
 
 @Composable

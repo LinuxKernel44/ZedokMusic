@@ -16,7 +16,7 @@ A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 - Audio engine in C++ on [Oboe](https://github.com/google/oboe) (AAudio, exclusive mode when available), WAV import and offline WAV export.
 - **Windows VST3 plugins (64-bit)** are hosted by a small Windows program running under **Wine + Box64** inside the app. Audio and MIDI travel
   through shared memory, one block ahead, so the audio thread never waits on Wine.
-- Your whole Windows environment is visible: Wine's `C:` drive, your plugins, projects and samples live in a folder you choose.
+- Your whole Windows environment is visible: Wine's `C:` drive, your plugins, projects and samples live in a folder you choose. Samples belong to the project: **Add sample → Import…** copies a WAV into `Projects/<project>/Samples` (recordings go there too); the older shared `Samples/` folder is still listed.
 - Interface in US English.
 
 ## Requirements
