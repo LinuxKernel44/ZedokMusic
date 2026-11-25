@@ -177,6 +177,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
         SquareButton(Glyph.Stop, size = bs) { vm.stop() }
         SquareButton(if (vm.playing) Glyph.Pause else Glyph.Play, active = vm.playing, size = ps) { vm.togglePlay() }
         SquareButton(Glyph.Loop, active = vm.loop, size = bs) { vm.toggleLoop() }
+        SquareButton(Glyph.FitLoop, size = bs) { vm.fitLoopToContent() }  // loop region = everything, ending where the content ends
         SquareButton(Glyph.Rec, active = vm.recording, tint = Zk.danger, activeColor = Zk.danger, size = bs, onClick = onRecord)
         // The box is as wide as the widest possible reading (every digit is as wide as the widest one), so the counter ticking
         // never changes its width and never pushes the buttons to its right around.

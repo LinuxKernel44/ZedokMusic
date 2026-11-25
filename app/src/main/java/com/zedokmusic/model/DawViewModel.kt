@@ -187,7 +187,16 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun stop() { e.pause(); e.seek(0); playing = false; playhead = 0f }
     fun seekBeat(beat: Float) { e.seek((beat.coerceAtLeast(0f) * fpb).toLong()); playhead = beat.coerceAtLeast(0f) }
     fun toggleLoop() { loop = !loop; applyLoop() }
-    fun changeLoopBars(b: Int) { loopBars = b.coerceIn(1, 64); applyLoop() }
+    fun changeLoopBars(b: Int) { loopBars = b.coerceIn(1, 512); applyLoop() }
+    /** Makes the loop region cover everything, from the start to the end of the last note or clip (whole bars), and turns looping on. */
+    fun fitLoopToContent() {
+        val filled = tracks.filter { it.notes.isNotEmpty() || it.clips.isNotEmpty() }
+        if (filled.isEmpty()) { message = "Nothing to loop yet: add notes or clips first."; return }
+        val bars = Math.round(filled.maxOf { it.lengthBeats(bpm) } / 4f).coerceAtLeast(1)
+        loop = true; changeLoopBars(bars)
+        message = "Loop set to $bars bar${if (bars > 1) "s" else ""}, the length of your content."
+        dirty = true
+    }
     private fun applyLoop() = e.setLoop(loop, 0, (loopBars * 4 * fpb).toLong())
     fun changeBpm(v: Float) {
         val old = bpm; bpm = v.coerceIn(30f, 300f)

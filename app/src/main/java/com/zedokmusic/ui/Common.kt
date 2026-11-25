@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class Glyph { Play, Pause, Stop, Loop, Plus, Minus, Keys, Close, Rec, Gear }
+enum class Glyph { Play, Pause, Stop, Loop, FitLoop, Plus, Minus, Keys, Close, Rec, Gear }
 
 /** Small vector icons drawn directly so the app needs no icon library. */
 @Composable
@@ -44,6 +44,15 @@ fun GlyphIcon(g: Glyph, color: Color, size: Dp = 20.dp) {
                 val st = Stroke(width = w * .1f)
                 drawRoundRect(color, Offset(w * .08f, h * .22f), Size(w * .84f, h * .56f), androidx.compose.ui.geometry.CornerRadius(w * .28f), style = st)
                 drawPath(Path().apply { moveTo(w * .62f, h * .1f); lineTo(w * .86f, h * .22f); lineTo(w * .62f, h * .36f); close() }, color)
+            }
+            Glyph.FitLoop -> {  // a loop region closed by two brackets: [ <-> ]
+                val st = w * .1f
+                drawLine(color, Offset(w * .14f, h * .2f), Offset(w * .14f, h * .8f), st); drawLine(color, Offset(w * .86f, h * .2f), Offset(w * .86f, h * .8f), st)
+                drawLine(color, Offset(w * .14f, h * .2f), Offset(w * .3f, h * .2f), st); drawLine(color, Offset(w * .14f, h * .8f), Offset(w * .3f, h * .8f), st)
+                drawLine(color, Offset(w * .86f, h * .2f), Offset(w * .7f, h * .2f), st); drawLine(color, Offset(w * .86f, h * .8f), Offset(w * .7f, h * .8f), st)
+                drawLine(color, Offset(w * .3f, h * .5f), Offset(w * .7f, h * .5f), st * .8f)
+                drawPath(Path().apply { moveTo(w * .22f, h * .5f); lineTo(w * .36f, h * .38f); lineTo(w * .36f, h * .62f); close() }, color)
+                drawPath(Path().apply { moveTo(w * .78f, h * .5f); lineTo(w * .64f, h * .38f); lineTo(w * .64f, h * .62f); close() }, color)
             }
             Glyph.Rec -> drawCircle(color, w * .34f, Offset(w / 2, h / 2))
             Glyph.Plus -> { drawRect(color, Offset(w * .44f, h * .12f), Size(w * .12f, h * .76f)); drawRect(color, Offset(w * .12f, h * .44f), Size(w * .76f, h * .12f)) }
