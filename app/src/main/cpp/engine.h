@@ -74,6 +74,9 @@ public:
     Engine();
     ~Engine();
     bool start();
+    /** Track ids are never reused while the app runs (a project switch removes every track); this starts again at 1 once none is left. */
+    int trackIdsUsed() const { return nextTrackId_ - 1; }
+    bool resetTrackIds();
     /** Audio output settings, used by the next start(): AAudio device id (0 = automatic), buffer = this many bursts, exclusive mode. */
     void configure(int outDevice, int bufferMult, bool exclusive) { outDevice_ = outDevice; bufferMult_ = std::clamp(bufferMult, 2, 8); exclusive_ = exclusive; }
     void stop();

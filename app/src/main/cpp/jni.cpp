@@ -10,6 +10,8 @@ static std::string str(JNIEnv* env, jstring s) { const char* c = env->GetStringU
 
 J(jboolean, start) { return eng().start(); }
 J(void, stop) { eng().stop(); }
+J(jint, trackIdsUsed) { return eng().trackIdsUsed(); }
+J(jboolean, resetTrackIds) { return eng().resetTrackIds(); }
 J(void, configure, jint outDevice, jint bufferMult, jboolean exclusive) { eng().configure(outDevice, bufferMult, exclusive); }
 J(jint, addTrack) { return eng().addTrack(); }
 J(jboolean, removeTrack, jint id) { return eng().removeTrack(id); }

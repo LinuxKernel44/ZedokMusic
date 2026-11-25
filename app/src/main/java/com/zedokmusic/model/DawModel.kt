@@ -13,8 +13,10 @@ enum class TrackKind { Instrument, Audio }
 /** A MIDI note. Positions are in beats (quarter notes) so the arrangement survives tempo changes. */
 class NoteM(val pitch: Int, val start: Float, val length: Float, val velocity: Int = 100)
 
-class ClipM(val engineId: Int, val path: String, val name: String, start: Float, val lengthFrames: Long) {
+class ClipM(val engineId: Int, path: String, val name: String, start: Float, val lengthFrames: Long) {
     var start by mutableFloatStateOf(start)  // beats
+    /** The WAV file; changes when the project is renamed, saved as another project or its samples are collected. */
+    var path by androidx.compose.runtime.mutableStateOf(path)
 }
 
 class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, val pluginPath: String?) {

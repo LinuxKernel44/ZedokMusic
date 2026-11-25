@@ -39,6 +39,11 @@ template <class F> void Engine::edit(F&& f) {
     f(*p);
     publish(std::move(p));
 }
+bool Engine::resetTrackIds() {
+    bool ok = false;
+    edit([&](Project& p) { if (p.tracks.empty()) { nextTrackId_ = 1; ok = true; } });
+    return ok;
+}
 int Engine::addTrack() {
     int id = 0;
     edit([&](Project& p) {

@@ -27,6 +27,8 @@ fun PluginPanel(vm: DawViewModel) {
         return
     }
     val editor = t.editorOpen
+    var presetsOpen by remember(t.id) { mutableStateOf(false) }
+    if (presetsOpen) PresetsDialog(vm, t) { presetsOpen = false }
     val short = LocalShort.current
     var keys by remember(t.id) { mutableStateOf(false) }
     var query by remember(t.id) { mutableStateOf("") }
@@ -43,6 +45,7 @@ fun PluginPanel(vm: DawViewModel) {
             }
             if (editor && !short && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 840) LabelButton(if (vm.panelExpanded) "Shrink" else "Full", vm.panelExpanded, w = 64.dp) { vm.panelExpanded = !vm.panelExpanded }
             if (editor) LabelButton("Keys", keys, w = 60.dp) { keys = !keys }
+            LabelButton("Presets", false, w = 66.dp) { presetsOpen = true }
             LabelButton("Editor", editor, w = 70.dp) { if (editor) vm.closeEditor(t) else vm.openEditor(t) }
             if (!editor) LabelButton("Changed", onlyChanged, w = 76.dp) { onlyChanged = !onlyChanged }
         }
@@ -68,8 +71,8 @@ fun PluginPanel(vm: DawViewModel) {
 
 @Composable
 private fun ParamRow(vm: DawViewModel, t: TrackM, p: ParamM) {
-    var value by remember(t.id, p.index) { mutableFloatStateOf(vm.paramValue(t, p.index)) }
-    var text by remember(t.id, p.index) { mutableStateOf(vm.paramText(t, p.index)) }
+    var value by remember(t.id, p.index, vm.paramsRevision) { mutableFloatStateOf(vm.paramValue(t, p.index)) }
+    var text by remember(t.id, p.index, vm.paramsRevision) { mutableStateOf(vm.paramText(t, p.index)) }
     val changed = t.paramOverrides.containsKey(p.index)
     LaunchedEffect(value) { delay(60); text = vm.paramText(t, p.index) }  // the host refreshes the text one block after the change
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {

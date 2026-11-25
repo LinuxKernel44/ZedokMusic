@@ -38,6 +38,7 @@ fun DawScreen(vm: DawViewModel) {
     var plugins by remember { mutableStateOf(emptyList<PluginInfo>()) }
     val sel = vm.selected
     val ctx = LocalContext.current
+    LaunchedEffect(vm.message) { if (vm.message != null) { kotlinx.coroutines.delay(4500); vm.message = null } }  // notices fade away by themselves
     fun begin() { vm.startRecording()?.let { vm.message = it } }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) begin() else vm.message = "Microphone permission is needed to record audio." }
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.midi.startScan() else vm.message = "Location permission is needed by Android to scan for Bluetooth devices." }
@@ -57,7 +58,7 @@ fun DawScreen(vm: DawViewModel) {
             CompositionLocalProvider(LocalShort provides short) {
             Column(Modifier.fillMaxSize()) {
                 Transport(vm, !wide && !short, short, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
-                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" }, onSettings = { showSettings = true })
+                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" }, onSettings = { showSettings = true }, onProject = { dialog = it })
                 if (short) {
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         Column(Modifier.width(74.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -106,10 +107,18 @@ fun DawScreen(vm: DawViewModel) {
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })
         "exports" -> ExportsDialog(vm) { dialog = null }
+        "new" -> NameDialog("New project", "Untitled", "Create", "Your current project is saved first.", { vm.newProject(it) }, { dialog = null })
+        "open" -> ProjectsDialog(vm) { dialog = null }
+        "saveas" -> NameDialog("Save as", vm.projectName, "Save", "Creates a new project folder with a copy of this project's samples and presets.", { vm.saveAs(it) }, { dialog = null })
+        "rename" -> NameDialog("Rename project", vm.projectName, "Rename", null, { vm.renameProject(it) }, { dialog = null })
+        "version" -> { LaunchedEffect(Unit) { vm.saveNewVersion(); dialog = null } }
+        "collect" -> { LaunchedEffect(Unit) { vm.collectSamples(); dialog = null } }
+        "info" -> ProjectInfoDialog(vm) { dialog = null }
         "installers" -> InstallersDialog(vm, { importPicker.launch(arrayOf("*/*")) }, { dialog = null })
         "export" -> ExportDialog(vm.loopBars, { r, f, n, st -> vm.exportAudio(r, f, n, st) }, { dialog = null })
     }
     if (vm.exporting) ExportingDialog()
+    if (vm.projectBusy) AlertDialog(onDismissRequest = {}, containerColor = Zk.panel, title = { Text("Opening project…") }, text = { LinearProgressIndicator(Modifier.fillMaxWidth()) }, confirmButton = {})
     InstallerScreen(vm)
     if (showSettings) SettingsScreen(vm) { showSettings = false }
     DisplaySettingsEffect(vm.playing)
@@ -144,7 +153,7 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit, onSettings: () -> Unit) {
+private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit, onSettings: () -> Unit, onProject: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     // Phones: tighter sizes so the whole transport (stop, play, loop, rec, position, tempo) fits even on dense, narrow screens.
     val bs = if (compact || oneRow) 36.dp else 40.dp
@@ -161,7 +170,26 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
             Text("%.0f".format(vm.bpm) + " BPM", color = Zk.text, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
         }
     }
+    var fileMenu by remember { mutableStateOf(false) }
     val tools: @Composable RowScope.() -> Unit = {
+        Box {
+            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable { fileMenu = true }.padding(horizontal = 12.dp, vertical = 9.dp)) { Text("File", color = Zk.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+            DropdownMenu(fileMenu, { fileMenu = false }) {
+                DropdownMenuItem(text = { Text("New project…") }, onClick = { fileMenu = false; onProject("new") })
+                DropdownMenuItem(text = { Text("Open project…") }, onClick = { fileMenu = false; onProject("open") })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Save") }, onClick = { fileMenu = false; onSave() })
+                DropdownMenuItem(text = { Text("Save as…") }, onClick = { fileMenu = false; onProject("saveas") })
+                DropdownMenuItem(text = { Text("Save new version") }, onClick = { fileMenu = false; onProject("version") })
+                DropdownMenuItem(text = { Text("Rename project…") }, onClick = { fileMenu = false; onProject("rename") })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Export audio…") }, onClick = { fileMenu = false; onExport() })
+                DropdownMenuItem(text = { Text("Exported files…") }, onClick = { fileMenu = false; onExports() })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Collect samples into project") }, onClick = { fileMenu = false; onProject("collect") })
+                DropdownMenuItem(text = { Text("Project info & backups…") }, onClick = { fileMenu = false; onProject("info") })
+            }
+        }
         Box {
             Row(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.accent.copy(alpha = .2f)).clickable { menu = true }.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 GlyphIcon(Glyph.Plus, Zk.accent, 16.dp); Text("Add", color = Zk.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -170,10 +198,6 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
                 DropdownMenuItem(text = { Text("Instrument track (VST3)…") }, onClick = { menu = false; onAddInstrument() })
                 DropdownMenuItem(text = { Text("Audio track") }, onClick = { menu = false; onAddAudio() })
                 DropdownMenuItem(text = { Text("Install plugin (.exe)…") }, onClick = { menu = false; onInstallers() })
-                HorizontalDivider()
-                DropdownMenuItem(text = { Text("Save project") }, onClick = { menu = false; onSave() })
-                DropdownMenuItem(text = { Text("Export audio…") }, onClick = { menu = false; onExport() })
-                DropdownMenuItem(text = { Text("Exported files…") }, onClick = { menu = false; onExports() })
             }
         }
         SquareButton(Glyph.Keys, active = keys, size = 38.dp, onClick = onKeys)
@@ -185,7 +209,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
             Text("${vm.loopBars} bars", color = Zk.dim, fontSize = 12.sp, maxLines = 1)
             SquareButton(Glyph.Plus, size = 30.dp) { vm.changeLoopBars(vm.loopBars + 1) }
         }
-        if (!compact) Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1, softWrap = false)
+        if (!compact) Text(vm.projectName + " · " + vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1, softWrap = false)
     }
     Column(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = if (oneRow) 3.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
@@ -194,6 +218,6 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
         }
         if (compact) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { tools() }
         // Phones: the engine status gets its own line so it is never cut off.
-        if (compact) Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+        if (compact) Text(vm.projectName + " · " + vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
     }
 }

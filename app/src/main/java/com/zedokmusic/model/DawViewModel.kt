@@ -26,12 +26,18 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val e = NativeEngine
     private val host = PluginHost(app)
     val workspace: File? = StorageFolder.saved(app)
-    private val projectName = "Untitled"
-    private val projectFile get() = workspace?.let { File(it, "Projects/$projectName.zedok") }
-    /** This project's own folder, next to its .zedok file: Projects/<name>/ (samples, recordings). */
-    fun projectDir(): File? = workspace?.let { File(it, "Projects/$projectName") }
-    /** Samples that belong to this project: imports and recordings are stored here, not in the shared library. */
-    fun projectSamplesDir(): File? = projectDir()?.let { File(it, "Samples") }
+    /** Project folders (FL Studio style: one folder per project, see [ProjectStore]). */
+    val store: ProjectStore? = workspace?.let { ProjectStore(it).also { s -> s.root.mkdirs(); s.migrateLegacy() } }
+    private val prefs = app.getSharedPreferences("zedok", 0)
+    var projectName by mutableStateOf(store?.let { s -> prefs.getString("project", null)?.takeIf { s.exists(it) } ?: s.list().firstOrNull()?.name } ?: "Untitled"); private set
+    /** True while another project is being opened. */
+    var projectBusy by mutableStateOf(false); private set
+    private val projectFile get() = store?.file(projectName)
+    fun projectDir(): File? = store?.dir(projectName)
+    /** Samples that belong to this project: imports and recordings are stored here, not in a shared library. */
+    fun projectSamplesDir(): File? = store?.samples(projectName)
+    fun projectExportsDir(): File? = store?.exports(projectName)
+    fun projectPresetsDir(): File? = store?.presets(projectName)
 
     val tracks = mutableStateListOf<TrackM>()
     var bpm by mutableFloatStateOf(120f); private set
@@ -118,6 +124,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val pendingLanes = HashMap<Int, List<Pair<String, List<AutoPoint>>>>()
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
     init {
+        store?.create(projectName)
         e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
         engineOk = e.start()
         midi.autoConnect = { AppSettings.midiAuto.on }
@@ -417,7 +424,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
      * 3 = AAC (.m4a, 256 kbps), 4/5 = FLAC 16/24-bit, 6/7 = MP3 320/192 kbps. [stems]: one file per track instead of the mix.
      */
     fun exportAudio(range: Int, format: Int, name: String, stems: Boolean) {
-        val dir = workspace?.let { File(it, "Exports") } ?: run { message = "No workspace folder."; return }
+        val dir = projectExportsDir() ?: run { message = "No workspace folder."; return }
         if (exporting) return
         val to = if (range == 1) (loopBars * 4 * fpb).toLong()
             else (tracks.maxOfOrNull { it.lengthBeats(bpm) }?.let { (it * fpb).toLong() + 2 * 48000L } ?: 0L)
@@ -449,12 +456,24 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Files in the workspace's Exports folder, newest first. */
-    fun exportedFiles(): List<File> = workspace?.let { File(it, "Exports") }?.listFiles { f -> f.isFile && f.extension.lowercase() in setOf("wav", "flac", "mp3", "m4a") }
-        ?.sortedByDescending { it.lastModified() } ?: emptyList()
+    private val audioExt = setOf("wav", "flac", "mp3", "m4a")
+    /** This project's rendered files, then those left in the old shared Exports folder; newest first within each. */
+    fun exportedFiles(): List<File> {
+        fun list(d: File?) = d?.listFiles { f -> f.isFile && f.extension.lowercase() in audioExt }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        return list(projectExportsDir()) + list(workspace?.let { File(it, "Exports") })
+    }
+    fun isSharedExport(f: File) = workspace != null && f.parentFile?.canonicalPath == File(workspace, "Exports").canonicalPath
 
     // ---------- persistence ----------
     fun save() {
         val f = projectFile ?: return
+        store?.backup(projectName)
+        store?.create(projectName)
+        write(f)
+    }
+
+    /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
+    private fun write(f: File, mapPath: (String) -> String = { it }) {
         val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("loopBars", loopBars)
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble())
@@ -462,10 +481,152 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
             .put("params", JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } })
             .put("lanes", JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble()).put(p.shape)) } })) } })
-            .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", c.path).put("start", c.start.toDouble())) } }))
+            .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("start", c.start.toDouble())) } }))
         root.put("tracks", arr)
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
     }
+
+    // ---------- projects (FL Studio style: File menu) ----------
+    fun projects(): List<ProjectStore.Info> = store?.list() ?: emptyList()
+
+    /** Saves, empties the workspace and makes [name] current; the project is then loaded (or created empty). */
+    private fun switchProject(name: String, create: Boolean) {
+        if (projectBusy) return
+        projectBusy = true
+        if (recording) stopRecording()
+        e.pause(); playing = false
+        save()
+        closeCurrent()
+        projectName = name; prefs.edit().putString("project", name).apply()
+        viewModelScope.launch {
+            // Track ids are only reused after the removed tracks' plugin hosts are gone.
+            if (e.trackIdsUsed() > 100) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { kotlinx.coroutines.delay(3500) }; e.resetTrackIds() }
+            if (create) { store?.create(name); store?.file(name)?.let { write(it) } } else load()  // a new project exists on disk at once
+            selected = tracks.firstOrNull(); dirty = false; projectBusy = false
+        }
+    }
+    private fun closeCurrent() {
+        tracks.toList().forEach { removeTrack(it) }
+        bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); applyLoop()
+        pendingLanes.clear(); pendingParams.clear()
+        e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
+    }
+    fun newProject(name: String) { val s = store ?: return; switchProject(s.uniqueName(name), create = true) }
+    fun openProject(name: String) { if (name != projectName && store?.exists(name) == true) switchProject(name, create = false) }
+    /** Re-reads the current project from disk (after restoring a backup). */
+    private fun reloadCurrent() {
+        if (projectBusy) return
+        projectBusy = true; e.pause(); playing = false; closeCurrent()
+        viewModelScope.launch { load(); selected = tracks.firstOrNull(); dirty = false; projectBusy = false }
+    }
+
+    /** Pointing every clip that lives in [from] at [to] (same file name), in memory. */
+    private fun repoint(from: File, to: File) {
+        val fp = from.absolutePath + "/"
+        tracks.forEach { t -> t.clips.forEach { c -> if (c.path.startsWith(fp)) c.path = File(to, c.path.removePrefix(fp)).absolutePath } }
+    }
+
+    /** Save as: a new project folder with a copy of this project's samples and presets; it becomes the current project. */
+    fun saveAs(name: String) {
+        val s = store ?: return
+        if (projectBusy) return
+        val old = projectName; val n = s.uniqueName(name)
+        save()
+        s.create(n)
+        runCatching { s.samples(old).copyRecursively(s.samples(n), overwrite = false); s.presets(old).copyRecursively(s.presets(n), overwrite = false) }
+        val oldSamples = s.samples(old).absolutePath + "/"
+        write(s.file(n)) { p -> if (p.startsWith(oldSamples)) File(s.samples(n), p.removePrefix(oldSamples)).absolutePath else p }
+        repoint(s.samples(old), s.samples(n))
+        projectName = n; prefs.edit().putString("project", n).apply(); dirty = false
+        message = "Saved as \"$n\"."
+    }
+    /** FL Studio's "Save new version": Song -> Song_2 -> Song_3, keeping the earlier ones. */
+    fun saveNewVersion() { val s = store ?: return; saveAs(s.nextVersionName(projectName)) }
+
+    fun renameProject(name: String) {
+        val s = store ?: return
+        val n = s.sanitize(name)
+        if (n.isEmpty() || n == projectName) return
+        if (s.dir(n).exists()) { message = "A project named \"$n\" already exists."; return }
+        save()
+        val old = projectName
+        val oldDir = s.dir(old)
+        if (!oldDir.renameTo(s.dir(n))) { message = "Could not rename the project folder."; return }
+        File(s.dir(n), "$old.zedok").renameTo(s.file(n))
+        repoint(File(oldDir, "Samples"), s.samples(n))
+        projectName = n; prefs.edit().putString("project", n).apply()
+        save(); message = "Renamed to \"$n\"."
+    }
+
+    fun deleteProject(name: String) {
+        val s = store ?: return
+        if (name == projectName) { message = "Open another project first."; return }
+        s.dir(name).deleteRecursively()
+    }
+
+    /** Copies every sample used by the project that lives elsewhere into its own Samples folder. Returns how many were copied. */
+    fun collectSamples(): Int {
+        val dir = projectSamplesDir() ?: return 0
+        dir.mkdirs()
+        var n = 0
+        for (t in tracks) for (c in t.clips) {
+            val f = File(c.path)
+            if (!f.exists() || f.absolutePath.startsWith(dir.absolutePath + "/")) continue
+            var out = File(dir, f.name); var k = 2
+            while (out.exists()) out = File(dir, f.nameWithoutExtension + " ($k)." + f.extension).also { k++ }
+            runCatching { f.copyTo(out); c.path = out.absolutePath; n++ }
+        }
+        if (n > 0) { save(); samplesVersion++ }
+        message = if (n > 0) "Copied $n sample(s) into this project." else "Every sample is already in this project."
+        return n
+    }
+
+    fun backups(): List<File> = store?.listBackups(projectName) ?: emptyList()
+    /** Replaces the project with an earlier save. The current state is kept as a backup first. */
+    fun restoreBackup(f: File) {
+        val dest = projectFile ?: return
+        store?.backup(projectName, minGapMs = 0)
+        runCatching { f.copyTo(dest, overwrite = true) }.onFailure { message = "Could not restore: ${it.message}"; return }
+        reloadCurrent(); message = "Restored ${f.name}."
+    }
+
+    // ---------- plugin presets (per project) ----------
+    private fun presetDir(t: TrackM): File? = projectPresetsDir()?.let { File(it, (t.pluginName.ifBlank { t.name }).replace(Regex("[^A-Za-z0-9 _.()+-]"), "_")) }
+    fun presets(t: TrackM): List<File> = presetDir(t)?.listFiles { f -> f.isFile && f.extension == "zpreset" }?.sortedBy { it.name.lowercase() } ?: emptyList()
+
+    /** Stores every parameter that differs from its default (the plugin's own state is not exposed to the host). */
+    fun savePreset(t: TrackM, name: String): Boolean {
+        val dir = presetDir(t) ?: return false
+        val safe = name.trim().replace(Regex("[^A-Za-z0-9 _.()+-]"), "_").trim('.', ' ').take(60)
+        if (safe.isEmpty()) { message = "Give the preset a name."; return false }
+        val params = loadParams(t)
+        val vals = JSONArray()
+        for (p in params) { val v = paramValue(t, p.index); if (Math.abs(v - p.default) > 1e-4f) vals.put(JSONArray().put(p.index).put(v.toDouble())) }
+        val o = JSONObject().put("format", 1).put("plugin", t.pluginName).put("params", params.size).put("values", vals)
+        return try { dir.mkdirs(); File(dir, "$safe.zpreset").writeText(o.toString()); message = "Preset \"$safe\" saved in this project."; true } catch (ex: Exception) { message = "Could not save the preset: ${ex.message}"; false }
+    }
+    fun deletePreset(f: File) { f.delete() }
+    /** Bumped when parameters change behind the sliders' back (a preset was loaded) so the parameter list re-reads them. */
+    var paramsRevision by mutableIntStateOf(0); private set
+    /** Applies a preset: listed parameters get their values, all others return to their defaults. Sent in small batches (the engine's queue is short). */
+    fun loadPreset(t: TrackM, f: File) {
+        val o = try { JSONObject(f.readText()) } catch (ex: Exception) { message = "Could not read the preset."; return }
+        val params = loadParams(t)
+        if (o.optInt("params", params.size) != params.size) { message = "This preset is for a different version of the plugin."; return }
+        val stored = HashMap<Int, Float>(); o.getJSONArray("values").let { a -> for (i in 0 until a.length()) a.getJSONArray(i).let { x -> stored[x.getInt(0)] = x.getDouble(1).toFloat() } }
+        viewModelScope.launch {
+            var sent = 0
+            for (p in params) {
+                val target = stored[p.index] ?: p.default
+                if (Math.abs(paramValue(t, p.index) - target) < 1e-4f) continue
+                e.setParam(t.id, p.index, target)
+                if (Math.abs(target - p.default) > 1e-4f) t.paramOverrides[p.index] = target else t.paramOverrides.remove(p.index)
+                if (++sent % 64 == 0) kotlinx.coroutines.delay(25)
+            }
+            paramsRevision++; dirty = true; message = "Loaded preset \"${f.nameWithoutExtension}\"."
+        }
+    }
+
     private fun load() {
         val f = projectFile ?: return
         if (!f.exists()) return

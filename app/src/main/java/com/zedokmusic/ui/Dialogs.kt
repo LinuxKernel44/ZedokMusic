@@ -123,7 +123,7 @@ fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String
             Text("Content", color = Zk.dim, fontSize = 12.sp)
             option("Full mix", !stems) { stems = false }
             option("Each track separately (stems)", stems) { stems = true }
-            Text("Saved in the Exports folder of your workspace.", color = Zk.dim, fontSize = 11.sp)
+            Text("Saved in this project's Exports folder.", color = Zk.dim, fontSize = 11.sp)
         }
     }, confirmButton = { TextButton({ com.zedokmusic.settings.AppSettings.exportFormat.set(format); onExport(range, format, name, stems); onDismiss() }) { Text("Export") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
@@ -159,12 +159,12 @@ fun ExportsDialog(vm: com.zedokmusic.model.DawViewModel, onDismiss: () -> Unit) 
         runCatching { ctx.startActivity(android.content.Intent.createChooser(send, "Share ${f.name}")) }.onFailure { vm.message = "No app can receive this file." }
     }
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Exported files") }, text = {
-        if (files.isEmpty()) Text("Nothing exported yet. Use Add → Export audio….", color = Zk.dim, fontSize = 13.sp)
+        if (files.isEmpty()) Text("Nothing exported yet. Use File → Export audio….", color = Zk.dim, fontSize = 13.sp)
         else LazyColumn(Modifier.heightIn(max = dialogListMax(420.dp))) {
             items(files, key = { it.absolutePath }) { f ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Text(f.name, color = Zk.text, fontSize = 14.sp, maxLines = 1)
-                    Text("%.1f MB · %s".format(f.length() / 1048576.0, java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(f.lastModified())), color = Zk.dim, fontSize = 11.sp)
+                    Text("%.1f MB · %s".format(f.length() / 1048576.0, java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(f.lastModified())) + if (vm.isSharedExport(f)) " · shared folder (older)" else "", color = Zk.dim, fontSize = 11.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton({ toggle(f) }) { Text(if (playing == f) "Stop" else "Play") }
                         TextButton({ share(f) }) { Text("Share") }
