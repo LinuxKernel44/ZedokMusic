@@ -106,6 +106,9 @@ public:
     /** Track ids are never reused while the app runs (a project switch removes every track); this starts again at 1 once none is left. */
     int trackIdsUsed() const { return nextTrackId_ - 1; }
     bool resetTrackIds();
+    /** A removed plugin's host only ends when its bridge is freed, i.e. when the audio thread has moved past every older snapshot
+     *  that still holds it. Without another edit that never happened: publish no-op versions (in the background) until it did. */
+    void releaseRetired();
     /** Audio output settings, used by the next start(): AAudio device id (0 = automatic), buffer = this many bursts, exclusive mode. */
     void configure(int outDevice, int bufferMult, bool exclusive) { outDevice_ = outDevice; bufferMult_ = std::clamp(bufferMult, 2, 8); exclusive_ = exclusive; }
     void stop();
@@ -234,6 +237,7 @@ private:
     std::atomic<int64_t> callbacks_{0};
     int outDevice_ = 0, bufferMult_ = 2; bool exclusive_ = true;  // see configure()
     std::atomic<int> panicAll_{0}, panicTrack_[kMaxTracks];  // blocks of ALL_NOTES_OFF still to send (see pause() / panic())
+    std::atomic<int> releasePending_{0};
     std::atomic<bool> exporting_{false};  // offline render owns the plugin bridges: the audio callback stays away from them
     std::atomic<int64_t> cbNsTotal_{0};
     std::atomic<int64_t> cbNsMax_{0};

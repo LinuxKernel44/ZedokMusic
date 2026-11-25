@@ -15,6 +15,7 @@ J(jboolean, removeFx, jint id) { return eng().removeFx(id); }
 J(jboolean, moveFx, jint id, jint index) { return eng().moveFx(id, index); }
 J(jboolean, setFxBypass, jint id, jboolean bypass) { return eng().setFxBypass(id, bypass); }
 J(jint, pluginKind, jint id) { return eng().pluginKind(id); }
+J(void, releaseRetired) { eng().releaseRetired(); }
 J(void, panic, jint track) { eng().panic(track); }
 J(jint, trackIdsUsed) { return eng().trackIdsUsed(); }
 J(jboolean, resetTrackIds) { return eng().resetTrackIds(); }

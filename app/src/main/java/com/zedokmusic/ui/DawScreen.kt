@@ -35,6 +35,8 @@ fun DawScreen(vm: DawViewModel) {
     var octave by rememberSaveable { mutableIntStateOf(3) }
     var ppb by vm::ppb   // saved with the project
     var dialog by remember { mutableStateOf<String?>(null) }
+    // A new project starts from the default layout: Tracks tab, no on-screen keys, default octave.
+    LaunchedEffect(vm.newProjectRevision) { if (vm.newProjectRevision > 0) { panel = Panel.Arrange; bottom = Panel.Piano; showKeys = false; octave = 3 } }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showUpdate by remember { mutableStateOf(false) }
     // Once per start-up (and at most once a day): look for a newer version quietly, then offer it.

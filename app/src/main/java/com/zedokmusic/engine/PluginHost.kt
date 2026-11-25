@@ -92,6 +92,7 @@ class PluginHost(private val ctx: Context) {
 
     fun stop(track: Int) {
         NativeEngine.detachPlugin(track)  // the bridge sets quit once its last snapshot is retired
+        NativeEngine.releaseRetired()
         synchronized(processes) { processes.remove(track) }?.let { p -> Thread { if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly() }.start() }
     }
 

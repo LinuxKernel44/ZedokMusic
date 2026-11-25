@@ -625,7 +625,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun closeCurrent() {
         tracks.toList().forEach { removeTrack(it) }
         masterFx.toList().forEach { removeEffect(null, it) }
-        pluginTarget = null
+        pluginTarget = null; panelExpanded = false
+        editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
         bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); applyLoop()
         pendingLanes.clear(); pendingParams.clear()
@@ -633,7 +634,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     /** The name pre-filled when creating or saving a project (the user can type anything else). */
     fun suggestProjectName(): String = store?.nextProjectName() ?: "Project_1"
-    fun newProject(name: String) { val s = store ?: return; switchProject(s.uniqueName(name), create = true) }
+    /** Bumped for each new project: the screen then goes back to its starting layout (tab, on-screen keys, octave). */
+    var newProjectRevision by mutableIntStateOf(0); private set
+    fun newProject(name: String) { val s = store ?: return; newProjectRevision++; switchProject(s.uniqueName(name), create = true) }
     fun openProject(name: String) { if (name != projectName && store?.exists(name) == true) switchProject(name, create = false) }
     /** Re-reads the current project from disk (after restoring a backup). */
     private fun reloadCurrent() {

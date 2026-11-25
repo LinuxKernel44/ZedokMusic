@@ -42,6 +42,16 @@ template <class F> void Engine::edit(F&& f) {
     f(*p);
     publish(std::move(p));
 }
+void Engine::releaseRetired() {
+    if (releasePending_.fetch_add(1) > 0) return;  // a worker is already running: it will see the counter and go round once more
+    std::thread([this]() {
+        int again;
+        do {
+            for (int i = 0; i < 10; i++) { edit([](Project&) {}); std::this_thread::sleep_for(std::chrono::milliseconds(15)); }
+            again = releasePending_.fetch_sub(1) - 1;
+        } while (again > 0);
+    }).detach();
+}
 bool Engine::resetTrackIds() {
     bool ok = false;
     edit([&](Project& p) { if (p.tracks.empty()) { nextTrackId_ = 1; ok = true; } });
