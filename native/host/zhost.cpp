@@ -207,7 +207,53 @@ static int probe(const char* path, const char* outFile) {
     return 0;
 }
 
+// `zhost.exe --edit <plugin.vst3>`: opens the plugin's own editor in a normal window and nothing else (no audio, no bridge), for the
+// Windows desktop: activating a licence, choosing a data folder, anything a plugin asks once. Returns when the window is closed.
+static LRESULT CALLBACK editProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_CLOSE) { DestroyWindow(h); return 0; }
+    if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    return DefWindowProcA(h, m, w, l);
+}
+static int editPlugin(const char* path) {
+    FreeConsole();  // zhost is a console program: no console window in the desktop
+    static ZkBridge dummy; gB = &dummy;  // the editor callbacks write into the bridge: give them a private one
+    HMODULE m = LoadLibraryA(path);
+    if (!m) { MessageBoxA(nullptr, "The plugin could not be loaded.", "ZedokMusic", MB_OK); return 20; }
+    typedef bool (*InitFn)(); if (auto init = (InitFn)GetProcAddress(m, "InitDll")) init();
+    typedef IPluginFactory* (*FactoryFn)(); auto gf = (FactoryFn)GetProcAddress(m, "GetPluginFactory");
+    IPluginFactory* fac = gf ? gf() : nullptr;
+    if (!fac) { MessageBoxA(nullptr, "This is not a VST3 plugin.", "ZedokMusic", MB_OK); return 21; }
+    TUID cid = {}; char name[64] = "Plugin"; bool found = false;
+    for (int i = 0; i < fac->countClasses() && !found; i++) { PClassInfo ci; fac->getClassInfo(i, &ci); if (!strcmp(ci.category, kVstAudioEffectClass)) { memcpy(cid, ci.cid, 16); snprintf(name, sizeof name, "%s", ci.name); found = true; } }
+    if (!found) { MessageBoxA(nullptr, "No audio plugin found in this file.", "ZedokMusic", MB_OK); return 22; }
+    HostApp host; IComponent* comp = nullptr;
+    if (fac->createInstance(cid, IComponent::iid, (void**)&comp) != kResultOk || !comp || comp->initialize(&host) != kResultOk) { MessageBoxA(nullptr, "The plugin did not start.", "ZedokMusic", MB_OK); return 23; }
+    IEditController* ctrl = nullptr;
+    if (comp->queryInterface(IEditController::iid, (void**)&ctrl) != kResultOk || !ctrl) {
+        TUID cc = {};
+        if (comp->getControllerClassId(cc) == kResultOk && fac->createInstance(cc, IEditController::iid, (void**)&ctrl) == kResultOk && ctrl) ctrl->initialize(&host); else ctrl = nullptr;
+    }
+    if (!ctrl) { MessageBoxA(nullptr, "This plugin has no editor.", "ZedokMusic", MB_OK); return 24; }
+    gCtrl = ctrl; ctrl->setComponentHandler(&gHandler);
+    IPlugView* view = ctrl->createView(ViewType::kEditor); ViewRect r{};
+    if (!view || view->isPlatformTypeSupported(kPlatformTypeHWND) != kResultTrue || view->getSize(&r) != kResultOk) { MessageBoxA(nullptr, "This plugin cannot show its editor.", "ZedokMusic", MB_OK); return 25; }
+    WNDCLASSA wc{}; wc.lpfnWndProc = editProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "ZedokPluginWindow"; wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH); wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    RegisterClassA(&wc);
+    const int w = std::max(1, (int)(r.right - r.left)), h = std::max(1, (int)(r.bottom - r.top));
+    RECT rc{0, 0, w, h}; AdjustWindowRect(&rc, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE);
+    char title[160]; snprintf(title, sizeof title, "%s (plugin)", name);
+    HWND hwnd = CreateWindowExA(0, "ZedokPluginWindow", title, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, 16, 16, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, wc.hInstance, nullptr);
+    Frame frame; frame.hwnd = hwnd; view->setFrame(&frame);
+    if (!hwnd || view->attached(hwnd, kPlatformTypeHWND) != kResultOk) { MessageBoxA(nullptr, "The editor could not be attached.", "ZedokMusic", MB_OK); return 26; }
+    ViewRect nr{0, 0, w, h}; view->onSize(&nr);
+    MSG msg; while (GetMessageA(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageA(&msg); }
+    view->setFrame(nullptr); view->removed(); view->release();
+    fflush(stdout); TerminateProcess(GetCurrentProcess(), 0);  // skip the plugin's DLL teardown
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc >= 3 && !strcmp(argv[1], "--edit")) return editPlugin(argv[2]);
     if (argc >= 4 && !strcmp(argv[1], "--probe")) return probe(argv[2], argv[3]);
     if (argc < 3) { fprintf(stderr, "usage: zhost plugin.vst3 bridge-file\n"); return 2; }
     // --- map the bridge ---

@@ -119,12 +119,13 @@ class PluginHost(private val ctx: Context) {
     }
 
     /** Starts the desktop (Wine explorer + the taskbar) on an X screen of [w] x [h]. Every plugin host must be stopped first. Blocking. */
-    fun startDesktop(w: Int, h: Int): Boolean {
+    fun startDesktop(w: Int, h: Int, pluginPath: String? = null): Boolean {
         ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
         gui.reset()
         if (!gui.ensureRunning(w, h)) return false
         val shell = toWinPath(ensureShellExe().absolutePath)
-        val pb = env.wine(*(gui.desktopArgs("zdesk", w, h) + arrayOf(shell)), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
+        val extra = if (pluginPath != null) arrayOf("--edit", toWinPath(pluginPath)) else emptyArray()  // open this plugin's editor first
+        val pb = env.wine(*(gui.desktopArgs("zdesk", w, h) + arrayOf(shell) + extra), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
         pb.directory(File(files, "home")); pb.redirectOutput(File(files, "desktop.log"))
         desktop = try { pb.start() } catch (e: Exception) { return false }
         return true

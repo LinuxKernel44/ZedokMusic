@@ -8,7 +8,7 @@
 
 #define BAR_H 56
 #define TIMER_ID 1
-enum { CMD_FILES = 1, CMD_REGEDIT, CMD_TASKMGR, CMD_NOTEPAD, CMD_CONTROL, CMD_CONSOLE, CMD_WINECFG, CMD_RUN, CMD_UNINSTALL, CMD_WORDPAD, CMD_INSTALLERS, CMD_VST3, CMD_REFRESH };
+enum { CMD_FILES = 1, CMD_REGEDIT, CMD_TASKMGR, CMD_NOTEPAD, CMD_CONTROL, CMD_CONSOLE, CMD_WINECFG, CMD_RUN, CMD_UNINSTALL, CMD_WORDPAD, CMD_INSTALLERS, CMD_VST3, CMD_REFRESH, CMD_PLUGIN };
 
 static HWND gBar; static HFONT gFont, gBold;
 static int gScreenW, gScreenH;
@@ -31,6 +31,13 @@ static void runFileDialog(const char* startDir) {
     if (ext && !_stricmp(ext, ".msi")) snprintf(cmd, sizeof cmd, "msiexec /i \"%s\"", file); else snprintf(cmd, sizeof cmd, "\"%s\"", file);
     STARTUPINFOA si = { sizeof si }; PROCESS_INFORMATION pi;
     if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, dir, &si, &pi)) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+}
+static void openPluginDialog(void) {
+    char file[MAX_PATH] = ""; OPENFILENAMEA o = { sizeof o };
+    o.hwndOwner = gBar; o.lpstrFilter = "VST3 plugins\0*.vst3\0All files\0*.*\0"; o.lpstrFile = file; o.nMaxFile = MAX_PATH;
+    o.lpstrInitialDir = "D:\\Plugins\\VST3"; o.lpstrTitle = "Open a plugin"; o.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameA(&o)) return;
+    char cmd[1200]; snprintf(cmd, sizeof cmd, "E:\\zhost.exe --edit \"%s\"", file); run(cmd);
 }
 static void openFolder(const char* path) { char c[600]; snprintf(c, sizeof c, "winefile \"%s\"", path); run(c); }
 
@@ -89,6 +96,7 @@ static void startMenu(HWND h) {
     AppendMenuA(m, MF_STRING, CMD_WINECFG, "Wine configuration");
     AppendMenuA(m, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m, MF_STRING, CMD_RUN, "Run a program or installer...");
+    AppendMenuA(m, MF_STRING, CMD_PLUGIN, "Open a plugin (licence, setup)...");
     AppendMenuA(m, MF_STRING, CMD_INSTALLERS, "Open the Installers folder");
     AppendMenuA(m, MF_STRING, CMD_VST3, "Open the VST3 folder");
     POINT p = { gStart.left, 0 }; ClientToScreen(h, &p);
@@ -106,6 +114,7 @@ static void startMenu(HWND h) {
     case CMD_UNINSTALL: run("uninstaller"); break;
     case CMD_WINECFG: run("winecfg"); break;
     case CMD_RUN: runFileDialog("D:\\"); break;
+    case CMD_PLUGIN: openPluginDialog(); break;
     case CMD_INSTALLERS: openFolder("D:\\Installers"); break;
     case CMD_VST3: openFolder("C:\\Program Files\\Common Files\\VST3"); break;
     }
@@ -142,7 +151,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     gBar = CreateWindowExA(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, "ZedokShellBar", "Taskbar", WS_POPUP | WS_VISIBLE, 0, gScreenH - BAR_H, gScreenW, BAR_H, NULL, NULL, inst, NULL);
     RECT wa = { 0, 0, gScreenW, gScreenH - BAR_H }; SystemParametersInfoA(SPI_SETWORKAREA, 0, &wa, SPIF_SENDCHANGE);  // maximised windows stop above the bar
     SetTimer(gBar, TIMER_ID, 500, NULL);
-    run("winefile");  // something to see and use on first open
+    // `zshell.exe --edit <plugin.vst3>` (from the app) opens that plugin's editor first; otherwise the file manager.
+    if (cmd && strstr(cmd, "--edit ")) { char c[1200]; const char* p = strstr(cmd, "--edit ") + 7; while (*p == ' ') p++; snprintf(c, sizeof c, "E:\\zhost.exe --edit %s", p); run(c); }
+    else run("winefile");
     MSG msg; while (GetMessageA(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessageA(&msg); }
     return 0;
 }
