@@ -54,7 +54,7 @@ fun DawScreen(vm: DawViewModel) {
     }
     fun onScan() { if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) vm.midi.startScan() else locPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
 
-    Box(Modifier.fillMaxSize().background(Zk.bg).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+    Box(Modifier.fillMaxSize().background(Zk.bg).windowInsetsPadding(screenInsets()).imePadding()) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 840.dp
             // Landscape on a phone: ~380 dp of height. One-row transport, vertical tab rail, denser panels.

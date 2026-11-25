@@ -61,7 +61,7 @@ fun InstallerScreen(vm: DawViewModel) {
     var confirmStop by remember { mutableStateOf(false) }
     BackHandler { if (vm.installerRunning) confirmStop = true else vm.closeInstaller() }
     Surface(Modifier.fillMaxSize(), color = Zk.bg) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(screenInsets())) {
             Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(name, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

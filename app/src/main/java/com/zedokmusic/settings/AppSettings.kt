@@ -44,6 +44,7 @@ object AppSettings {
     val keepOn = s("display.keepon", 0)            // 0 never, 1 while playing, 2 always
     val orientation = s("display.orientation", 0)  // 0 automatic, 1 portrait, 2 landscape
     val immersive = b("display.immersive", false)
+    val ignoreCutout = b("display.cutout", false)  // draw under the notch / camera cutout
 
     val SNAP_BEATS = floatArrayOf(0.125f, 0.25f, 0.5f, 1f)
     val SNAP_LABELS = listOf("1/32", "1/16", "1/8", "1/4")

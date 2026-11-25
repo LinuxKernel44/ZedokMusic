@@ -39,7 +39,7 @@ fun SettingsScreen(vm: DawViewModel, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
     var section by rememberSaveable { mutableStateOf(Section.Audio) }
     Surface(Modifier.fillMaxSize(), color = Zk.bg) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(screenInsets())) {
             Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SquareButton(Glyph.Close, size = 36.dp, onClick = onClose)
                 Text("Settings", color = Zk.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -189,6 +189,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
     ChoiceRow("Keep the screen on", "Stops the screen from turning off.", listOf("Never", "While playing", "Always"), AppSettings.keepOn.value) { AppSettings.keepOn.set(it) }
     ChoiceRow("Orientation", "Landscape gives the arrangement and the plugin windows more room.", listOf("Automatic", "Portrait", "Landscape"), AppSettings.orientation.value) { AppSettings.orientation.set(it) }
     SwitchRow("Full screen", "Hides the status and navigation bars (swipe from the edge to bring them back).", AppSettings.immersive)
+    SwitchRow("Use the whole screen (ignore the notch)", "Draws under the camera cutout instead of leaving a black bar beside it. Something may be hidden behind the notch.", AppSettings.ignoreCutout)
 }
 
 private fun dirSize(f: File): Long = if (!f.exists()) 0 else f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -270,11 +271,20 @@ private fun shareDiagnostics(ctx: Context, vm: DawViewModel) {
 @Composable
 fun DisplaySettingsEffect(playing: Boolean) {
     val activity = LocalContext.current as? android.app.Activity ?: return
+    val cut = AppSettings.ignoreCutout.on
     val keep = AppSettings.keepOn.value; val orient = AppSettings.orientation.value; val full = AppSettings.immersive.on
     DisposableEffect(keep, playing) {
         val on = keep == 2 || (keep == 1 && playing)
         if (on) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+    LaunchedEffect(cut) {
+        // Let the window extend into the cutout: short edges (API 28+), or always, also on a long edge, from API 30.
+        val a = activity.window.attributes
+        a.layoutInDisplayCutoutMode = if (!cut) android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            else if (android.os.Build.VERSION.SDK_INT >= 30) android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        activity.window.attributes = a
     }
     LaunchedEffect(orient) {
         activity.requestedOrientation = when (orient) { 1 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT; 2 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }

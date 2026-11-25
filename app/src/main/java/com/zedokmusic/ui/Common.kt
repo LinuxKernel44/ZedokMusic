@@ -6,6 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -74,6 +77,13 @@ fun LabelButton(text: String, active: Boolean = false, activeColor: Color = Zk.a
 fun beatLabel(beat: Float): String {
     val bar = (beat / 4f).toInt() + 1; val b = (beat % 4f).toInt() + 1; val t = (((beat % 1f) * 100f).toInt()).coerceIn(0, 99)
     return "%03d.%d.%02d".format(bar, b, t)
+}
+
+/** Insets the screens keep clear of: system bars, and the notch unless "Use the whole screen" is on. */
+@Composable
+fun screenInsets(): androidx.compose.foundation.layout.WindowInsets {
+    val bars = androidx.compose.foundation.layout.WindowInsets.systemBars
+    return if (com.zedokmusic.settings.AppSettings.ignoreCutout.on) bars else bars.union(androidx.compose.foundation.layout.WindowInsets.displayCutout)
 }
 
 /** True in landscape on a phone: little vertical room, so every panel uses denser rows. */
