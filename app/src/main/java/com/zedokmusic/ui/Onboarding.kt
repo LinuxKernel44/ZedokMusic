@@ -45,7 +45,13 @@ fun Onboarding(autoFolder: File? = null, onDone: () -> Unit) {
         Thread {
             val err = RootfsInstaller.install(ctx) { progress = it }
             if (err != null) { error = err; step = Step.Error }
-            else { val f = folder; if (f != null) runSetup(f) else step = Step.ChooseFolder }
+            else {
+                val f = folder
+                // A runtime update must keep the Windows environment (the C: drive with the user's installed plugins and licences):
+                // only a missing or broken one is created again.
+                if (f != null && PrefixManager.isReady(ctx, f)) step = Step.Done
+                else if (f != null) runSetup(f) else step = Step.ChooseFolder
+            }
         }.start()
     }
     LaunchedEffect(Unit) {

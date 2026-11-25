@@ -21,7 +21,7 @@ object PrefixManager {
     fun setup(ctx: Context, workspace: File, progress: (Float, String) -> Unit): String? {
         val env = WineEnv(ctx)
         progress(0.02f, "Creating Windows environment…")
-        env.prefix.deleteRecursively()
+        env.prefix.deleteTree()  // never deleteRecursively: the prefix links d: to the whole workspace
         env.prefix.mkdirs()
         // 1) internal init
         val p = env.wine("wineboot", "-i").redirectOutput(File(ctx.filesDir, "wineboot.log")).start()
@@ -39,7 +39,8 @@ object PrefixManager {
         if (!File(internalC, "windows").isDirectory) return "Windows environment is incomplete."
         // 2) copy to the user's folder
         val target = File(workspace, "C")
-        target.deleteRecursively(); target.mkdirs()
+        // Never delete an existing C: (installed plugins, licences, saved settings): the new files are merged over it.
+        target.mkdirs()
         val total = internalC.walkTopDown().count().coerceAtLeast(1)
         var n = 0
         for (src in internalC.walkTopDown()) {
@@ -53,7 +54,7 @@ object PrefixManager {
             if (++n % 40 == 0) progress(0.42f + 0.56f * (n / total.toFloat()), "Copying Windows files to your folder…")
         }
         // 3) repoint drive_c
-        internalC.deleteRecursively()
+        internalC.deleteTree()
         Files.createSymbolicLink(File(env.prefix, "drive_c").toPath(), target.toPath())
         linkDrive(env, "d:", workspace); linkDrive(env, "e:", ctx.filesDir)
         marker(ctx).writeText("1")

@@ -29,6 +29,7 @@ import com.zedokmusic.model.DawViewModel
 import com.zedokmusic.settings.AppSettings
 import com.zedokmusic.settings.Setting
 import com.zedokmusic.update.Updater
+import com.zedokmusic.wine.deleteTree
 import com.zedokmusic.update.Updater.Phase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -256,7 +257,7 @@ private fun fmt(b: Long) = if (b >= 1L shl 30) "%.1f GB".format(b / 1073741824.0
     confirm?.let { dir ->
         AlertDialog(onDismissRequest = { confirm = null }, containerColor = Zk.panel, title = { Text("Delete everything in $dir?") },
             text = { Text("This cannot be undone.", color = Zk.dim) },
-            confirmButton = { TextButton({ ws?.let { File(it, dir).listFiles()?.forEach { f -> f.deleteRecursively() } }; confirm = null; refresh++ }) { Text("Delete", color = Zk.danger) } },
+            confirmButton = { TextButton({ ws?.let { File(it, dir).listFiles()?.forEach { f -> f.deleteTree() } }; confirm = null; refresh++ }) { Text("Delete", color = Zk.danger) } },
             dismissButton = { TextButton({ confirm = null }) { Text("Cancel") } })
     }
 }

@@ -16,7 +16,7 @@ object RootfsInstaller {
     /** Blocking. [progress] receives 0..1. Returns null on success or an error message. */
     fun install(ctx: Context, progress: (Float) -> Unit): String? {
         val env = WineEnv(ctx)
-        env.root.deleteRecursively()
+        env.root.deleteTree()
         val afd = try { ctx.assets.openFd(ASSET) } catch (e: Exception) { return "Bundled runtime is missing from this build." }
         val total = afd.length.toFloat()
         val watcher = Thread {
@@ -25,7 +25,7 @@ object RootfsInstaller {
         }.also { it.start() }
         val err = try { NativeEngine.extractTarZst(afd.parcelFileDescriptor.fd, afd.startOffset, afd.length, env.root.absolutePath) }
         finally { watcher.interrupt(); afd.close() }
-        if (err.isNotEmpty()) { env.root.deleteRecursively(); return err }
+        if (err.isNotEmpty()) { env.root.deleteTree(); return err }
         if (!env.box64.setExecutable(true) || !env.box64.canExecute()) return "Runtime extracted but Box64 is not executable."
         marker(ctx).writeText(bundledVersion(ctx))
         progress(1f)

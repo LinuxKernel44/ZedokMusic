@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.FileProvider
 import com.zedokmusic.settings.AppSettings
+import com.zedokmusic.wine.deleteTree
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
@@ -114,7 +115,7 @@ object Updater {
     }
 
     private fun dir() = File(app.cacheDir, "updates").also { it.mkdirs() }
-    fun cleanDownloads() { runCatching { File(app.cacheDir, "updates").deleteRecursively() } }
+    fun cleanDownloads() { runCatching { File(app.cacheDir, "updates").deleteTree() } }
 
     /** Downloads the APK (resuming a partial file), verifies it, and stops at [Phase.Ready]. */
     fun download() {

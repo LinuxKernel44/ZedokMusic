@@ -29,6 +29,7 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     var pluginState by mutableIntStateOf(0)
     var pluginName by mutableStateOf("")
     var meter by mutableFloatStateOf(0f)
+    var missed = 0   // consecutive checks in which the plugin's Wine process was not found
     /** Parameter values the user changed (index -> normalized value); saved with the project and re-applied when the plugin starts. */
     val paramOverrides = androidx.compose.runtime.mutableStateMapOf<Int, Float>()
     var paramNames: Map<Int, String> = emptyMap()

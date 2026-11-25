@@ -20,7 +20,16 @@ class PluginHost(private val ctx: Context) {
     /** WINEDEBUG value: a developer file `winedebug` wins, else "err+all" when verbose logging is on in Settings, else silent. */
     private fun debugChannels(): String =
         File(files, "winedebug").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null }
-            ?: if (com.zedokmusic.settings.AppSettings.wineLog.on) "err+all" else "-all"
+            ?: if (com.zedokmusic.settings.AppSettings.wineLog.on) "err+all,fixme+all" else "err+all"  // errors are always kept: they are few and explain failures
+
+    /** Where a plugin host's log goes: the workspace's Logs folder (readable with a file manager or adb), else the app's own folder. */
+    private fun hostLog(track: Int, pluginPath: String): File {
+        val ws = StorageFolder.saved(ctx)
+        val name = File(pluginPath).nameWithoutExtension.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+        val dir = ws?.let { File(it, "Logs") }?.takeIf { it.isDirectory || it.mkdirs() }
+        return if (dir != null) File(dir, "host_${track}_$name.log") else File(files, "host_$track.log")
+    }
+    private fun note(f: File, text: String) { runCatching { f.appendText("[zedok ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())}] $text\n") } }
 
     /** Maps an Android path to the Windows path Wine sees. */
     fun toWinPath(unixPath: String): String {
@@ -61,8 +70,19 @@ class PluginHost(private val ctx: Context) {
             val guiOn = guiRunning && mode == "full"  // ("kill" mode also ends up here with guiRunning = false)
             val dbg = debugChannels()
             val pb = env.wine(*(if (guiOn) gui.desktopArgs() + args else args), debug = dbg, extraEnv = if (guiOn) ({ e -> gui.wineEnv(e) }) else null)
-            val proc = pb.redirectOutput(File(files, "host_$track.log")).start()
+            val log = hostLog(track, pluginPath); log.writeText("")
+            note(log, "starting ${File(pluginPath).name} (track $track, attempt ${attempt + 1}), GUI ${if (guiOn) "on" else "off"}, WINEDEBUG=$dbg, verbose=${com.zedokmusic.settings.AppSettings.wineLog.on}")
+            val proc = pb.redirectOutput(ProcessBuilder.Redirect.appendTo(log)).start()
             synchronized(processes) { processes[track] = proc }
+            // Say in the log when the host process disappears (a crash leaves no other trace), and how far it had got.
+            Thread {
+                val t0 = System.currentTimeMillis(); var seen = false; var gone = 0
+                while (synchronized(processes) { processes[track] === proc }) {
+                    Thread.sleep(1000)
+                    if (hostRunning(track)) { seen = true; gone = 0 } else if (seen || System.currentTimeMillis() - t0 > 20000) gone++
+                    if (gone >= 3) { note(log, "the host process is gone after ${(System.currentTimeMillis() - t0) / 1000} s (plugin state ${NativeEngine.pluginState(track)}, GUI ${NativeEngine.guiState(track).firstOrNull()})"); break }
+                }
+            }.start()
             // The process started here is only a launcher when the X desktop already exists, so watch the host itself: if no
             // zhost for this bridge is running a few seconds after the start and it never became ready, start it again.
             if (attempt < 2) Thread {
@@ -83,6 +103,7 @@ class PluginHost(private val ctx: Context) {
     }
 
     /** Is a zhost for this track's bridge running? (Scans our own processes' command lines.) */
+    fun isRunning(track: Int): Boolean = hostRunning(track)
     private fun hostRunning(track: Int): Boolean {
         val tag = "bridge_$track.bin"
         return File("/proc").listFiles()?.any { d ->

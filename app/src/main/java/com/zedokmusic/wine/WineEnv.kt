@@ -21,7 +21,8 @@ class WineEnv(ctx: Context) {
         e["TMPDIR"] = File(root, "tmp").absolutePath
         e["BOX64_LD_LIBRARY_PATH"] = "${root}/opt/wine/lib/wine/x86_64-unix:${root}/usr/lib/x86_64-linux-gnu"
         e["BOX64_PATH"] = "${root}/opt/wine/bin"
-        e["BOX64_LOG"] = "0"
+        e["BOX64_LOG"] = File(files, "box64log").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null } ?: "0"  // developer aid: a file holding the value (1 = loaded libraries)
+        e["BOX64_SHOWSEGV"] = "1"  // a crash in emulated code is then written to the plugin log
         e["BOX64_DYNAREC"] = "1"
         e["WINEPREFIX"] = prefix.absolutePath
         e["WINEDEBUG"] = debug

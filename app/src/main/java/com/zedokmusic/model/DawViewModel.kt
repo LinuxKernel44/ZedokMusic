@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zedokmusic.settings.AppSettings
+import com.zedokmusic.wine.deleteTree
 import com.zedokmusic.engine.NativeEngine
 import com.zedokmusic.engine.MidiInput
 import com.zedokmusic.engine.AacEncoder
@@ -166,6 +167,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 for (t in plugins) if (t.pluginPath != null && t.pluginState < 2) {
                     t.pluginState = e.pluginState(t.id)
                     if (t.pluginState == 2) { t.pluginName = e.pluginName(t.id); applyPending(t); rememberKind(t) }
+                }
+                // A plugin that was running and whose Wine process is gone has crashed: show it (red dot) instead of a stuck editor.
+                for (t in plugins) if (t.pluginPath != null && t.pluginState == 2) {
+                    if (host.isRunning(t.id)) t.missed = 0 else if (++t.missed >= 3) { t.pluginState = 3; t.editorOpen = false; message = "${t.pluginName.ifBlank { t.name }} stopped unexpectedly. See Logs in your ZedokMusic folder." }
                 }
                 val s = e.stats()
                 if (s[0] > 0) engineInfo = "%d Hz · %.1f ms · %d xruns".format(s[0].toInt(), s[6], s[3].toInt())
@@ -713,7 +718,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteProject(name: String) {
         val s = store ?: return
         if (name == projectName) { message = "Open another project first."; return }
-        s.dir(name).deleteRecursively()
+        s.dir(name).deleteTree()
     }
 
     /** Copies every sample used by the project that lives elsewhere into its own Samples folder. Returns how many were copied. */
