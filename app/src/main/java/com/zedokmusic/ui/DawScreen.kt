@@ -35,10 +35,14 @@ fun DawScreen(vm: DawViewModel) {
     var ppb by rememberSaveable { mutableFloatStateOf(44f) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var insertsOpen by remember { mutableStateOf(false) }
+    var insertsOwner by remember { mutableStateOf<TrackM?>(null) }
+    val openInserts: (TrackM?) -> Unit = { owner -> insertsOwner = owner; insertsOpen = true }
     var plugins by remember { mutableStateOf(emptyList<PluginInfo>()) }
     val sel = vm.selected
     val ctx = LocalContext.current
     LaunchedEffect(vm.message) { if (vm.message != null) { kotlinx.coroutines.delay(4500); vm.message = null } }  // notices fade away by themselves
+    LaunchedEffect(dialog, vm.pluginsVersion) { if (dialog == "plugins") { plugins = vm.scanPlugins(); vm.probeUnknown(plugins) } }  // tell instruments from effects
     fun begin() { vm.startRecording()?.let { vm.message = it } }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) begin() else vm.message = "Microphone permission is needed to record audio." }
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.midi.startScan() else vm.message = "Location permission is needed by Android to scan for Bluetooth devices." }
@@ -66,7 +70,7 @@ fun DawScreen(vm: DawViewModel) {
                         }
                         VerticalDivider(color = Zk.line)
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" })
+                            PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" }, openInserts)
                         }
                     }
                 } else if (wide) {
@@ -79,11 +83,11 @@ fun DawScreen(vm: DawViewModel) {
                         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (p in listOf(Panel.Piano, Panel.Mixer, Panel.Plugin, Panel.Auto)) PanelChip(p.label, bottom == p) { bottom = p }
                         }
-                        Box(Modifier.weight(1f)) { PanelContent(vm, bottom, ppb, { ppb = it }, {}, {}) }
+                        Box(Modifier.weight(1f)) { PanelContent(vm, bottom, ppb, { ppb = it }, {}, {}, openInserts) }
                     }
                 } else {
                     Box(Modifier.weight(1f)) {
-                        PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" })
+                        PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" }, openInserts)
                     }
                     Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (p in Panel.values()) PanelChip(p.label, panel == p, Modifier.weight(1f)) { panel = p }
@@ -101,7 +105,7 @@ fun DawScreen(vm: DawViewModel) {
         }
     }
     when (dialog) {
-        "plugins" -> PluginPickerDialog(plugins, vm.pluginDir()?.path ?: "", { plugins = vm.scanPlugins() }, { vm.addInstrument(it); dialog = null }, { dialog = null })
+        "plugins" -> PluginPickerDialog(plugins.filter { it.kind != 2 }, vm.pluginDir()?.path ?: "", { plugins = vm.scanPlugins() }, { vm.addInstrument(it); dialog = null }, { dialog = null })
         "samples" -> SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { samplePicker.launch(arrayOf("audio/*", "application/octet-stream")) }, { f ->
             val t = vm.selected?.takeIf { it.kind == TrackKind.Audio } ?: vm.addAudioTrack(); if (t != null) vm.importClip(t, f, vm.playhead.let { Math.floor(it.toDouble()).toFloat() }); dialog = null }, { dialog = null })
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
@@ -114,18 +118,20 @@ fun DawScreen(vm: DawViewModel) {
         "version" -> { LaunchedEffect(Unit) { vm.saveNewVersion(); dialog = null } }
         "collect" -> { LaunchedEffect(Unit) { vm.collectSamples(); dialog = null } }
         "info" -> ProjectInfoDialog(vm) { dialog = null }
+        "fxpicker" -> EffectPickerDialog(vm, insertsOwner, { dialog = "installers" }, { dialog = null })
         "installers" -> InstallersDialog(vm, { importPicker.launch(arrayOf("*/*")) }, { dialog = null })
         "export" -> ExportDialog(vm.loopBars, { r, f, n, st -> vm.exportAudio(r, f, n, st) }, { dialog = null })
     }
     if (vm.exporting) ExportingDialog()
     if (vm.projectBusy) AlertDialog(onDismissRequest = {}, containerColor = Zk.panel, title = { Text("Opening project…") }, text = { LinearProgressIndicator(Modifier.fillMaxWidth()) }, confirmButton = {})
+    if (insertsOpen) InsertsDialog(vm, insertsOwner, { fx -> insertsOwner?.let { vm.selected = it }; vm.pluginTarget = fx; panel = Panel.Plugin; bottom = Panel.Plugin; insertsOpen = false }, { dialog = "fxpicker" }, { insertsOpen = false })
     InstallerScreen(vm)
     if (showSettings) SettingsScreen(vm) { showSettings = false }
     DisplaySettingsEffect(vm.playing)
 }
 
 @Composable
-private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Float) -> Unit, openPiano: () -> Unit, importTo: (TrackM) -> Unit) {
+private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Float) -> Unit, openPiano: () -> Unit, importTo: (TrackM) -> Unit, onInserts: (TrackM?) -> Unit) {
     when (panel) {
         Panel.Arrange -> ArrangeView(vm, ppb, setPpb, { openPiano() }, importTo)
         Panel.Piano -> {
@@ -139,7 +145,7 @@ private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Fl
                 Box(Modifier.weight(1f)) { PianoRollView(vm, t, ppb) }
             }
         }
-        Panel.Mixer -> MixerView(vm)
+        Panel.Mixer -> MixerView(vm, onInserts)
         Panel.Plugin -> PluginPanel(vm)
         Panel.Auto -> AutomationView(vm)
     }

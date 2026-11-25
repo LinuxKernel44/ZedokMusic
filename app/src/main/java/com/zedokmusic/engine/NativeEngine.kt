@@ -16,6 +16,13 @@ object NativeEngine {
     external fun addTrack(): Int
     /** How many track ids were handed out; ids restart at 1 with [resetTrackIds] once the project has no track. */
     external fun trackIdsUsed(): Int
+    /** Insert effects: [track] 0 = the master. Effect ids (>= 1000) work with every plugin call (bridge, parameters, editor, automation). Returns 0 when full. */
+    external fun addFx(track: Int, position: Int): Int
+    external fun removeFx(fxId: Int): Boolean
+    external fun moveFx(fxId: Int, index: Int): Boolean
+    external fun setFxBypass(fxId: Int, bypass: Boolean): Boolean
+    /** 0 unknown, 1 instrument, 2 effect, as reported by the loaded plugin. */
+    external fun pluginKind(id: Int): Int
     external fun resetTrackIds(): Boolean
     external fun removeTrack(id: Int): Boolean
     /** Loads a WAV into a new clip. Returns [clipId, frames] or null if unreadable. */

@@ -175,7 +175,40 @@ int fail(ZkBridge* b, uint32_t code, const char* msg) {
 }
 }
 
+// 1 = instrument, 2 = effect, 0 = unknown, from the class's VST3 sub-categories ("Instrument|Synth", "Fx|Reverb"...).
+static int kindOf(const char* sub) {
+    if (!sub || !*sub) return 0;
+    if (strstr(sub, "Instrument")) return 1;
+    if (strstr(sub, "Fx")) return 2;
+    return 0;
+}
+
+// `zhost.exe --probe <plugin.vst3> <result-file>`: loads the module only far enough to read its first audio class and writes
+// "<kind>\t<name>" (see kindOf) so the app can tell instruments from effects without starting the plugin.
+static int probe(const char* path, const char* outFile) {
+    HMODULE m = LoadLibraryA(path); int kind = 0; char name[64] = "";
+    if (m) {
+        typedef bool (*InitFn)(); if (auto init = (InitFn)GetProcAddress(m, "InitDll")) init();
+        typedef IPluginFactory* (*FactoryFn)(); auto gf = (FactoryFn)GetProcAddress(m, "GetPluginFactory");
+        if (gf) if (IPluginFactory* fac = gf()) {
+            IPluginFactory2* f2 = nullptr; fac->queryInterface(IPluginFactory2::iid, (void**)&f2);
+            for (int i = 0; i < fac->countClasses(); i++) {
+                PClassInfo ci; fac->getClassInfo(i, &ci);
+                if (strcmp(ci.category, kVstAudioEffectClass)) continue;
+                snprintf(name, sizeof name, "%s", ci.name);
+                if (f2) { PClassInfo2 c2; if (f2->getClassInfo2(i, &c2) == kResultOk) kind = kindOf(c2.subCategories); }
+                break;
+            }
+        }
+    }
+    FILE* f = fopen(outFile, "w"); if (!f) return 3;
+    fprintf(f, "%d\t%s\n", kind, name); fclose(f);
+    fflush(stdout); TerminateProcess(GetCurrentProcess(), 0);  // do not run the plugin's DLL teardown
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc >= 4 && !strcmp(argv[1], "--probe")) return probe(argv[2], argv[3]);
     if (argc < 3) { fprintf(stderr, "usage: zhost plugin.vst3 bridge-file\n"); return 2; }
     // --- map the bridge ---
     HANDLE f = CreateFileA(argv[2], GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -197,7 +230,12 @@ int main(int argc, char** argv) {
     TUID cid = {}; bool found = false; char name[64] = "";
     for (int i = 0; i < fac->countClasses(); i++) {
         PClassInfo ci; fac->getClassInfo(i, &ci);
-        if (!strcmp(ci.category, kVstAudioEffectClass)) { memcpy(cid, ci.cid, 16); snprintf(name, sizeof name, "%s", ci.name); found = true; break; }
+        if (!strcmp(ci.category, kVstAudioEffectClass)) {
+            memcpy(cid, ci.cid, 16); snprintf(name, sizeof name, "%s", ci.name); found = true;
+            IPluginFactory2* f2 = nullptr; fac->queryInterface(IPluginFactory2::iid, (void**)&f2);
+            PClassInfo2 c2; if (f2 && f2->getClassInfo2(i, &c2) == kResultOk) B->plugin_kind = kindOf(c2.subCategories);
+            break;
+        }
     }
     if (!found) return fail(B, 22, "no audio class");
     snprintf(B->plugin_name, sizeof B->plugin_name, "%s", name);

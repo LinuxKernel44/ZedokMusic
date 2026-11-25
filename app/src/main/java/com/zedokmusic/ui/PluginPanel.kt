@@ -18,8 +18,8 @@ import kotlinx.coroutines.delay
 /** Generic editor for the selected instrument's parameters (VST3 IEditController), with search. */
 @Composable
 fun PluginPanel(vm: DawViewModel) {
-    val t = vm.selected?.takeIf { it.kind == TrackKind.Instrument } ?: vm.tracks.firstOrNull { it.kind == TrackKind.Instrument }
-    if (t == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Add an instrument track first.", color = Zk.dim) }; return }
+    val t = vm.panelPlugin()
+    if (t == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Add an instrument track, or an effect from the Mixer, first.", color = Zk.dim) }; return }
     if (t.pluginState != 2) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(if (t.pluginState == 3) "The plugin failed to start." else "Plugin is starting…", color = if (t.pluginState == 3) Zk.danger else Zk.dim)
@@ -38,6 +38,7 @@ fun PluginPanel(vm: DawViewModel) {
         params.filter { (query.isBlank() || it.name.contains(query, true)) && (!onlyChanged || t.paramOverrides.containsKey(it.index)) }
     }
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
+        PluginChooser(vm, t)
         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = if (short) 3.dp else 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(t.pluginName.ifBlank { t.name }, color = t.color, fontSize = 14.sp, maxLines = 1)

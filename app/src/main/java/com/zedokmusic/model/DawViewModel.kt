@@ -2,6 +2,7 @@ package com.zedokmusic.model
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -123,6 +124,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // Declared before init: load() runs from init and fills them.
     private val pendingLanes = HashMap<Int, List<Pair<String, List<AutoPoint>>>>()
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
+    /** The master's insert effects (a track's own are in [TrackM.fx]). Declared before init: load() fills it. */
+    val masterFx = mutableStateListOf<TrackM>()
+    /** The plugin the Plugin and Auto panels show: an effect picked in the mixer, otherwise the selected instrument. */
+    var pluginTarget by mutableStateOf<TrackM?>(null)
     init {
         store?.create(projectName)
         e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
@@ -143,13 +148,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             playhead = (e.position() / fpb).toFloat()
             for (t in tracks) { t.meter = maxOf(e.peak(t.id), t.meter * 0.86f) }
             masterMeter = maxOf(e.peak(-1), masterMeter * 0.86f)
-            for (t in tracks) if (t.pluginState == 2) pollEditorEdits(t)
-            if (!playing) for (t in tracks) for (l in t.lanes) l.lastWrite = -1f
+            val plugins = allPlugins()
+            for (t in plugins) if (t.pluginState == 2) pollEditorEdits(t)
+            if (!playing) for (t in plugins) for (l in t.lanes) l.lastWrite = -1f
             if (recording && !recMidi) recLevel = maxOf(e.recLevel(), recLevel * 0.86f)
             if (++n % 15 == 0) {
-                for (t in tracks) if (t.pluginPath != null && t.pluginState < 2) {
+                for (t in plugins) if (t.pluginPath != null && t.pluginState < 2) {
                     t.pluginState = e.pluginState(t.id)
-                    if (t.pluginState == 2) { t.pluginName = e.pluginName(t.id); applyPending(t) }
+                    if (t.pluginState == 2) { t.pluginName = e.pluginName(t.id); applyPending(t); rememberKind(t) }
                 }
                 val s = e.stats()
                 if (s[0] > 0) engineInfo = "%d Hz · %.1f ms · %d xruns".format(s[0].toInt(), s[6], s[3].toInt())
@@ -207,6 +213,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         tracks.add(t); selected = t; dirty = true; return t
     }
     fun removeTrack(t: TrackM) {
+        t.fx.toList().forEach { removeEffect(t, it) }
         if (t.pluginPath != null) { closeEditor(t); host.stop(t.id) }
         e.removeTrack(t.id); tracks.remove(t); if (selected == t) selected = tracks.firstOrNull(); dirty = true
     }
@@ -225,6 +232,44 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun setMute(t: TrackM, m: Boolean) { t.mute = m; e.setTrackMute(t.id, m); dirty = true }
     fun setSolo(t: TrackM, s: Boolean) { t.solo = s; e.setTrackSolo(t.id, s); dirty = true }
     fun setMaster(g: Float) { masterGain = g; e.setMasterGain(g); dirty = true }
+
+    // ---------- insert effects ----------
+    /** Every plugin of the project: instruments, then each track's effects, then the master's. */
+    fun allPlugins(): List<TrackM> = tracks.flatMap { t -> (if (t.pluginPath != null) listOf(t) else emptyList()) + t.fx } + masterFx
+    fun fxOf(owner: TrackM?): MutableList<TrackM> = owner?.fx ?: masterFx
+    /** The plugin the Plugin and Auto panels work on. */
+    fun panelPlugin(): TrackM? {
+        val tg = pluginTarget; val sel = selected
+        if (tg != null && (tg === sel || sel?.fx?.contains(tg) == true || masterFx.contains(tg))) return tg
+        return sel?.takeIf { it.kind == TrackKind.Instrument } ?: sel?.fx?.firstOrNull() ?: tracks.firstOrNull { it.kind == TrackKind.Instrument } ?: masterFx.firstOrNull()
+    }
+
+    /** Adds [plugin] at the end of the chain of [owner] (null = the master) and starts its Wine host. */
+    fun addEffect(owner: TrackM?, plugin: PluginInfo): TrackM? = addEffectInternal(owner, plugin.name, plugin.path).also { if (it != null) { pluginTarget = it; dirty = true } }
+    private fun addEffectInternal(owner: TrackM?, name: String, path: String): TrackM? {
+        val list = fxOf(owner)
+        if (list.size >= 10) { message = "At most 10 effects per mixer track."; return null }
+        val id = e.addFx(owner?.id ?: 0, list.size)
+        if (id == 0) { message = "Could not add the effect."; return null }
+        val t = TrackM(id, name, TrackKind.Effect, owner?.color ?: Color(0xFFE6E8EE), path)
+        list.add(t)
+        t.pluginState = 1
+        if (!host.launch(id, path)) { t.pluginState = 3; message = "Could not start the plugin host." }
+        return t
+    }
+    fun removeEffect(owner: TrackM?, fx: TrackM) {
+        closeEditor(fx); host.stop(fx.id)
+        e.removeFx(fx.id); fxOf(owner).remove(fx)
+        if (pluginTarget === fx) pluginTarget = null
+        dirty = true
+    }
+    /** Moves an effect one place earlier (delta -1) or later (+1) in its chain. */
+    fun moveEffect(owner: TrackM?, fx: TrackM, delta: Int) {
+        val list = fxOf(owner); val i = list.indexOf(fx); val j = i + delta
+        if (i < 0 || j < 0 || j >= list.size) return
+        if (e.moveFx(fx.id, j)) { list.removeAt(i); list.add(j, fx); dirty = true }
+    }
+    fun setBypass(fx: TrackM, bypass: Boolean) { fx.bypass = bypass; e.setFxBypass(fx.id, bypass); dirty = true }
 
     // ---------- notes ----------
     fun addNote(t: TrackM, pitch: Int, start: Float, length: Float, velocity: Int = 100) { t.notes.add(NoteM(pitch, start, length, velocity)); syncNotes(t); dirty = true }
@@ -247,7 +292,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens the plugin's editor; up to three stay open at once (the oldest is closed to make room). */
     fun openEditor(t: TrackM) {
         if (editorSlots.containsKey(t.id)) { t.editorOpen = true; return }
-        if (editorSlots.size >= 3) tracks.firstOrNull { it.id == editorSlots.keys.first() }?.let { closeEditor(it) }
+        if (editorSlots.size >= 3) allPlugins().firstOrNull { it.id == editorSlots.keys.first() }?.let { closeEditor(it) }
         val slot = (0..2).first { it !in editorSlots.values }
         editorSlots[t.id] = slot
         e.guiCommand(t.id, 1, 0, slot * com.zedokmusic.wine.GuiServer.SLOT_HEIGHT)
@@ -337,10 +382,37 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             dir.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { f ->
                 if (!f.name.endsWith(".vst3", true)) return@forEach
                 val dll = if (f.isFile) f else f.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".vst3", true) && it.path.contains("x86_64-win") }
-                if (dll != null && out.none { it.path == dll.path }) out.add(PluginInfo(f.nameWithoutExtension.replace(Regex("\\s*\\((x64|64-?bit)\\)$", RegexOption.IGNORE_CASE), ""), dll.path))  // u-he installers name the 64-bit file "Name(x64).vst3"
+                if (dll != null && out.none { it.path == dll.path }) out.add(PluginInfo(f.nameWithoutExtension.replace(Regex("\\s*\\((x64|64-?bit)\\)$", RegexOption.IGNORE_CASE), ""), dll.path, kindOfPath(dll.path)))  // u-he installers name the 64-bit file "Name(x64).vst3"
             }
         }
         return out
+    }
+
+    // ---------- plugin kinds: instrument or effect ----------
+    private val kindFile get() = File(getApplication<Application>().filesDir, "plugin_kinds.json")
+    private var kindCache: JSONObject? = null
+    private fun kinds(): JSONObject = kindCache ?: (runCatching { JSONObject(kindFile.readText()) }.getOrNull() ?: JSONObject()).also { kindCache = it }
+    private fun stamp(f: File) = "${f.length()}:${f.lastModified()}"
+    /** 0 = not checked yet, 1 instrument, 2 effect, 3 checked but the plugin does not say. Stale when the file changed. */
+    fun kindOfPath(path: String): Int { val a = kinds().optJSONArray(path) ?: return 0; return if (a.optString(0) == stamp(File(path))) a.optInt(1) else 0 }
+    private fun setKind(path: String, kind: Int) { kinds().put(path, JSONArray().put(stamp(File(path))).put(kind)); runCatching { kindFile.writeText(kinds().toString()) } }
+    /** Bumped when plugin kinds become known, so open pickers re-list. */
+    var pluginsVersion by mutableIntStateOf(0); private set
+    private fun rememberKind(t: TrackM) {
+        val p = t.pluginPath ?: return
+        val k = e.pluginKind(t.id)
+        if (k in 1..2 && kindOfPath(p) != k) { setKind(p, k); pluginsVersion++ }
+    }
+    var probing by mutableStateOf(false); private set
+    /** Reads the type (instrument / effect) of plugins not seen before, one by one, without starting them. */
+    fun probeUnknown(plugins: List<PluginInfo>) {
+        val todo = plugins.filter { it.kind == 0 }
+        if (probing || todo.isEmpty()) return
+        probing = true
+        Thread {
+            try { for (p in todo) { val k = host.probe(p.path); setKind(p.path, if (k in 1..2) k else 3); pluginsVersion++ } }
+            finally { probing = false }
+        }.start()
     }
 
     // ---------- Windows plugin installers ----------
@@ -479,11 +551,30 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
-            .put("params", JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } })
-            .put("lanes", JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble()).put(p.shape)) } })) } })
+            .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("start", c.start.toDouble())) } }))
-        root.put("tracks", arr)
+        root.put("tracks", arr).put("masterFx", fxJson(masterFx))
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
+    }
+
+    private fun paramsJson(t: TrackM) = JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } }
+    private fun lanesJson(t: TrackM) = JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble()).put(p.shape)) } })) } }
+    private fun fxJson(list: List<TrackM>) = JSONArray().also { a -> list.forEach { f -> a.put(JSONObject().put("plugin", f.pluginPath).put("name", f.name).put("bypass", f.bypass).put("params", paramsJson(f)).put("lanes", lanesJson(f))) } }
+    /** Saved parameter values and automation, applied once the plugin is up (see applyPending). */
+    private fun readPluginState(t: TrackM, o: JSONObject) {
+        o.optJSONArray("lanes")?.let { la -> pendingLanes[t.id] = (0 until la.length()).map { k -> val lo = la.getJSONObject(k); val pa = lo.getJSONArray("points")
+            lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat(), x.optInt(2, 0)) } } } }
+        o.optJSONArray("params")?.let { pa -> pendingParams[t.id] = (0 until pa.length()).map { k -> pa.getJSONArray(k).let { x -> x.getString(0) to x.getDouble(1).toFloat() } } }
+    }
+    private fun loadFx(owner: TrackM?, arr: JSONArray?) {
+        if (arr == null) return
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val path = o.optString("plugin").takeIf { it.isNotEmpty() && File(it).exists() } ?: continue
+            val fx = addEffectInternal(owner, o.optString("name", File(path).nameWithoutExtension), path) ?: continue
+            if (o.optBoolean("bypass")) { fx.bypass = true; e.setFxBypass(fx.id, true) }
+            readPluginState(fx, o)
+        }
     }
 
     // ---------- projects (FL Studio style: File menu) ----------
@@ -507,6 +598,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     private fun closeCurrent() {
         tracks.toList().forEach { removeTrack(it) }
+        masterFx.toList().forEach { removeEffect(null, it) }
+        pluginTarget = null
         bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); applyLoop()
         pendingLanes.clear(); pendingParams.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
@@ -649,12 +742,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 val na = o.getJSONArray("notes")
                 for (k in 0 until na.length()) { val n = na.getJSONArray(k); t.notes.add(NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3))) }
                 syncNotes(t)
-                o.optJSONArray("lanes")?.let { la -> pendingLanes[t.id] = (0 until la.length()).map { k -> val lo = la.getJSONObject(k); val pa = lo.getJSONArray("points")
-                    lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat(), x.optInt(2, 0)) } } } }
-                o.optJSONArray("params")?.let { pa -> pendingParams[t.id] = (0 until pa.length()).map { k -> pa.getJSONArray(k).let { x -> x.getString(0) to x.getDouble(1).toFloat() } } }
+                readPluginState(t, o)
+                loadFx(t, o.optJSONArray("fx"))
                 val ca = o.getJSONArray("clips")
                 for (k in 0 until ca.length()) { val c = ca.getJSONObject(k); val w = File(c.getString("path")); if (w.exists()) importClip(t, w, c.getDouble("start").toFloat()) }
             }
+            loadFx(null, root.optJSONArray("masterFx"))
             selected = tracks.firstOrNull()
         } catch (ex: Exception) { message = "Could not open the saved project: ${ex.message}" }
         dirty = false

@@ -32,6 +32,7 @@ public:
     uint32_t hostState() const { return b_ ? __atomic_load_n(&b_->host_state, __ATOMIC_ACQUIRE) : ZK_HOST_ERROR; }
     bool ready() const { return hostState() == ZK_HOST_READY; }
     uint32_t hostError() const { return b_ ? b_->host_error : 0; }
+    uint32_t kind() const { return b_ ? __atomic_load_n(&b_->plugin_kind, __ATOMIC_ACQUIRE) : 0; }  // 0 unknown, 1 instrument, 2 effect
     std::string pluginName() const { return b_ ? std::string(b_->plugin_name, strnlen(b_->plugin_name, sizeof b_->plugin_name)) : ""; }
     int frames() const { return frames_; }
     // --- parameters (published by the host once ready) ---
@@ -63,6 +64,12 @@ public:
         b_->n_events = n; b_->n_changes = nch; b_->frames = frames;
         __atomic_store_n(&b_->req_seq, ++seq_, __ATOMIC_RELEASE);
         pending_ = true;
+    }
+    // Effects: hands one block of audio (interleaved stereo) to the host, together with parameter changes.
+    void submitAudio(const float* interleaved, int frames, const ZkParamChange* ch = nullptr, int nch = 0) {
+        const int n = frames > ZK_MAX_FRAMES ? ZK_MAX_FRAMES : frames;
+        for (int i = 0; i < n; i++) { b_->in[0][i] = interleaved[i * 2]; b_->in[1][i] = interleaved[i * 2 + 1]; }
+        submit(nullptr, 0, n, ch, nch);
     }
     // Waits (bounded spin) for the outstanding block. Returns false and counts a late block if the host missed the deadline.
     bool collect(float* interleaved, int frames, int64_t maxWaitNs) {

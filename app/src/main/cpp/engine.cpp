@@ -12,13 +12,15 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace zedok {
-static void appendAutomation(const TrackState& t, int64_t pos, float* last, ZkParamChange* ch, int& nc);
+static void appendAutomation(const std::vector<AutoLane>& lanes, int64_t pos, float* last, ZkParamChange* ch, int& nc);
 
 Engine::Engine() {
     auto p = std::make_shared<Project>();
     current_ = p;
     published_.store(p.get());
     for (auto& m : meters_) m.store(0.f);
+    for (auto& row : fxAutoLast_) for (auto& v : row) v = NAN;
+    for (auto& row : fxAutoLastOff_) for (auto& v : row) v = NAN;
 }
 Engine::~Engine() { stop(); }
 
@@ -116,25 +118,13 @@ int64_t Engine::projectLength() const {
 }
 
 // ---------- mixer ----------
-void Engine::mix(const Project& p, int64_t pos, int frames, float* out, MixState& ms, std::atomic<float>* meters, int plugOffset) {
-    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; ms.init = true; }
-    memset(out, 0, sizeof(float) * 2 * frames);
-    bool anySolo = false;
-    for (auto& t : p.tracks) anySolo |= t.solo;
-    float masterPeak = 0.f;
-    if ((int)ms.scratch.size() < frames * 2) ms.scratch.assign(frames * 2, 0.f);  // only allocates on first use / bigger block
-    for (auto& t : p.tracks) {
-        bool audible = !t.mute && (!anySolo || t.solo);
-        float target = audible ? t.gain : 0.f;
-        float g0 = ms.smoothGain[t.id], g1 = target;
-        ms.smoothGain[t.id] = g1;
-        // constant-power pan
-        float ang = (t.pan * 0.5f + 0.5f) * (float)M_PI_2;
-        float pl = cosf(ang) * (float)M_SQRT2, pr = sinf(ang) * (float)M_SQRT2;
-        float* tb = ms.scratch.data(); memset(tb, 0, sizeof(float) * 2 * frames);
+void Engine::accumulateDry(const Project& p, int64_t pos, int n, MixState& ms, int offset) {
+    for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
+        const TrackState& t = p.tracks[ti];
+        float* tb = ms.dry[ti] + offset * 2;
         if (ms.playClips) for (auto& c : t.clips) {
             if (!c.audio) continue;
-            int64_t cs = std::max<int64_t>(pos, c.start), ce = std::min<int64_t>(pos + frames, c.start + c.length);
+            int64_t cs = std::max<int64_t>(pos, c.start), ce = std::min<int64_t>(pos + n, c.start + c.length);
             if (ce <= cs) continue;
             const float* src = c.audio->data();
             int64_t total = (int64_t)(c.audio->size() / 2);
@@ -145,9 +135,40 @@ void Engine::mix(const Project& p, int64_t pos, int frames, float* out, MixState
             }
         }
         if (t.plugin && t.pluginSlot >= 0) {
-            const float* po = ms.plugOut[t.pluginSlot] + plugOffset * 2;
-            for (int i = 0; i < frames * 2; i++) tb[i] += po[i];
+            const float* po = ms.plugOut[t.pluginSlot] + offset * 2;
+            for (int i = 0; i < n * 2; i++) tb[i] += po[i];
         }
+    }
+}
+
+int64_t Engine::renderBlockDry(const Project& p, int64_t pos, int frames, MixState& ms) {
+    for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) memset(ms.dry[ti], 0, sizeof(float) * 2 * frames);
+    int done = 0;
+    while (done < frames) {
+        int n = frames - done;
+        if (p.loop && pos < p.loopEnd) n = (int)std::min<int64_t>(n, p.loopEnd - pos);
+        accumulateDry(p, pos, n, ms, done);
+        done += n; pos += n;
+        if (p.loop && pos >= p.loopEnd) pos = p.loopStart;
+    }
+    return pos;
+}
+
+void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
+    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; ms.init = true; }
+    memset(out, 0, sizeof(float) * 2 * frames);
+    bool anySolo = false;
+    for (auto& t : p.tracks) anySolo |= t.solo;
+    for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
+        const TrackState& t = p.tracks[ti];
+        bool audible = !t.mute && (!anySolo || t.solo);
+        float target = audible ? t.gain : 0.f;
+        float g0 = ms.smoothGain[t.id], g1 = target;
+        ms.smoothGain[t.id] = g1;
+        // constant-power pan
+        float ang = (t.pan * 0.5f + 0.5f) * (float)M_PI_2;
+        float pl = cosf(ang) * (float)M_SQRT2, pr = sinf(ang) * (float)M_SQRT2;
+        const float* tb = ms.dry[ti];
         float tpk = 0.f;
         for (int i = 0; i < frames; i++) {
             float g = g0 + (g1 - g0) * ((float)i / (float)frames);
@@ -157,6 +178,10 @@ void Engine::mix(const Project& p, int64_t pos, int frames, float* out, MixState
         }
         if (meters && t.id < kMaxTracks) { float old = meters[t.id].load(std::memory_order_relaxed); if (tpk > old) meters[t.id].store(tpk, std::memory_order_relaxed); }
     }
+}
+
+void Engine::masterOut(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
+    float masterPeak = 0.f;
     float m0 = ms.smoothMaster, m1 = p.masterGain; ms.smoothMaster = m1;
     for (int i = 0; i < frames; i++) {
         float g = m0 + (m1 - m0) * ((float)i / (float)frames);
@@ -166,16 +191,109 @@ void Engine::mix(const Project& p, int64_t pos, int frames, float* out, MixState
     if (meters) { float old = meters[kMaxTracks].load(std::memory_order_relaxed); if (masterPeak > old) meters[kMaxTracks].store(masterPeak, std::memory_order_relaxed); }
 }
 
-int64_t Engine::renderBlock(const Project& p, int64_t pos, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
-    int done = 0;
-    while (done < frames) {
-        int n = frames - done;
-        if (p.loop && pos < p.loopEnd) n = (int)std::min<int64_t>(n, p.loopEnd - pos);
-        mix(p, pos, n, out + done * 2, ms, meters, done);
-        done += n; pos += n;
-        if (p.loop && pos >= p.loopEnd) pos = p.loopStart;
+// ---------- insert effects ----------
+static inline bool fxActive(const FxState& f) { return f.plugin && !f.bypass && f.plugin->ready(); }
+
+void Engine::drainParams() {
+    np_ = 0;
+    uint32_t pt = paramTail_.load(std::memory_order_relaxed), ph = paramHead_.load(std::memory_order_acquire);
+    while (pt != ph && np_ < ZK_MAX_PARAM_CHANGES * 2) pe_[np_++] = paramQ_[pt++ % paramQ_.size()];
+    paramTail_.store(pt, std::memory_order_release);
+}
+
+// Sends one block to an effect. `autoPos` is the timeline position of that block (-1 = not playing, no automation).
+void Engine::fxSubmit(const FxState& fx, const float* in, int frames, int64_t autoPos, float* autoLast, int64_t* lastPos) {
+    ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
+    for (int i = 0; i < np_; i++) if (pe_[i].track == fx.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe_[i].index, pe_[i].value};
+    if (autoPos < 0 || (lastPos && *lastPos != autoPos - frames)) for (int k = 0; k < kMaxLanes; k++) autoLast[k] = NAN;  // stopped or jumped: send the values again
+    if (autoPos >= 0 && !fx.lanes.empty()) appendAutomation(fx.lanes, autoPos, autoLast, ch, nc);
+    if (lastPos) *lastPos = autoPos;
+    fx.plugin->submitAudio(in, frames, ch, nc);
+}
+
+void Engine::fxRealtime(const Project& p, MixState& ms, int frames, int64_t budgetNs) {
+    int L = 0;
+    for (auto& t : p.tracks) L = std::max(L, std::min((int)t.fx.size(), kMaxFx));
+    ms.latencyBlocks = L;
+    if (L == 0 || frames != kCallbackFramesFx) return;
+    const size_t bytes = sizeof(float) * 2 * frames;
+    const auto t0 = std::chrono::steady_clock::now();
+    const int64_t totalNs = (int64_t)(0.7 * 1e9 * frames / kProjectRate);
+    auto waitLeft = [&]() { int64_t el = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(); return std::min<int64_t>(budgetNs, std::max<int64_t>(0, totalNs - el)); };
+    const int ring = kMaxFx + 1;
+    for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
+        const TrackState& t = p.tracks[ti];
+        const int n = std::min((int)t.fx.size(), kMaxFx);
+        FxChain& ch = ms.chain[t.id];
+        const int sig = n * 100 + L;
+        if (ch.sig != sig) { memset(ch.hold, 0, sizeof ch.hold); memset(ch.fin, 0, sizeof ch.fin); ch.finPos = 0; ch.sig = sig; }
+        const float* cur = ms.dry[ti];
+        if (n > 0) {
+            for (int i = 0; i < n; i++) {  // results of last callback's requests
+                const FxState& f = t.fx[i]; float* o = ms.stage[i];
+                if (fxActive(f)) f.plugin->collect(o, frames, waitLeft()); else memcpy(o, ch.hold[i], bytes);
+            }
+            for (int i = 0; i < n; i++) {  // requests for this callback: effect i processes what effect i-1 returned
+                const FxState& f = t.fx[i]; const float* in = i == 0 ? ms.dry[ti] : ms.stage[i - 1];
+                if (fxActive(f)) fxSubmit(f, in, frames, posRing_[(blockCounter_ - i) & 31], fxAutoLast_[f.pluginSlot], &fxLastPos_[f.pluginSlot]);
+                else memcpy(ch.hold[i], in, bytes);
+            }
+            cur = ms.stage[n - 1];
+        }
+        // Delay compensation: shorter chains wait so that every track lines up with the longest one.
+        memcpy(ch.fin[ch.finPos], cur, bytes);
+        const int rd = ((ch.finPos - (L - n)) % ring + ring) % ring;
+        memcpy(ms.dry[ti], ch.fin[rd], bytes);
+        ch.finPos = (ch.finPos + 1) % ring;
     }
-    return pos;
+}
+
+void Engine::masterFxRealtime(const Project& p, MixState& ms, float* out, int frames, int64_t budgetNs) {
+    const int m = std::min((int)p.masterFx.size(), kMaxFx);
+    if (m == 0 || frames != kCallbackFramesFx) return;
+    const size_t bytes = sizeof(float) * 2 * frames;
+    FxChain& ch = ms.masterChain;
+    if (ch.sig != m) { memset(ch.hold, 0, sizeof ch.hold); ch.sig = m; }
+    const auto t0 = std::chrono::steady_clock::now();
+    const int64_t totalNs = (int64_t)(0.7 * 1e9 * frames / kProjectRate);
+    auto waitLeft = [&]() { int64_t el = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(); return std::min<int64_t>(budgetNs, std::max<int64_t>(0, totalNs - el)); };
+    for (int i = 0; i < m; i++) {
+        const FxState& f = p.masterFx[i]; float* o = ms.stage[i];
+        if (fxActive(f)) f.plugin->collect(o, frames, waitLeft()); else memcpy(o, ch.hold[i], bytes);
+    }
+    for (int i = 0; i < m; i++) {
+        const FxState& f = p.masterFx[i]; const float* in = i == 0 ? out : ms.stage[i - 1];
+        if (fxActive(f)) fxSubmit(f, in, frames, posRing_[(blockCounter_ - ms.latencyBlocks - i) & 31], fxAutoLast_[f.pluginSlot], &fxLastPos_[f.pluginSlot]);
+        else memcpy(ch.hold[i], in, bytes);
+    }
+    memcpy(out, ms.stage[m - 1], bytes);
+}
+
+// Offline: every effect is waited for, so the chain adds no latency and nothing needs compensating.
+void Engine::fxOffline(const Project& p, MixState& ms, int frames, int64_t pos) {
+    constexpr int64_t kWait = 5'000'000'000;
+    for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
+        const TrackState& t = p.tracks[ti];
+        if (t.mute) continue;
+        float* buf = ms.dry[ti];
+        for (auto& f : t.fx) {
+            if (!fxActive(f)) continue;
+            ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
+            if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
+            f.plugin->submitAudio(buf, frames, ch, nc);
+            f.plugin->collect(buf, frames, kWait);
+        }
+    }
+}
+void Engine::fxOfflineMaster(const Project& p, float* out, int frames, int64_t pos) {
+    constexpr int64_t kWait = 5'000'000'000;
+    for (auto& f : p.masterFx) {
+        if (!fxActive(f)) continue;
+        ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
+        if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
+        f.plugin->submitAudio(out, frames, ch, nc);
+        f.plugin->collect(out, frames, kWait);
+    }
 }
 
 // ---------- offline render ----------
@@ -196,6 +314,16 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
     { const int64_t c0 = callbacks_.load(); auto t0 = std::chrono::steady_clock::now();
       while (stream_ && callbacks_.load() < c0 + 3 && std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(500)) std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
     struct Done { Engine* e; ~Done() { e->exporting_.store(false, std::memory_order_release); } } done{this};
+    // Effects: finish what the realtime path left in flight, then let their tails die (a second of silence) so the render starts clean.
+    {
+        std::vector<const FxState*> fxs;
+        for (auto& t : q.tracks) for (auto& f : t.fx) if (fxActive(f)) fxs.push_back(&f);
+        for (auto& f : q.masterFx) if (fxActive(f)) fxs.push_back(&f);
+        std::vector<float> zeros(plugFrames * 2, 0.f), sink(plugFrames * 2);
+        for (auto* f : fxs) f->plugin->collect(sink.data(), plugFrames, kSyncWaitNs);
+        for (int b = 0; b < 150 && !fxs.empty(); b++) for (auto* f : fxs) { f->plugin->submitAudio(zeros.data(), plugFrames); f->plugin->collect(sink.data(), plugFrames, kSyncWaitNs); }
+        for (auto& row : fxAutoLastOff_) for (auto& v : row) v = NAN;
+    }
     // Drain anything the realtime path left in flight, then silence the plugins.
     for (auto& t : q.tracks) if (t.plugin && t.plugin->ready()) {
         t.plugin->collect(ms->plugOut[t.pluginSlot], plugFrames, kSyncWaitNs);
@@ -218,12 +346,17 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
             if (!t.lanes.empty()) {
                 static thread_local float last[kMaxLanes];
                 if (pos == from) for (int k = 0; k < kMaxLanes; k++) last[k] = NAN;
-                appendAutomation(t, pos, last, ch, nc);
+                appendAutomation(t.lanes, pos, last, ch, nc);
             }
             t.plugin->submit(ev, ne, plugFrames, ch, nc);
             t.plugin->collect(dst, plugFrames, kSyncWaitNs);
         }
-        mix(q, pos, n, blk.data(), *ms, nullptr, 0);
+        for (size_t ti = 0; ti < q.tracks.size() && ti < (size_t)kMaxTracks; ti++) memset(ms->dry[ti], 0, sizeof(float) * 2 * plugFrames);
+        accumulateDry(q, pos, n, *ms, 0);
+        fxOffline(q, *ms, plugFrames, pos);
+        mixTracks(q, plugFrames, blk.data(), *ms, nullptr);
+        if (onlyTrack == 0) fxOfflineMaster(q, blk.data(), plugFrames, pos);  // stems come without the master effects
+        masterOut(q, plugFrames, blk.data(), *ms, nullptr);
         all.insert(all.end(), blk.begin(), blk.begin() + n * 2);
     }
     for (auto& t : q.tracks) if (t.plugin && t.plugin->ready()) {  // leave the plugins silent for the realtime path
@@ -263,50 +396,104 @@ void Engine::setNotes(int track, std::vector<Note> notes) {
 }
 void Engine::clearNotes(int track) { edit([&](Project& p) { for (auto& t : p.tracks) if (t.id == track) t.notes.clear(); }); }
 
-bool Engine::createPluginBridge(int track, const std::string& path, int maxFrames) {
+// One id space for every plugin: track ids address the track's instrument, ids >= kFxIdBase address an insert effect (on a track or the master).
+struct Endpoint { std::shared_ptr<PluginBridge>* bridge = nullptr; int* slot = nullptr; std::vector<AutoLane>* lanes = nullptr; };
+static Endpoint findEndpoint(Project& p, int id) {
+    Endpoint e;
+    if (id >= kFxIdBase) {
+        for (auto& f : p.masterFx) if (f.id == id) return Endpoint{&f.plugin, &f.pluginSlot, &f.lanes};
+        for (auto& t : p.tracks) for (auto& f : t.fx) if (f.id == id) return Endpoint{&f.plugin, &f.pluginSlot, &f.lanes};
+    } else for (auto& t : p.tracks) if (t.id == id) return Endpoint{&t.plugin, &t.pluginSlot, &t.lanes};
+    return e;
+}
+static std::shared_ptr<PluginBridge> bridgeOf(const std::shared_ptr<const Project>& p, int id) {
+    Endpoint e = findEndpoint(const_cast<Project&>(*p), id);
+    return e.bridge ? *e.bridge : nullptr;
+}
+
+bool Engine::createPluginBridge(int id, const std::string& path, int maxFrames) {
     auto bridge = std::make_shared<PluginBridge>();
     if (!bridge->create(path, kProjectRate, maxFrames)) return false;
     bool ok = false;
     edit([&](Project& p) {
         bool used[kMaxPlugins] = {};
-        for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0) used[t.pluginSlot] = true;
-        for (auto& t : p.tracks) if (t.id == track) {
-            int slot = t.pluginSlot >= 0 ? t.pluginSlot : -1;
-            for (int s = 0; slot < 0 && s < kMaxPlugins; s++) if (!used[s]) slot = s;
-            if (slot < 0) return;
-            t.plugin = bridge; t.pluginSlot = slot; ok = true;
-        }
+        for (auto& t : p.tracks) { if (t.plugin && t.pluginSlot >= 0) used[t.pluginSlot] = true; for (auto& f : t.fx) if (f.plugin && f.pluginSlot >= 0) used[f.pluginSlot] = true; }
+        for (auto& f : p.masterFx) if (f.plugin && f.pluginSlot >= 0) used[f.pluginSlot] = true;
+        Endpoint e = findEndpoint(p, id);
+        if (!e.bridge) return;
+        int slot = *e.slot >= 0 ? *e.slot : -1;
+        for (int s = 0; slot < 0 && s < kMaxPlugins; s++) if (!used[s]) slot = s;
+        if (slot < 0) return;
+        *e.bridge = bridge; *e.slot = slot; ok = true;
     });
     return ok;
 }
-bool Engine::detachPlugin(int track) {
+bool Engine::detachPlugin(int id) {
     bool ok = false;
-    edit([&](Project& p) { for (auto& t : p.tracks) if (t.id == track && t.plugin) { t.plugin.reset(); t.pluginSlot = -1; ok = true; } });
+    edit([&](Project& p) { Endpoint e = findEndpoint(p, id); if (e.bridge && *e.bridge) { e.bridge->reset(); *e.slot = -1; ok = true; } });
     return ok;
 }
-int Engine::pluginState(int track) {
+int Engine::pluginState(int id) {
     std::lock_guard<std::mutex> lk(editMutex_);
-    for (auto& t : current_->tracks) if (t.id == track) {
-        if (!t.plugin) return 0;
-        uint32_t s = t.plugin->hostState();
-        return s == ZK_HOST_READY ? 2 : s == ZK_HOST_ERROR ? 3 : 1;
-    }
-    return 0;
+    auto b = bridgeOf(current_, id);
+    if (!b) return 0;
+    uint32_t s = b->hostState();
+    return s == ZK_HOST_READY ? 2 : s == ZK_HOST_ERROR ? 3 : 1;
 }
-std::string Engine::pluginName(int track) {
+std::string Engine::pluginName(int id) {
     std::lock_guard<std::mutex> lk(editMutex_);
-    for (auto& t : current_->tracks) if (t.id == track && t.plugin) return t.plugin->pluginName();
-    return "";
+    auto b = bridgeOf(current_, id); return b ? b->pluginName() : "";
 }
-Engine::PluginStats Engine::pluginStats(int track) {
+int Engine::pluginKind(int id) {
     std::lock_guard<std::mutex> lk(editMutex_);
-    for (auto& t : current_->tracks) if (t.id == track && t.plugin) return {t.plugin->late(), t.plugin->blocks(), t.plugin->waitedBlocks(), t.plugin->waitNsTotal(), t.plugin->waitNsMax()};
+    auto b = bridgeOf(current_, id); return b ? (int)b->kind() : 0;
+}
+Engine::PluginStats Engine::pluginStats(int id) {
+    std::lock_guard<std::mutex> lk(editMutex_);
+    if (auto b = bridgeOf(current_, id)) return {b->late(), b->blocks(), b->waitedBlocks(), b->waitNsTotal(), b->waitNsMax()};
     return {0, 0, 0, 0, 0};
 }
-static std::shared_ptr<PluginBridge> bridgeOf(const std::shared_ptr<const Project>& p, int track) {
-    for (auto& t : p->tracks) if (t.id == track) return t.plugin;
+
+// ---------- insert effects ----------
+int Engine::addFx(int track, int position) {
+    int id = 0;
+    edit([&](Project& p) {
+        std::vector<FxState>* v = nullptr;
+        if (track == 0) v = &p.masterFx; else for (auto& t : p.tracks) if (t.id == track) v = &t.fx;
+        if (!v || (int)v->size() >= kMaxFx) return;
+        FxState f; f.id = nextFxId_++; id = f.id;
+        position = std::clamp(position, 0, (int)v->size());
+        v->insert(v->begin() + position, std::move(f));
+    });
+    return id;
+}
+// Finds the chain that holds an effect (callers hold a mutable project copy).
+static std::vector<FxState>* chainOf(Project& p, int fxId, int* index) {
+    auto look = [&](std::vector<FxState>& v) -> std::vector<FxState>* { for (size_t i = 0; i < v.size(); i++) if (v[i].id == fxId) { *index = (int)i; return &v; } return nullptr; };
+    if (auto* v = look(p.masterFx)) return v;
+    for (auto& t : p.tracks) if (auto* v = look(t.fx)) return v;
     return nullptr;
 }
+bool Engine::removeFx(int fxId) {
+    bool ok = false;
+    edit([&](Project& p) { int i = 0; if (auto* v = chainOf(p, fxId, &i)) { v->erase(v->begin() + i); ok = true; } });
+    return ok;
+}
+bool Engine::moveFx(int fxId, int newIndex) {
+    bool ok = false;
+    edit([&](Project& p) {
+        int i = 0; auto* v = chainOf(p, fxId, &i); if (!v) return;
+        newIndex = std::clamp(newIndex, 0, (int)v->size() - 1);
+        FxState f = std::move((*v)[i]); v->erase(v->begin() + i); v->insert(v->begin() + newIndex, std::move(f)); ok = true;
+    });
+    return ok;
+}
+bool Engine::setFxBypass(int fxId, bool bypass) {
+    bool ok = false;
+    edit([&](Project& p) { int i = 0; if (auto* v = chainOf(p, fxId, &i)) { (*v)[i].bypass = bypass; ok = true; } });
+    return ok;
+}
+
 int Engine::paramCount(int track) { std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b && b->ready() ? b->paramCount() : 0; }
 bool Engine::paramInfo(int track, int index, std::string* name, std::string* units, float* def, int* steps) {
     std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); if (!b) return false;
@@ -377,15 +564,15 @@ static float laneValueAt(const AutoLane& l, int64_t pos) {
     return l.values[lo] + (float)((l.values[hi] - l.values[lo]) * t);
 }
 // Appends the automation changes for the block starting at [pos]. [last] holds the last value sent per lane (NaN = send now).
-static void appendAutomation(const TrackState& t, int64_t pos, float* last, ZkParamChange* ch, int& nc) {
-    for (size_t i = 0; i < t.lanes.size() && i < (size_t)kMaxLanes; i++) {
+static void appendAutomation(const std::vector<AutoLane>& lanes, int64_t pos, float* last, ZkParamChange* ch, int& nc) {
+    for (size_t i = 0; i < lanes.size() && i < (size_t)kMaxLanes; i++) {
         if (nc >= ZK_MAX_PARAM_CHANGES) break;
-        const float v = laneValueAt(t.lanes[i], pos);
-        if (std::isnan(last[i]) || std::fabs(v - last[i]) > 0.0005f) { ch[nc++] = ZkParamChange{(uint32_t)t.lanes[i].param, v}; last[i] = v; }
+        const float v = laneValueAt(lanes[i], pos);
+        if (std::isnan(last[i]) || std::fabs(v - last[i]) > 0.0005f) { ch[nc++] = ZkParamChange{(uint32_t)lanes[i].param, v}; last[i] = v; }
     }
 }
 void Engine::setAutomation(int track, std::vector<AutoLane> lanes) {
-    edit([&](Project& p) { for (auto& t : p.tracks) if (t.id == track) t.lanes = std::move(lanes); });
+    edit([&](Project& p) { Endpoint e = findEndpoint(p, track); if (e.lanes) *e.lanes = std::move(lanes); });
 }
 int Engine::pollEdits(int track, ZkParamChange* out, int max) {
     std::lock_guard<std::mutex> lk(editMutex_); auto b = bridgeOf(current_, track); return b ? b->pollEdits(out, max) : 0;
@@ -397,16 +584,12 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
     uint32_t tail = liveTail_.load(std::memory_order_relaxed), head = liveHead_.load(std::memory_order_acquire);
     while (tail != head && nl < 64) le[nl++] = live_[tail++ % live_.size()];
     liveTail_.store(tail, std::memory_order_release);
-    ParamEvt pe[ZK_MAX_PARAM_CHANGES * 2]; int np = 0;
-    { uint32_t pt = paramTail_.load(std::memory_order_relaxed), ph = paramHead_.load(std::memory_order_acquire);
-      while (pt != ph && np < ZK_MAX_PARAM_CHANGES * 2) pe[np++] = paramQ_[pt++ % paramQ_.size()];
-      paramTail_.store(pt, std::memory_order_release); }
     for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0 && t.plugin->ready()) {
         ZkEvent ev[ZK_MAX_EVENTS]; int n = 0;
         ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
-        for (int i = 0; i < np; i++) if (pe[i].track == t.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe[i].index, pe[i].value};
+        for (int i = 0; i < np_; i++) if (pe_[i].track == t.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe_[i].index, pe_[i].value};
         if (!playing || jumped) for (int k = 0; k < kMaxLanes; k++) autoLast_[t.pluginSlot][k] = NAN;  // re-send values when playback (re)starts
-        if (playing) appendAutomation(t, windowPos, autoLast_[t.pluginSlot], ch, nc);
+        if (playing) appendAutomation(t.lanes, windowPos, autoLast_[t.pluginSlot], ch, nc);
         if (jumped) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)
@@ -430,6 +613,7 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
         const bool jumped = (playing != pluginWasPlaying_) || (playing && pos != pluginExpectedPos_);
         // Plugin block requested one callback ago (bounded wait: never stall the audio thread).
         const int64_t budgetNs = (int64_t)(0.5 * 1e9 * frames / kProjectRate);
+        drainParams();
         pluginCollect(*p, audioMix_, frames, budgetNs);
         if (jumped) for (int s = 0; s < kMaxPlugins; s++) memset(audioMix_.plugOut[s], 0, sizeof(float) * 2 * frames);
         // Plugins run one block behind: the block submitted now is heard on the next callback. When playback starts or the
@@ -438,8 +622,14 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
         const bool preroll = playing && jumped;
         audioMix_.playClips = playing && !preroll;
         int64_t next = pos;
-        if (playing && !preroll) next = renderBlock(*p, pos, frames, out, audioMix_, meters_);
-        else mix(*p, pos, frames, out, audioMix_, meters_, 0);
+        if (audioMix_.playClips) next = renderBlockDry(*p, pos, frames, audioMix_);
+        else { for (size_t ti = 0; ti < p->tracks.size() && ti < (size_t)kMaxTracks; ti++) memset(audioMix_.dry[ti], 0, sizeof(float) * 2 * frames); accumulateDry(*p, pos, frames, audioMix_, 0); }
+        posRing_[blockCounter_ & 31] = audioMix_.playClips ? pos : -1;
+        fxRealtime(*p, audioMix_, frames, budgetNs);
+        mixTracks(*p, frames, out, audioMix_, meters_);
+        masterFxRealtime(*p, audioMix_, out, frames, budgetNs);
+        masterOut(*p, frames, out, audioMix_, meters_);
+        blockCounter_++;
         pos_.store(next, std::memory_order_relaxed);
         pluginSubmit(*p, preroll ? pos : next, frames, playing, jumped, true);
         pluginWasPlaying_ = playing; pluginExpectedPos_ = next;

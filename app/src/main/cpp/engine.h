@@ -17,6 +17,7 @@ namespace zedok {
 constexpr int kProjectRate = 48000;
 constexpr int kMaxTracks = 256;
 constexpr int kCallbackFrames = 128;  // fixed audio callback size; also the plugin bridge block size
+constexpr int kCallbackFramesFx = 128;  // same, for the effect pipeline buffers (declared before kCallbackFrames users)
 
 using AudioData = std::shared_ptr<const std::vector<float>>;  // interleaved stereo @ kProjectRate
 
@@ -34,11 +35,22 @@ struct Note {
     uint8_t pitch = 60, velocity = 100, channel = 0;
 };
 
-constexpr int kMaxPlugins = 16;
+constexpr int kMaxPlugins = 64;   // instruments and effects share these slots (one Wine process each)
+constexpr int kMaxFx = 10;        // insert effects per track, and on the master
+constexpr int kFxIdBase = 1000;   // effect ids start here, so one id space addresses instruments (track ids) and effects
 
 // Parameter automation: piecewise-linear lane of a plugin parameter, points sorted by frame.
 struct AutoLane { int param = 0; std::vector<int64_t> frames; std::vector<float> values; std::vector<uint8_t> shapes; };  // shape of the segment starting at each point: 0 linear, 1 step, 2 smooth
 constexpr int kMaxLanes = 32;
+
+// One insert effect: a VST3 plugin in its own Wine host, processing the track's (or the master's) audio.
+struct FxState {
+    int id = 0;
+    std::shared_ptr<PluginBridge> plugin;
+    int pluginSlot = -1;                            // index into MixState::plugOut
+    bool bypass = false;
+    std::vector<AutoLane> lanes;
+};
 
 struct TrackState {
     int id = 0;
@@ -47,6 +59,7 @@ struct TrackState {
     std::vector<AutoLane> lanes;                    // parameter automation
     std::shared_ptr<PluginBridge> plugin;           // optional Wine-hosted instrument
     int pluginSlot = -1;                            // index into MixState::plugOut
+    std::vector<FxState> fx;                        // insert effects, in series, after the clips and the instrument
     float gain = 1.f, pan = 0.f;
     bool mute = false, solo = false;
 };
@@ -54,14 +67,30 @@ struct TrackState {
 // Immutable snapshot, published by the UI thread and read by the audio thread.
 struct Project {
     std::vector<TrackState> tracks;
+    std::vector<FxState> masterFx;                  // insert effects on the summed mix
     float masterGain = 1.f;
     bool loop = false;
     int64_t loopStart = 0, loopEnd = 0;
 };
 
 // Per-render mutable state (gain smoothing, meters). One per render context.
+// Pipeline state of one effect chain (audio thread only). Effects run one callback behind each other: the result of the effect
+// at position i for block P arrives i+1 callbacks after P was rendered. `hold` delays a bypassed effect by the same one callback;
+// `fin` delays shorter chains so every track lines up with the longest one (plugin delay compensation).
+struct FxChain {
+    float hold[kMaxFx][kCallbackFramesFx * 2];
+    float fin[kMaxFx + 1][kCallbackFramesFx * 2];
+    int finPos = 0;
+    int sig = -1;  // chain length and compensation it was set up for; a change clears the buffers
+};
+
 struct MixState {
     float plugOut[kMaxPlugins][ZK_MAX_FRAMES * 2];  // block returned by each plugin (interleaved)
+    float dry[kMaxTracks][ZK_MAX_FRAMES * 2];       // each track's own signal (clips + instrument), then after its effects
+    float stage[kMaxFx][kCallbackFramesFx * 2];     // scratch: outputs of the effects of the chain being processed
+    FxChain chain[kMaxTracks];
+    FxChain masterChain;
+    int latencyBlocks = 0;                          // longest track chain (callbacks), set by Engine::fxRealtime
     float smoothGain[kMaxTracks];
     float smoothMaster = 1.f;
     bool init = false;
@@ -107,6 +136,12 @@ public:
     int pluginState(int track);  // 0 none, 1 starting, 2 ready, 3 error
     std::string pluginName(int track);
     void liveNote(int track, bool on, int pitch, int velocity);  // MIDI keyboard / on-screen keys (any thread)
+    // --- insert effects (track 0 = the master). Ids >= kFxIdBase work with every plugin call above and below (bridge, params, editor...) ---
+    int addFx(int track, int position);          // returns the effect id, 0 on failure (limit reached)
+    bool removeFx(int fxId);
+    bool moveFx(int fxId, int newIndex);
+    bool setFxBypass(int fxId, bool bypass);
+    int pluginKind(int id);                       // 0 unknown, 1 instrument, 2 effect (as reported by the loaded plugin)
     // --- plugin parameters (normalized 0..1) ---
     int paramCount(int track);
     bool paramInfo(int track, int index, std::string* name, std::string* units, float* def, int* steps);
@@ -147,12 +182,27 @@ public:
 private:
     template <class F> void edit(F&& f);  // copy-on-write publish
     void publish(std::shared_ptr<Project> p);
-    // Renders `frames` frames starting at `pos` into out (interleaved stereo). Real-time safe.
-    static void mix(const Project& p, int64_t pos, int frames, float* out, MixState& ms, std::atomic<float>* meters, int plugOffset);
-    // Handles looping while rendering a block; returns the new position.
-    static int64_t renderBlock(const Project& p, int64_t pos, int frames, float* out, MixState& ms, std::atomic<float>* meters);
+    // --- rendering (real-time safe) ---
+    // Adds the clips (when ms.playClips) and the instrument output of the segment [pos, pos+n) to each track's dry buffer at `offset`.
+    static void accumulateDry(const Project& p, int64_t pos, int n, MixState& ms, int offset);
+    // Zeroes the dry buffers, then accumulates `frames` frames from `pos` (following loop wraps); returns the new position.
+    static int64_t renderBlockDry(const Project& p, int64_t pos, int frames, MixState& ms);
+    // Applies gain, pan, mute/solo to each track's dry buffer and sums into out (interleaved stereo); no master gain yet.
+    static void mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters);
+    // Master gain and meter.
+    static void masterOut(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters);
+    // Effect chains, pipelined (audio callback): results arrive one callback later per effect; tracks are delay-compensated.
+    void fxRealtime(const Project& p, MixState& ms, int frames, int64_t budgetNs);
+    void masterFxRealtime(const Project& p, MixState& ms, float* out, int frames, int64_t budgetNs);
+    // Effect chains, synchronous (offline render): every effect is waited for, so there is no added latency. `pos` is the block's position.
+    void fxOffline(const Project& p, MixState& ms, int frames, int64_t pos);
+    void fxOfflineMaster(const Project& p, float* out, int frames, int64_t pos);
+    // Sends one block to an effect; automation and UI parameter edits are applied at the start of the block.
+    void fxSubmit(const FxState& fx, const float* in, int frames, int64_t autoPos, float* autoLast, int64_t* lastPos);
+    void drainParams();
     // Plugin pipeline: collect the block requested one callback ago, then request the next window.
     struct LiveEvt { int track; uint8_t on, pitch, vel; };
+    struct ParamEvt { int track, index; float value; };
     static void pluginCollect(const Project& p, MixState& ms, int frames, int64_t maxWaitNs);
     void pluginSubmit(const Project& p, int64_t windowPos, int frames, bool playing, bool jumped, bool drainLive);
     static void windowEvents(const Project& p, const TrackState& t, int64_t pos, int frames, ZkEvent* ev, int& n);
@@ -187,8 +237,13 @@ private:
     std::mutex liveMutex_;
     std::array<LiveEvt, 256> live_;
     std::atomic<uint32_t> liveHead_{0}, liveTail_{0};
-    struct ParamEvt { int track, index; float value; };
     std::mutex paramMutex_;
+    ParamEvt pe_[ZK_MAX_PARAM_CHANGES * 2]; int np_ = 0;                 // UI parameter edits drained at the start of this callback
+    uint64_t blockCounter_ = 0; int64_t posRing_[32] = {};                // audio thread: timeline position of the last callbacks (-1 = not playing)
+    float fxAutoLast_[kMaxPlugins][kMaxLanes];                           // audio thread: last automation value sent per effect slot
+    int64_t fxLastPos_[kMaxPlugins] = {};                                // audio thread: position of the block last sent to each effect slot
+    float fxAutoLastOff_[kMaxPlugins][kMaxLanes];                        // offline render: same, separate state
+    int nextFxId_ = kFxIdBase;
     std::array<ParamEvt, 512> paramQ_;
     float autoLast_[kMaxPlugins][kMaxLanes];  // audio thread: last automation value sent per (plugin slot, lane); NaN = unsent
     std::atomic<uint32_t> paramHead_{0}, paramTail_{0};

@@ -10,6 +10,11 @@ static std::string str(JNIEnv* env, jstring s) { const char* c = env->GetStringU
 
 J(jboolean, start) { return eng().start(); }
 J(void, stop) { eng().stop(); }
+J(jint, addFx, jint track, jint position) { return eng().addFx(track, position); }
+J(jboolean, removeFx, jint id) { return eng().removeFx(id); }
+J(jboolean, moveFx, jint id, jint index) { return eng().moveFx(id, index); }
+J(jboolean, setFxBypass, jint id, jboolean bypass) { return eng().setFxBypass(id, bypass); }
+J(jint, pluginKind, jint id) { return eng().pluginKind(id); }
 J(jint, trackIdsUsed) { return eng().trackIdsUsed(); }
 J(jboolean, resetTrackIds) { return eng().resetTrackIds(); }
 J(void, configure, jint outDevice, jint bufferMult, jboolean exclusive) { eng().configure(outDevice, bufferMult, exclusive); }

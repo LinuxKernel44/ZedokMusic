@@ -45,6 +45,11 @@ class PluginHost(private val ctx: Context) {
     fun launch(track: Int, pluginPath: String): Boolean {
         ensureHostExe()
         ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
+        return startHost(track, pluginPath, 0)
+    }
+
+    /** Creates the bridge and starts the Wine process. A host that dies before it is ready (Wine and the X server occasionally fail while several start at once) is started again, twice at most. */
+    private fun startHost(track: Int, pluginPath: String, attempt: Int): Boolean {
         val bridge = File(files, "bridge_$track.bin")
         if (!NativeEngine.createPluginBridge(track, bridge.absolutePath)) return false
         val args = arrayOf(toWinPath(File(files, "zhost.exe").absolutePath), toWinPath(pluginPath), toWinPath(bridge.absolutePath))
@@ -56,14 +61,50 @@ class PluginHost(private val ctx: Context) {
             val guiOn = guiRunning && mode == "full"  // ("kill" mode also ends up here with guiRunning = false)
             val dbg = debugChannels()
             val pb = env.wine(*(if (guiOn) gui.desktopArgs() + args else args), debug = dbg, extraEnv = if (guiOn) ({ e -> gui.wineEnv(e) }) else null)
-            synchronized(processes) { processes[track] = pb.redirectOutput(File(files, "host_$track.log")).start() }
+            val proc = pb.redirectOutput(File(files, "host_$track.log")).start()
+            synchronized(processes) { processes[track] = proc }
+            // The process started here is only a launcher when the X desktop already exists, so watch the host itself: if no
+            // zhost for this bridge is running a few seconds after the start and it never became ready, start it again.
+            if (attempt < 2) Thread {
+                val t0 = System.currentTimeMillis(); var gone = 0
+                while (System.currentTimeMillis() - t0 < 90_000) {
+                    Thread.sleep(2000)
+                    if (synchronized(processes) { processes[track] !== proc }) return@Thread   // stopped (or replaced)
+                    if (NativeEngine.pluginState(track) == 2) return@Thread
+                    gone = if (hostRunning(track)) 0 else gone + 1
+                    if (gone >= 3 && System.currentTimeMillis() - t0 > 8_000) {
+                        synchronized(processes) { processes.remove(track) }
+                        startHost(track, pluginPath, attempt + 1); return@Thread
+                    }
+                }
+            }.start()
         }.start()
         return true
+    }
+
+    /** Is a zhost for this track's bridge running? (Scans our own processes' command lines.) */
+    private fun hostRunning(track: Int): Boolean {
+        val tag = "bridge_$track.bin"
+        return File("/proc").listFiles()?.any { d ->
+            d.name.all { it.isDigit() } && runCatching { File(d, "cmdline").readText().let { it.contains(tag) && it.contains("zhost") } }.getOrDefault(false)
+        } == true
     }
 
     fun stop(track: Int) {
         NativeEngine.detachPlugin(track)  // the bridge sets quit once its last snapshot is retired
         synchronized(processes) { processes.remove(track) }?.let { p -> Thread { if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly() }.start() }
+    }
+
+    /** Asks zhost what a plugin is (1 instrument, 2 effect, 0 unknown) without starting it. Blocking, a few seconds. */
+    fun probe(pluginPath: String): Int {
+        val out = File(files, "probe.txt"); out.delete()
+        return try {
+            val args = arrayOf(toWinPath(File(files, "zhost.exe").absolutePath), "--probe", toWinPath(pluginPath), toWinPath(out.absolutePath))
+            ensureHostExe()
+            val p = env.wine(*args).redirectOutput(File(files, "probe.log")).start()
+            if (!p.waitFor(90, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); 0 }
+            else out.takeIf { it.exists() }?.readText()?.substringBefore('\t')?.trim()?.toIntOrNull() ?: 0
+        } catch (e: Exception) { 0 }
     }
 
     // ---------- Windows installers (.exe / .msi) ----------

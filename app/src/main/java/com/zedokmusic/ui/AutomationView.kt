@@ -23,7 +23,7 @@ import com.zedokmusic.model.*
 /** Draws parameter automation: tap to add a point, drag to move it, double-tap to delete it. Arm REC and move a knob to record. */
 @Composable
 fun AutomationView(vm: DawViewModel) {
-    val t = vm.selected?.takeIf { it.kind == TrackKind.Instrument } ?: vm.tracks.firstOrNull { it.kind == TrackKind.Instrument }
+    val t = vm.panelPlugin()
     if (t == null || t.pluginState != 2) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Add an instrument track and wait for its green dot.", color = Zk.dim, fontSize = 13.sp) }
         return
@@ -33,6 +33,7 @@ fun AutomationView(vm: DawViewModel) {
     val short = LocalShort.current
     var sel by remember(lane) { mutableIntStateOf(-1) }  // selected point (its outgoing segment gets the shape buttons)
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
+        PluginChooser(vm, t)
         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = if (short) 3.dp else 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(lane?.paramName ?: "No automation yet", color = t.color, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

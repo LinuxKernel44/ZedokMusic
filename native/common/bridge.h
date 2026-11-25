@@ -26,7 +26,7 @@ struct ZkBridge {
     volatile uint32_t quit;            // set by engine
     uint32_t sample_rate, max_frames;  // set by engine before launching the host
     volatile uint32_t host_error;      // error code when host_state == ZK_HOST_ERROR
-    uint32_t reserved0;
+    volatile uint32_t plugin_kind;     // written by host: 0 unknown, 1 instrument, 2 effect (from the VST3 sub-categories)
     char plugin_name[96];              // written by host
     char _pad0[64];
     // --- plugin editor (GUI) ---

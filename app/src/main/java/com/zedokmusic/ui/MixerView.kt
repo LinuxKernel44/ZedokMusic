@@ -30,27 +30,28 @@ import androidx.compose.ui.unit.sp
 import com.zedokmusic.model.*
 
 @Composable
-fun MixerView(vm: DawViewModel) {
+fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
     Row(Modifier.fillMaxSize().background(Zk.bg).horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         vm.tracks.forEach { t ->
-            Strip(t.name, t.color, t.gain, t.pan, t.meter, t.mute, t.solo, vm.selected == t,
+            Strip(t.name, t.color, t.gain, t.pan, t.meter, t.mute, t.solo, vm.selected == t, t.fx.size, t.fx.any { !it.bypass }, { onInserts(t) },
                 onGain = { vm.setGain(t, it) }, onPan = { vm.setPan(t, it) }, onMute = { vm.setMute(t, !t.mute) }, onSolo = { vm.setSolo(t, !t.solo) }, onSelect = { vm.selected = t })
         }
-        Strip("Master", Zk.text, vm.masterGain, null, vm.masterMeter, false, false, false, onGain = { vm.setMaster(it) }, onPan = {}, onMute = {}, onSolo = {}, onSelect = {})
+        Strip("Master", Zk.text, vm.masterGain, null, vm.masterMeter, false, false, false, vm.masterFx.size, vm.masterFx.any { !it.bypass }, { onInserts(null) }, onGain = { vm.setMaster(it) }, onPan = {}, onMute = {}, onSolo = {}, onSelect = {})
         if (vm.tracks.isEmpty()) Text("No tracks yet", color = Zk.dim, modifier = Modifier.padding(16.dp))
     }
 }
 
 @Composable
-private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: Float, mute: Boolean, solo: Boolean, selected: Boolean,
+private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: Float, mute: Boolean, solo: Boolean, selected: Boolean, fxCount: Int, fxOn: Boolean, onFx: () -> Unit,
                   onGain: (Float) -> Unit, onPan: (Float) -> Unit, onMute: () -> Unit, onSolo: () -> Unit, onSelect: () -> Unit) {
     Column(Modifier.width(92.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Zk.panel).border(1.dp, if (selected) color else Zk.line, RoundedCornerShape(12.dp))
         .pointerInput(Unit) { detectTapGestures { onSelect() } }.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(name, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        LabelButton(if (fxCount == 0) "FX" else "FX $fxCount", fxOn, color, w = 60.dp, h = 26.dp, onClick = onFx)
         if (pan != null) {
             Slider(pan, onPan, valueRange = -1f..1f, modifier = Modifier.height(28.dp).doubleTapReset { onPan(0f) }, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = Zk.line, inactiveTrackColor = Zk.line))
             Text(if (pan == 0f) "C" else if (pan < 0) "L${(-pan * 100).toInt()}" else "R${(pan * 100).toInt()}", color = Zk.dim, fontSize = 10.sp)
-        } else Spacer(Modifier.height(40.dp))
+        } else Spacer(Modifier.height(28.dp))
         Row(Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
             Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight().doubleTapReset { onGain(1f) })  // double tap = 0 dB
             Meter(meter, Modifier.width(14.dp).fillMaxHeight())

@@ -8,7 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
-enum class TrackKind { Instrument, Audio }
+enum class TrackKind { Instrument, Audio, Effect }  // Effect: an insert effect (not a mixer track of its own; it lives in TrackM.fx or VM.masterFx)
 
 /** A MIDI note. Positions are in beats (quarter notes) so the arrangement survives tempo changes. */
 class NoteM(val pitch: Int, val start: Float, val length: Float, val velocity: Int = 100)
@@ -37,6 +37,10 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     val lanes = mutableStateListOf<AutoLane>()
     /** The plugin's own editor window is open (it stays open while you look at other tracks). */
     var editorOpen by mutableStateOf(false)
+    /** Insert effects of this track, in series after the clips and the instrument. */
+    val fx = mutableStateListOf<TrackM>()
+    /** For an insert effect: processing is skipped (the audio passes through). */
+    var bypass by mutableStateOf(false)
 
     /** End of the content in beats, rounded up to whole bars (min 1 bar). */
     fun lengthBeats(bpm: Float): Float {
@@ -59,7 +63,7 @@ class AutoLane(val paramName: String, var paramIndex: Int) {
 
 class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int)
 
-class PluginInfo(val name: String, val path: String)
+class PluginInfo(val name: String, val path: String, val kind: Int = 0)  // kind: 0 unknown, 1 instrument, 2 effect
 
 val TrackColors = listOf(
     Color(0xFF3DDCC4), Color(0xFFFF7A59), Color(0xFF8E7CFF), Color(0xFFFFC857),
