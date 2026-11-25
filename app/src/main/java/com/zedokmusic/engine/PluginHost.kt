@@ -108,6 +108,34 @@ class PluginHost(private val ctx: Context) {
         } catch (e: Exception) { 0 }
     }
 
+    // ---------- full Windows desktop (Settings) ----------
+    @Volatile private var desktop: Process? = null
+    val desktopRunning get() = desktop?.isAlive == true
+
+    private fun ensureShellExe(): File {
+        val exe = File(files, "zshell.exe"); val bundled = ctx.assets.open("zshell.exe").use { it.readBytes() }
+        if (!exe.exists() || !exe.readBytes().contentEquals(bundled)) exe.writeBytes(bundled)
+        return exe
+    }
+
+    /** Starts the desktop (Wine explorer + the taskbar) on an X screen of [w] x [h]. Every plugin host must be stopped first. Blocking. */
+    fun startDesktop(w: Int, h: Int): Boolean {
+        ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
+        gui.reset()
+        if (!gui.ensureRunning(w, h)) return false
+        val shell = toWinPath(ensureShellExe().absolutePath)
+        val pb = env.wine(*(gui.desktopArgs("zdesk", w, h) + arrayOf(shell)), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
+        pb.directory(File(files, "home")); pb.redirectOutput(File(files, "desktop.log"))
+        desktop = try { pb.start() } catch (e: Exception) { return false }
+        return true
+    }
+
+    /** Ends the desktop and everything it started, and frees the X screen so plugins get the standard one again. Blocking. */
+    fun stopDesktop() {
+        desktop?.destroyForcibly(); desktop = null
+        gui.reset()
+    }
+
     // ---------- Windows installers (.exe / .msi) ----------
     @Volatile private var installer: Process? = null
     val installerRunning get() = installer?.isAlive == true

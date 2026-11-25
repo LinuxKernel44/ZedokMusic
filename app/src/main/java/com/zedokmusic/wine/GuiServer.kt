@@ -24,6 +24,9 @@ class GuiServer(private val ctx: Context) {
         const val INSTALLER_ZOOM_W = 760; const val INSTALLER_ZOOM_H = 570         // closer, easier to touch on a phone
     }  // three editors fit, one per slot
 
+    /** Size of the X screen now running (the plugin editors' layout, or the Windows desktop's). */
+    @Volatile var screenW = WIDTH; @Volatile var screenH = HEIGHT
+
     val available get() = xvfbBin.exists() && File(env.root, "usr/lib/libxshim.so").exists()
 
     /** Environment additions that let Wine (through Box64) reach the X server. */
@@ -36,13 +39,14 @@ class GuiServer(private val ctx: Context) {
     }
 
     /** Starts Xvfb if needed and opens the display. Blocking (a few seconds the first time). Returns false when GUIs are unavailable. */
-    @Synchronized fun ensureRunning(): Boolean {
+    @Synchronized fun ensureRunning(w: Int = WIDTH, h: Int = HEIGHT): Boolean {
         if (!available) return false
-        if (xvfb?.isAlive == true && socket.exists()) return true
-        return try { start() } catch (e: Exception) { false }
+        if (xvfb?.isAlive == true && socket.exists() && screenW == w && screenH == h) return true
+        return try { start(w, h) } catch (e: Exception) { false }
     }
 
-    private fun start(): Boolean {
+    private fun start(w: Int, h: Int): Boolean {
+        screenW = w; screenH = h
         XDisplay.inputClose()
         xvfb?.destroyForcibly(); xvfb = null
         // A wineserver left over from an earlier run still refers to the old X screen's desktop window: end it first.
@@ -55,7 +59,7 @@ class GuiServer(private val ctx: Context) {
         listOf(".tX0-lock", ".X0-lock").forEach { File(bin, it).delete() }
         socket.delete(); File(env.root, "tmp/.X11-unix").apply { mkdirs(); setReadable(true, false); setWritable(true, false); setExecutable(true, false) }
         File(fbDir, "Xvfb_screen0").delete(); fbDir.mkdirs(); env.home.mkdirs()
-        val pb = ProcessBuilder("./Xvfb", ":0", "-screen", "0", "${WIDTH}x${HEIGHT}x24", "-fp", "built-ins",
+        val pb = ProcessBuilder("./Xvfb", ":0", "-screen", "0", "${w}x${h}x24", "-fp", "built-ins",
             "-xkbdir", File(env.root, "usr/share/X11/xkb").absolutePath, "-nolisten", "tcp", "-extension", "MIT-SHM", "-fbdir", fbDir.absolutePath)
         pb.directory(bin)
         pb.environment().apply {
@@ -79,7 +83,7 @@ class GuiServer(private val ctx: Context) {
     }
 
     /** Wine arguments that put a program on the shared virtual desktop (no window manager is needed there). */
-    fun desktopArgs(name: String = "zedok", w: Int = WIDTH, h: Int = HEIGHT) = arrayOf("explorer", "/desktop=$name,${w}x$h")
+    fun desktopArgs(name: String = "zedok", w: Int = screenW, h: Int = screenH) = arrayOf("explorer", "/desktop=$name,${w}x$h")
 
     /** An earlier experiment set the desktop in the registry for every process; remove it (explicit launch is used instead). Once per prefix. */
     private fun clearDesktopRegistry() {
@@ -89,6 +93,13 @@ class GuiServer(private val ctx: Context) {
         env.wine("reg", "delete", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/f").start().waitFor(60, TimeUnit.SECONDS)
         env.wineserver("-w").start().waitFor(30, TimeUnit.SECONDS)
         marker.writeText("1")
+    }
+
+    /** Ends the X server and everything Wine runs on it (the next plugin or installer start brings the standard screen back). */
+    @Synchronized fun reset() {
+        XDisplay.inputClose(); xvfb?.destroyForcibly(); xvfb = null
+        runCatching { env.wineserver("-k").start().waitFor(10, TimeUnit.SECONDS) }
+        screenW = WIDTH; screenH = HEIGHT
     }
 
     fun stop() { XDisplay.inputClose(); xvfb?.destroyForcibly(); xvfb = null }

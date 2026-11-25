@@ -136,6 +136,7 @@ fun DawScreen(vm: DawViewModel) {
     if (vm.projectBusy) AlertDialog(onDismissRequest = {}, containerColor = Zk.panel, title = { Text("Opening project…") }, text = { LinearProgressIndicator(Modifier.fillMaxWidth()) }, confirmButton = {})
     if (insertsOpen) InsertsDialog(vm, insertsOwner, { fx -> insertsOwner?.let { vm.selected = it }; vm.pluginTarget = fx; panel = Panel.Plugin; bottom = Panel.Plugin; insertsOpen = false }, { dialog = "fxpicker" }, { insertsOpen = false })
     InstallerScreen(vm)
+    DesktopScreen(vm)
     if (showSettings) SettingsScreen(vm, { showUpdate = true }) { showSettings = false }
     UpdateDialog(vm, showUpdate) { showUpdate = false; Updater.dismiss() }
     DisplaySettingsEffect(vm.playing)

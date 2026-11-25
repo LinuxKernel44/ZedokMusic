@@ -436,6 +436,33 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }.start()
     }
 
+    // ---------- full Windows desktop ----------
+    var desktopOpen by mutableStateOf(false); private set
+    var desktopStarting by mutableStateOf(false); private set
+    var desktopW by mutableIntStateOf(0); private set
+    var desktopH by mutableIntStateOf(0); private set
+
+    /** Opens a complete Windows desktop (taskbar, file manager, registry...). The project is saved and its plugins are stopped: the desktop needs the whole X screen, and they come back when it closes. */
+    fun openDesktop(w: Int, h: Int) {
+        if (desktopOpen || desktopStarting || projectBusy) return
+        if (recording) stopRecording()
+        e.pause(); playing = false
+        save()
+        desktopStarting = true; desktopW = w; desktopH = h
+        closeCurrent()
+        Thread {
+            Thread.sleep(2500)  // let the stopped plugins' Wine processes end
+            val ok = host.startDesktop(w, h)
+            if (ok) { desktopOpen = true } else { message = "Could not start the Windows desktop."; host.stopDesktop(); reloadCurrent() }
+            desktopStarting = false
+        }.start()
+    }
+    fun closeDesktop() {
+        if (!desktopOpen) return
+        desktopOpen = false; desktopStarting = true
+        Thread { host.stopDesktop(); desktopStarting = false; viewModelScope.launch { reloadCurrent() } }.start()
+    }
+
     // ---------- Windows plugin installers ----------
     /** Name of the installer whose screen is shown (null = none). */
     var installerName by mutableStateOf<String?>(null); private set

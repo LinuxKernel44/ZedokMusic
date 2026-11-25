@@ -77,7 +77,7 @@ fun InstallerScreen(vm: DawViewModel) {
                     // Windows centre themselves on the 1600x3000 desktop: show the middle of it, closer or wider.
                     val w = if (zoom) GuiServer.INSTALLER_ZOOM_W else GuiServer.INSTALLER_VIEW_W
                     val h = if (zoom) GuiServer.INSTALLER_ZOOM_H else GuiServer.INSTALLER_VIEW_H
-                    key(w) { EditorSurface(w, h, (GuiServer.WIDTH - w) / 2, GuiServer.HEIGHT / 2 - h / 2, keys) }
+                    key(w) { EditorSurface(w, h, (GuiServer.WIDTH - w) / 2, GuiServer.HEIGHT / 2 - h / 2, keys) }  // the installer runs on the standard 1600x3000 screen
                 }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("The installer has ended.", color = Zk.text, fontSize = 15.sp) }
             }

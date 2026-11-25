@@ -33,12 +33,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private enum class Section(val label: String) { Audio("Audio"), Project("Project"), Plugins("Plugins"), Midi("MIDI"), Display("Display"), Storage("Storage"), Updates("Updates"), About("About") }
+private enum class Section(val label: String) { Audio("Audio"), Project("Project"), Plugins("Plugins"), Midi("MIDI"), Display("Display"), Storage("Storage"), Windows("Windows"), Updates("Updates"), About("About") }
 
 /** All user settings. Wide / landscape: a category list on the left and the chosen category on the right; narrow: one scrolling list. */
 @Composable
 fun SettingsScreen(vm: DawViewModel, onShowUpdate: () -> Unit, onClose: () -> Unit) {
+    var confirmDesktop by remember { mutableStateOf(false) }
+    val onOpenDesktop = { confirmDesktop = true }
     BackHandler(onBack = onClose)
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
     var section by rememberSaveable { mutableStateOf(Section.Audio) }
     Surface(Modifier.fillMaxSize(), color = Zk.bg) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(screenInsets())) {
@@ -53,15 +56,28 @@ fun SettingsScreen(vm: DawViewModel, onShowUpdate: () -> Unit, onClose: () -> Un
                     }
                     VerticalDivider(color = Zk.line)
                     Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        Box(Modifier.widthIn(max = 640.dp)) { Column { SectionContent(section, vm, onShowUpdate) } }
+                        Box(Modifier.widthIn(max = 640.dp)) { Column { SectionContent(section, vm, onShowUpdate, onOpenDesktop) } }
                     }
                 } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 4.dp)) {
-                    Section.values().forEach { s -> Header(s.label); SectionContent(s, vm, onShowUpdate) }
+                    Section.values().forEach { s -> Header(s.label); SectionContent(s, vm, onShowUpdate, onOpenDesktop) }
                     Spacer(Modifier.height(24.dp))
                 }
             }
         }
     }
+    if (confirmDesktop) AlertDialog(onDismissRequest = { confirmDesktop = false }, containerColor = Zk.panel, title = { Text("Open the Windows desktop?") },
+        text = { Text("Your project is saved and its plugins stop. The desktop needs the whole Windows screen. When you close it, the project loads again.", color = Zk.dim) },
+        confirmButton = { TextButton({
+            confirmDesktop = false
+            // The desktop is about 800 px on its short side, in the screen's own orientation (so a phone in portrait gets a tall desktop).
+            // (the desktop view sits under a 48 dp title bar and the system bars: use the room it really gets, so there is no empty band)
+            val aw = cfg.screenWidthDp.toFloat(); val land = cfg.screenWidthDp > cfg.screenHeightDp; val ah = cfg.screenHeightDp - (if (land) 80f else 130f)
+            val ratio = maxOf(aw, ah) / minOf(aw, ah)
+            val short = 800; val long = (short * ratio).toInt().coerceIn(1000, 1800) / 2 * 2
+            vm.openDesktop(if (land) long else short, if (land) short else long)
+            onClose()
+        }) { Text("Open") } },
+        dismissButton = { TextButton({ confirmDesktop = false }) { Text("Cancel") } })
 }
 
 @Composable private fun CategoryChip(text: String, active: Boolean, onClick: () -> Unit) {
@@ -141,7 +157,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
     }
 }
 
-@Composable private fun SectionContent(section: Section, vm: DawViewModel, onShowUpdate: () -> Unit) {
+@Composable private fun SectionContent(section: Section, vm: DawViewModel, onShowUpdate: () -> Unit, onOpenDesktop: () -> Unit) {
     when (section) {
         Section.Audio -> AudioSection(vm)
         Section.Project -> ProjectSection()
@@ -149,6 +165,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
         Section.Midi -> MidiSection(vm)
         Section.Display -> DisplaySection()
         Section.Storage -> StorageSection(vm)
+        Section.Windows -> WindowsSection(onOpenDesktop)
         Section.Updates -> UpdatesSection(onShowUpdate)
         Section.About -> AboutSection()
     }
@@ -222,6 +239,12 @@ private fun fmt(b: Long) = if (b >= 1L shl 30) "%.1f GB".format(b / 1073741824.0
             confirmButton = { TextButton({ ws?.let { File(it, dir).listFiles()?.forEach { f -> f.deleteRecursively() } }; confirm = null; refresh++ }) { Text("Delete", color = Zk.danger) } },
             dismissButton = { TextButton({ confirm = null }) { Text("Cancel") } })
     }
+}
+
+@Composable private fun WindowsSection(onOpen: () -> Unit) {
+    Text("A complete Windows desktop for installing and setting up plugins the way you would on a PC: taskbar, Start menu, file manager, registry editor, task manager, command prompt, control panel.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 8.dp))
+    ActionRow("Open the Windows desktop", "Your project is saved and its plugins stop while the desktop is open; they come back when you close it.", "Open", onClick = onOpen)
+    Text("Your files: D: is the ZedokMusic folder you chose (Installers, Plugins, Projects), C: is the Windows drive. Plugins installed to C:\\Program Files\\Common Files\\VST3 are found automatically; the .vst3 files in D:\\Plugins\\VST3 too.", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
 }
 
 @Composable private fun UpdatesSection(onShowUpdate: () -> Unit) {
