@@ -37,6 +37,7 @@ object AppSettings {
     // Plugins
     val editorFps = s("plugin.fps", 30)
     val wineLog = b("plugin.winelog", false)
+    val dxvk = b("plugin.dxvk", true)               // Direct3D 9-11 for plugin windows through DXVK (Vulkan)
     // MIDI
     val midiAuto = b("midi.auto", true)
     val midiChannel = s("midi.channel", 0)         // 0 = all, 1..16

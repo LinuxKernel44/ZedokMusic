@@ -1,4 +1,10 @@
-# Serum 2 does not start: findings (2026-11-25, OnePlus 15, ZedokMusic 0.16.x)
+# Serum 2 and Direct3D 11 (2026-11-25)
+
+**Resolved in 0.17.0** (software): Wine's Direct3D now runs through DXVK 2.4.1 on Vulkan, with Mesa lavapipe as the Vulkan driver
+(see tools/build-gpu-overlay.sh). Serum 2's editor opens on a Galaxy S10. The OpenGL attempt below was abandoned for this route.
+A real GPU driver (Turnip on Adreno, or Winlator's Vortek) would replace only the ICD; presenting into Xvfb is the open question.
+
+## Original findings (before 0.17.0): Serum 2 does not start
 
 **Symptom.** Serum 2 (Xfer, `Serum2.vst3`, 2.1.5) loads and shows its 2000+ parameters, but opening its editor kills the plugin host
 ("The plugin failed to start"). The host log (`<workspace>/Logs/host_<track>_<plugin>.log`) shows:

@@ -13,8 +13,8 @@ android {
         minSdk = 28
         // targetSdk 28 is required so Wine/Box64 binaries can be exec'd from app data (W^X, Android 10+).
         targetSdk = 28
-        versionCode = 32
-        versionName = "0.16.2-alpha"
+        versionCode = 33
+        versionName = "0.17.0-alpha"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }
@@ -30,6 +30,9 @@ android {
         }
     }
     buildTypes {
+        // Developer aid: ./gradlew assembleDebug -PsignDebugWithRelease signs the debug build with the release key, so it can replace a release
+        // install in place (keeping its data) and use run-as / the --es cmd hook on a real device.
+        if (project.hasProperty("signDebugWithRelease")) debug { signingConfigs.findByName("release")?.let { signingConfig = it } }
         release {
             isMinifyEnabled = false  // JNI + Compose: keep the build predictable
             isDebuggable = false

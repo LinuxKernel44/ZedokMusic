@@ -36,6 +36,13 @@ class GuiServer(private val ctx: Context) {
         e["ZSHIM_ROOT"] = env.root.absolutePath
         e["ZSHIM_KEEP"] = "1"
         e["BOX64_LD_PRELOAD"] = File(env.root, "usr/lib/libzshmstub.so").absolutePath
+        // Direct3D 9-11 through DXVK on Vulkan (software lavapipe from the runtime): plugin editors that draw with Direct3D 11 need it.
+        e["VK_ICD_FILENAMES"] = File(env.root, "usr/share/vulkan/icd.d/lvp_icd.json").absolutePath
+        if (com.zedokmusic.settings.AppSettings.dxvk.on) {
+            e["WINEDLLOVERRIDES"] = "mscoree,mshtml=;d3d11,d3d10core,dxgi,d3d9,d3d8=n,b"
+            e["DXVK_LOG_LEVEL"] = if (com.zedokmusic.settings.AppSettings.wineLog.on) "info" else "warn"
+            e["DXVK_LOG_PATH"] = "E:\\"
+        }
     }
 
     /** Starts Xvfb if needed and opens the display. Blocking (a few seconds the first time). Returns false when GUIs are unavailable. */

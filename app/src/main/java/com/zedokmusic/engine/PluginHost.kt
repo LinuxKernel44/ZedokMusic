@@ -22,6 +22,28 @@ class PluginHost(private val ctx: Context) {
         File(files, "winedebug").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null }
             ?: if (com.zedokmusic.settings.AppSettings.wineLog.on) "err+all,fixme+all" else "err+all"  // errors are always kept: they are few and explain failures
 
+    /**
+     * DXVK (Direct3D 9/10/11 over Vulkan) into the Windows system folder, from the runtime (opt/dxvk/x64). Wine's own copies are kept in
+     * system32/wine-orig and put back when the option is turned off. Done once per version / setting, before a Wine program starts.
+     */
+    @Synchronized private fun applyDxvk() {
+        val ws = StorageFolder.saved(ctx) ?: return
+        val src = File(env.root, "opt/dxvk/x64").takeIf { it.isDirectory } ?: return
+        val sys = File(ws, "C/windows/system32"); if (!sys.isDirectory) return
+        val want = if (com.zedokmusic.settings.AppSettings.dxvk.on) "dxvk-2.4.1-1" else "wine"
+        val marker = File(files, "dxvk.applied")
+        if (marker.exists() && marker.readText().trim() == want) return
+        val orig = File(sys, "wine-orig").apply { mkdirs() }
+        for (f in src.listFiles { x -> x.name.endsWith(".dll") } ?: return) {
+            val dst = File(sys, f.name); val keep = File(orig, f.name)
+            runCatching {
+                if (want == "wine") { if (keep.exists()) keep.copyTo(dst, overwrite = true) }
+                else { if (!keep.exists() && dst.exists()) dst.copyTo(keep); f.copyTo(dst, overwrite = true) }
+            }
+        }
+        marker.writeText(want)
+    }
+
     /** Where a plugin host's log goes: the workspace's Logs folder (readable with a file manager or adb), else the app's own folder. */
     private fun hostLog(track: Int, pluginPath: String): File {
         val ws = StorageFolder.saved(ctx)
@@ -66,6 +88,7 @@ class PluginHost(private val ctx: Context) {
         Thread {
             // Developer switch (file files/guimode): "none" = no X server, "xvfb" = start Xvfb but run hosts without it, default = full GUI.
             val mode = File(files, "guimode").takeIf { it.exists() }?.readText()?.trim() ?: "full"
+            applyDxvk()
             val guiRunning = mode != "none" && gui.ensureRunning()
             val guiOn = guiRunning && mode == "full"  // ("kill" mode also ends up here with guiRunning = false)
             val dbg = debugChannels()
@@ -143,6 +166,7 @@ class PluginHost(private val ctx: Context) {
     fun startDesktop(w: Int, h: Int, pluginPath: String? = null): Boolean {
         ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
         gui.reset()
+        applyDxvk()
         if (!gui.ensureRunning(w, h)) return false
         val shell = toWinPath(ensureShellExe().absolutePath)
         val extra = if (pluginPath != null) arrayOf("--edit", toWinPath(pluginPath)) else emptyArray()  // open this plugin's editor first
@@ -169,6 +193,7 @@ class PluginHost(private val ctx: Context) {
     fun runInstaller(file: File, onStarted: (Boolean) -> Unit, onExit: (Int) -> Unit) {
         Thread {
             val win = try { toWinPath(file.absolutePath) } catch (e: Exception) { onStarted(false); return@Thread }
+            applyDxvk()
             if (!gui.ensureRunning()) { onStarted(false); return@Thread }
             val args = if (file.extension.equals("msi", true)) arrayOf("msiexec", "/i", win) else arrayOf(win)
             val pb = env.wine(*(gui.desktopArgs("zinst") + args), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })

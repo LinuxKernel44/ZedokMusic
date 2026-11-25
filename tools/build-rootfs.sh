@@ -34,7 +34,10 @@ chmod -R u+rwX rf
 # GUI overlay (Xvfb + shims): built from Ubuntu packages, merged after the prefix rewrite.
 RF="$WORK/rf" WORK="$WORK" "$HERE/tools/build-gui-overlay.sh"
 cp -a "$WORK/gui-overlay/." rf/
+# GPU overlay (lavapipe + DXVK): software Vulkan and Direct3D for plugin editors.
+RF="$WORK/rf" WORK="$WORK" "$HERE/tools/build-gpu-overlay.sh"
+cp -a "$WORK/gpu-overlay/." rf/
 chmod -R u+rwX rf
 tar --numeric-owner --owner=0 --group=0 -C rf -cf - . | zstd -19 -T0 -q -f -o "$OUT/root.tar.zst"
-echo "3" > "$OUT/root.version"
+echo "5" > "$OUT/root.version"
 ls -la "$OUT"
