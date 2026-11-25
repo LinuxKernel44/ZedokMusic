@@ -16,6 +16,8 @@ object NativeEngine {
     external fun addTrack(): Int
     /** How many track ids were handed out; ids restart at 1 with [resetTrackIds] once the project has no track. */
     external fun trackIdsUsed(): Int
+    /** Releases every sounding note of an instrument track (once). */
+    external fun panic(track: Int)
     /** Insert effects: [track] 0 = the master. Effect ids (>= 1000) work with every plugin call (bridge, parameters, editor, automation). Returns 0 when full. */
     external fun addFx(track: Int, position: Int): Int
     external fun removeFx(fxId: Int): Boolean

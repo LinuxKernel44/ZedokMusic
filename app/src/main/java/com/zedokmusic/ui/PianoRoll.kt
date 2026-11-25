@@ -62,7 +62,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     var sel by remember(track.id) { mutableStateOf<NoteM?>(null) }
     val selNote = sel?.takeIf { track.notes.contains(it) }
 
-    LaunchedEffect(preview) { preview?.let { p -> vm.liveNote(track, true, p); delay(280); vm.liveNote(track, false, p); preview = null } }
+    // The note-off must always follow the note-on, even when another tap restarts this effect or the view is left during the 280 ms.
+    LaunchedEffect(preview) { preview?.let { p -> vm.liveNote(track, true, p); try { delay(280) } finally { vm.liveNote(track, false, p) }; preview = null } }
 
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(40.dp).background(Zk.panel), verticalAlignment = Alignment.CenterVertically) {

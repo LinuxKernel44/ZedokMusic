@@ -65,9 +65,11 @@ fun DawScreen(vm: DawViewModel) {
             val wide = maxWidth >= 840.dp
             // Landscape on a phone: ~380 dp of height. One-row transport, vertical tab rail, denser panels.
             val short = maxHeight < 520.dp && maxWidth > maxHeight
+            // The piano roll has its own keys on its left: the on-screen keyboard is hidden there (and its button greyed out).
+            val rollOpen = if (wide && !short) bottom == Panel.Piano else panel == Panel.Piano
             CompositionLocalProvider(LocalShort provides short) {
             Column(Modifier.fillMaxSize()) {
-                Transport(vm, !wide && !short, short, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
+                Transport(vm, !wide && !short, short, showKeys, rollOpen, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
                     onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" }, onSettings = { showSettings = true }, onProject = { dialog = it })
                 if (short) {
                     Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -99,7 +101,7 @@ fun DawScreen(vm: DawViewModel) {
                         for (p in Panel.values()) PanelChip(p.label, panel == p, Modifier.weight(1f)) { panel = p }
                     }
                 }
-                if (showKeys) {
+                if (showKeys && !rollOpen) {
                     val t = if (sel?.kind == TrackKind.Instrument) sel else vm.tracks.firstOrNull { it.kind == TrackKind.Instrument }
                     if (t != null) PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(if (short) 88.dp else if (wide) 150.dp else 130.dp))
                 }
@@ -166,7 +168,7 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit, onSettings: () -> Unit, onProject: (String) -> Unit) {
+private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, rollOpen: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit, onSettings: () -> Unit, onProject: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     // Phones: tighter sizes so the whole transport (stop, play, loop, rec, position, tempo) fits even on dense, narrow screens.
     val bs = if (compact || oneRow) 36.dp else 40.dp
@@ -221,7 +223,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
                 DropdownMenuItem(text = { Text("Install plugin (.exe)…") }, onClick = { menu = false; onInstallers() })
             }
         }
-        SquareButton(Glyph.Keys, active = keys, size = 38.dp, onClick = onKeys)
+        SquareButton(Glyph.Keys, active = keys, size = 38.dp, enabled = !rollOpen, onClick = onKeys)
         SquareButton(Glyph.Gear, size = 38.dp, onClick = onSettings)
         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable(onClick = onMidi).padding(horizontal = 12.dp, vertical = 9.dp)) { Text("MIDI", color = if (vm.midi.devices.any { it.connected }) Zk.accent else Zk.dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
         if (vm.recording && vm.selected?.kind == TrackKind.Audio) Box(Modifier.width(60.dp).height(10.dp)) { Meter(vm.recLevel, Modifier.fillMaxSize()) }

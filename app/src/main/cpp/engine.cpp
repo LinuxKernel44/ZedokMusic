@@ -19,6 +19,7 @@ Engine::Engine() {
     current_ = p;
     published_.store(p.get());
     for (auto& m : meters_) m.store(0.f);
+    for (auto& c : panicTrack_) c.store(0);
     for (auto& row : fxAutoLast_) for (auto& v : row) v = NAN;
     for (auto& row : fxAutoLastOff_) for (auto& v : row) v = NAN;
 }
@@ -584,13 +585,17 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
     uint32_t tail = liveTail_.load(std::memory_order_relaxed), head = liveHead_.load(std::memory_order_acquire);
     while (tail != head && nl < 64) le[nl++] = live_[tail++ % live_.size()];
     liveTail_.store(tail, std::memory_order_release);
+    const int panicAll = panicAll_.load(std::memory_order_relaxed);
+    if (panicAll > 0) panicAll_.store(panicAll - 1, std::memory_order_relaxed);
     for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0 && t.plugin->ready()) {
         ZkEvent ev[ZK_MAX_EVENTS]; int n = 0;
         ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
         for (int i = 0; i < np_; i++) if (pe_[i].track == t.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe_[i].index, pe_[i].value};
         if (!playing || jumped) for (int k = 0; k < kMaxLanes; k++) autoLast_[t.pluginSlot][k] = NAN;  // re-send values when playback (re)starts
         if (playing) appendAutomation(t.lanes, windowPos, autoLast_[t.pluginSlot], ch, nc);
-        if (jumped) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
+        const int pt = t.id < kMaxTracks ? panicTrack_[t.id].load(std::memory_order_relaxed) : 0;
+        if (jumped || pt > 0 || (!playing && panicAll > 0)) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
+        if (pt > 0) panicTrack_[t.id].store(pt - 1, std::memory_order_relaxed);
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)
             ev[n++] = ZkEvent{0, le[i].on ? (uint8_t)ZK_NOTE_ON : (uint8_t)ZK_NOTE_OFF, 0, le[i].pitch, le[i].vel};

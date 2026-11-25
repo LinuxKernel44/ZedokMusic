@@ -273,8 +273,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- notes ----------
     fun addNote(t: TrackM, pitch: Int, start: Float, length: Float, velocity: Int = 100) { t.notes.add(NoteM(pitch, start, length, velocity)); syncNotes(t); dirty = true }
-    fun removeNote(t: TrackM, n: NoteM) { t.notes.remove(n); syncNotes(t); dirty = true }
-    fun replaceNote(t: TrackM, old: NoteM, new: NoteM) { val i = t.notes.indexOf(old); if (i >= 0) { t.notes[i] = new; syncNotes(t); dirty = true } }
+    /** A note that is sounding right now loses its Note Off when it is deleted or changed: release the track's notes so it cannot hang. */
+    private fun releaseIfSounding(t: TrackM, n: NoteM) { if (e.isPlaying() && playhead >= n.start && playhead <= n.start + n.length) e.panic(t.id) }
+    fun removeNote(t: TrackM, n: NoteM) { releaseIfSounding(t, n); t.notes.remove(n); syncNotes(t); dirty = true }
+    fun replaceNote(t: TrackM, old: NoteM, new: NoteM) { val i = t.notes.indexOf(old); if (i >= 0) { releaseIfSounding(t, old); t.notes[i] = new; syncNotes(t); dirty = true } }
     private fun syncNotes(t: TrackM) {
         val d = LongArray(t.notes.size * 4)
         t.notes.forEachIndexed { i, n ->

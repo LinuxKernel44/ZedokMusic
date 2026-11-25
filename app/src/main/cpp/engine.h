@@ -159,7 +159,11 @@ public:
 
     // --- transport ---
     void play() { playing_.store(true); }
-    void pause() { playing_.store(false); }
+    /** Stops the transport and releases every sounding note: ALL_NOTES_OFF is sent for several blocks, because one block can be lost
+     *  when a plugin host is late, which used to leave a note sounding for good. Pressing Stop again repeats it. */
+    void pause() { playing_.store(false); panicAll_.store(12); }
+    /** Releases the notes of one instrument track once (e.g. a sounding note was deleted or moved while playing). */
+    void panic(int track) { if (track > 0 && track < kMaxTracks) panicTrack_[track].store(2); }
     void seek(int64_t f) { pos_.store(f < 0 ? 0 : f); }
     bool playing() const { return playing_.load(); }
     int64_t position() const { return pos_.load(); }
@@ -229,6 +233,7 @@ private:
     std::shared_ptr<oboe::AudioStream> stream_;
     std::atomic<int64_t> callbacks_{0};
     int outDevice_ = 0, bufferMult_ = 2; bool exclusive_ = true;  // see configure()
+    std::atomic<int> panicAll_{0}, panicTrack_[kMaxTracks];  // blocks of ALL_NOTES_OFF still to send (see pause() / panic())
     std::atomic<bool> exporting_{false};  // offline render owns the plugin bridges: the audio callback stays away from them
     std::atomic<int64_t> cbNsTotal_{0};
     std::atomic<int64_t> cbNsMax_{0};

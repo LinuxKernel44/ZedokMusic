@@ -61,9 +61,9 @@ fun GlyphIcon(g: Glyph, color: Color, size: Dp = 20.dp) {
 }
 
 @Composable
-fun SquareButton(g: Glyph, active: Boolean = false, tint: Color = Zk.text, activeColor: Color = Zk.accent, size: Dp = 40.dp, onClick: () -> Unit) {
-    Box(Modifier.size(size).clip(RoundedCornerShape(10.dp)).background(if (active) activeColor.copy(alpha = .22f) else Zk.panel2).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        GlyphIcon(g, if (active) activeColor else tint)
+fun SquareButton(g: Glyph, active: Boolean = false, tint: Color = Zk.text, activeColor: Color = Zk.accent, size: Dp = 40.dp, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.size(size).clip(RoundedCornerShape(10.dp)).background(if (active && enabled) activeColor.copy(alpha = .22f) else Zk.panel2).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        GlyphIcon(g, if (!enabled) tint.copy(alpha = .28f) else if (active) activeColor else tint)
     }
 }
 
