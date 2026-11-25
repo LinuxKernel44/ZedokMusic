@@ -27,6 +27,7 @@ fun PluginPanel(vm: DawViewModel) {
         return
     }
     val editor = t.editorOpen
+    val short = LocalShort.current
     var keys by remember(t.id) { mutableStateOf(false) }
     var query by remember(t.id) { mutableStateOf("") }
     var onlyChanged by remember(t.id) { mutableStateOf(false) }
@@ -35,12 +36,12 @@ fun PluginPanel(vm: DawViewModel) {
         params.filter { (query.isBlank() || it.name.contains(query, true)) && (!onlyChanged || t.paramOverrides.containsKey(it.index)) }
     }
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
-        Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = if (short) 3.dp else 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(t.pluginName.ifBlank { t.name }, color = t.color, fontSize = 14.sp, maxLines = 1)
-                Text("${params.size} parameters · ${t.paramOverrides.size} changed", color = Zk.dim, fontSize = 11.sp)
+                if (!short) Text("${params.size} parameters · ${t.paramOverrides.size} changed", color = Zk.dim, fontSize = 11.sp)
             }
-            if (editor && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 840) LabelButton(if (vm.panelExpanded) "Shrink" else "Full", vm.panelExpanded, w = 64.dp) { vm.panelExpanded = !vm.panelExpanded }
+            if (editor && !short && androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 840) LabelButton(if (vm.panelExpanded) "Shrink" else "Full", vm.panelExpanded, w = 64.dp) { vm.panelExpanded = !vm.panelExpanded }
             if (editor) LabelButton("Keys", keys, w = 60.dp) { keys = !keys }
             LabelButton("Editor", editor, w = 70.dp) { if (editor) vm.closeEditor(t) else vm.openEditor(t) }
             if (!editor) LabelButton("Changed", onlyChanged, w = 76.dp) { onlyChanged = !onlyChanged }
@@ -58,7 +59,7 @@ fun PluginPanel(vm: DawViewModel) {
             return@Column
         }
         OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search parameters") },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp))
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = if (short) 0.dp else 4.dp))
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
             items(shown, key = { it.index }) { p -> ParamRow(vm, t, p) }
         }

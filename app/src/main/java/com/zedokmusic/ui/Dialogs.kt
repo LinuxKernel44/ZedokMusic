@@ -21,7 +21,7 @@ fun PluginPickerDialog(plugins: List<PluginInfo>, folder: String, onRescan: () -
         text = {
             Column {
                 if (plugins.isEmpty()) Text("No VST3 plugins found.\n\nCopy your Windows .vst3 files into:\n$folder\n\nthen tap Rescan.", color = Zk.dim, fontSize = 13.sp)
-                else LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
                     items(plugins) { p -> Text(p.name, color = Zk.text, modifier = Modifier.fillMaxWidth().clickable { onPick(p) }.padding(vertical = 12.dp)); HorizontalDivider(color = Zk.line) }
                 }
             }
@@ -37,7 +37,7 @@ fun SamplePickerDialog(samples: List<File>, folder: String, onPick: (File) -> Un
         text = {
             Column {
                 if (samples.isEmpty()) Text("No WAV files found.\n\nCopy .wav files into:\n$folder", color = Zk.dim, fontSize = 13.sp)
-                else LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
                     items(samples) { f -> Text(f.name, color = Zk.text, modifier = Modifier.fillMaxWidth().clickable { onPick(f) }.padding(vertical = 12.dp)); HorizontalDivider(color = Zk.line) }
                 }
             }
@@ -66,7 +66,7 @@ fun TempoDialog(bpm: Float, onChange: (Float) -> Unit, onDismiss: () -> Unit) {
 fun MidiDialog(midi: com.zedokmusic.engine.MidiInput, onScan: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("MIDI input") },
         text = {
-            Column(Modifier.heightIn(max = 380.dp)) {
+            Column(Modifier.heightIn(max = dialogListMax(380.dp)).verticalScroll(rememberScrollState())) {
                 if (midi.devices.isEmpty()) Text("No USB MIDI device detected. Plug in a keyboard (USB-OTG) or scan for a Bluetooth one.", color = Zk.dim, fontSize = 13.sp)
                 midi.devices.forEach { d ->
                     Row(Modifier.fillMaxWidth().clickable { d.info?.let { midi.connect(it) } }.padding(vertical = 10.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -156,7 +156,7 @@ fun ExportsDialog(vm: com.zedokmusic.model.DawViewModel, onDismiss: () -> Unit) 
     }
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Exported files") }, text = {
         if (files.isEmpty()) Text("Nothing exported yet. Use Add → Export audio….", color = Zk.dim, fontSize = 13.sp)
-        else LazyColumn(Modifier.heightIn(max = 420.dp)) {
+        else LazyColumn(Modifier.heightIn(max = dialogListMax(420.dp))) {
             items(files, key = { it.absolutePath }) { f ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Text(f.name, color = Zk.text, fontSize = 14.sp, maxLines = 1)

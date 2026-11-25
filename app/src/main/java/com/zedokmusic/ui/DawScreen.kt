@@ -3,6 +3,7 @@ package com.zedokmusic.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,13 +46,26 @@ fun DawScreen(vm: DawViewModel) {
     }
     fun onScan() { if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) vm.midi.startScan() else locPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
 
-    Box(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding()) {
+    Box(Modifier.fillMaxSize().background(Zk.bg).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 840.dp
+            // Landscape on a phone: ~380 dp of height. One-row transport, vertical tab rail, denser panels.
+            val short = maxHeight < 520.dp && maxWidth > maxHeight
+            CompositionLocalProvider(LocalShort provides short) {
             Column(Modifier.fillMaxSize()) {
-                Transport(vm, !wide, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
+                Transport(vm, !wide && !short, short, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
                     onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" })
-                if (wide) {
+                if (short) {
+                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                        Column(Modifier.width(74.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (p in Panel.values()) PanelChip(p.label, panel == p, Modifier.fillMaxWidth()) { panel = p }
+                        }
+                        VerticalDivider(color = Zk.line)
+                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                            PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" })
+                        }
+                    }
+                } else if (wide) {
                     val expanded = vm.panelExpanded && bottom == Panel.Plugin
                     if (!expanded) {
                         Box(Modifier.weight(1f)) { ArrangeView(vm, ppb, { ppb = it }, { panel = Panel.Piano; bottom = Panel.Piano }, { vm.selected = it; dialog = "samples" }) }
@@ -73,12 +87,13 @@ fun DawScreen(vm: DawViewModel) {
                 }
                 if (showKeys) {
                     val t = if (sel?.kind == TrackKind.Instrument) sel else vm.tracks.firstOrNull { it.kind == TrackKind.Instrument }
-                    if (t != null) PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(if (wide) 150.dp else 130.dp))
+                    if (t != null) PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(if (short) 88.dp else if (wide) 150.dp else 130.dp))
                 }
             }
             if (vm.message != null) {
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(16.dp), action = { TextButton({ vm.message = null }) { Text("OK") } }) { Text(vm.message ?: "") }
             }
+            }  // CompositionLocalProvider
         }
     }
     when (dialog) {
@@ -122,11 +137,11 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit) {
+private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     // Phones: tighter sizes so the whole transport (stop, play, loop, rec, position, tempo) fits even on dense, narrow screens.
-    val bs = if (compact) 36.dp else 40.dp
-    val ps = if (compact) 40.dp else 46.dp
+    val bs = if (compact || oneRow) 36.dp else 40.dp
+    val ps = if (compact || oneRow) 40.dp else 46.dp
     val core: @Composable RowScope.() -> Unit = {
         SquareButton(Glyph.Stop, size = bs) { vm.stop() }
         SquareButton(if (vm.playing) Glyph.Pause else Glyph.Play, active = vm.playing, size = ps) { vm.togglePlay() }
@@ -161,9 +176,9 @@ private fun Transport(vm: DawViewModel, compact: Boolean, keys: Boolean, onRecor
             Text("${vm.loopBars} bars", color = Zk.dim, fontSize = 12.sp, maxLines = 1)
             SquareButton(Glyph.Plus, size = 30.dp) { vm.changeLoopBars(vm.loopBars + 1) }
         }
-        if (!compact) Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1)
+        if (!compact) Text(vm.engineInfo, color = Zk.dim, fontSize = 11.sp, maxLines = 1, softWrap = false)
     }
-    Column(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = if (oneRow) 3.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
             core()
             if (!compact) tools()

@@ -427,12 +427,16 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
         const int64_t budgetNs = (int64_t)(0.5 * 1e9 * frames / kProjectRate);
         pluginCollect(*p, audioMix_, frames, budgetNs);
         if (jumped) for (int s = 0; s < kMaxPlugins; s++) memset(audioMix_.plugOut[s], 0, sizeof(float) * 2 * frames);
-        audioMix_.playClips = playing;
+        // Plugins run one block behind: the block submitted now is heard on the next callback. When playback starts or the
+        // position jumps, the first timeline block would never reach the plugin (a note at beat 0 stayed silent). So that
+        // callback is a silent pre-roll: the position does not advance and the plugin is sent the block at `pos` itself.
+        const bool preroll = playing && jumped;
+        audioMix_.playClips = playing && !preroll;
         int64_t next = pos;
-        if (playing) next = renderBlock(*p, pos, frames, out, audioMix_, meters_);
+        if (playing && !preroll) next = renderBlock(*p, pos, frames, out, audioMix_, meters_);
         else mix(*p, pos, frames, out, audioMix_, meters_, 0);
         pos_.store(next, std::memory_order_relaxed);
-        pluginSubmit(*p, next, frames, playing, jumped, true);
+        pluginSubmit(*p, preroll ? pos : next, frames, playing, jumped, true);
         pluginWasPlaying_ = playing; pluginExpectedPos_ = next;
     } else {
         memset(out, 0, sizeof(float) * 2 * frames);

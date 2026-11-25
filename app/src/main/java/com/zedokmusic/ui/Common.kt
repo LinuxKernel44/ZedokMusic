@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,3 +66,10 @@ fun beatLabel(beat: Float): String {
     val bar = (beat / 4f).toInt() + 1; val b = (beat % 4f).toInt() + 1; val t = (((beat % 1f) * 100f).toInt()).coerceIn(0, 99)
     return "%03d.%d.%02d".format(bar, b, t)
 }
+
+/** True in landscape on a phone: little vertical room, so every panel uses denser rows. */
+val LocalShort = compositionLocalOf { false }
+
+/** Max height for a scrolling list inside a dialog: [base] on tall windows, less when the window is short (landscape). */
+@Composable
+fun dialogListMax(base: Dp): Dp = minOf(base, (LocalConfiguration.current.screenHeightDp * 0.42f).dp)

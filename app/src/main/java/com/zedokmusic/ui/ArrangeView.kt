@@ -35,13 +35,15 @@ import androidx.compose.ui.unit.sp
 import com.zedokmusic.model.*
 import kotlin.math.roundToInt
 
-private val RowH = 78.dp
+private val RowHTall = 78.dp
+private val RowHShort = 62.dp
 private val HeaderW = 136.dp
 private val RulerH = 28.dp
 
 /** Arrangement: track headers on the left, a scrolling timeline on the right (beats on the x axis). */
 @Composable
 fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onEdit: (TrackM) -> Unit, onImport: (TrackM) -> Unit) {
+    val RowH = if (LocalShort.current) RowHShort else RowHTall
     val hs = rememberScrollState(); val vs = rememberScrollState()
     val density = LocalDensity.current
     val ppb = pxPerBeat
@@ -72,6 +74,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
 }
 
 @Composable private fun EmptyHint() {
+    val RowH = if (LocalShort.current) RowHShort else RowHTall
     Box(Modifier.width(HeaderW).height(RowH), contentAlignment = Alignment.Center) { Text("Add a track with +", color = Zk.dim, fontSize = 12.sp) }
 }
 
@@ -93,6 +96,7 @@ private fun Ruler(vm: DawViewModel, totalBeats: Float, ppb: Float, totalW: andro
 
 @Composable
 private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit) {
+    val RowH = if (LocalShort.current) RowHShort else RowHTall
     val sel = vm.selected == t
     var menu by remember { mutableStateOf(false) }
     Box(Modifier.width(HeaderW).height(RowH).background(if (sel) Zk.panel2 else Zk.panel).border(0.5.dp, Zk.line).clickable { vm.selected = t }) {
@@ -123,6 +127,7 @@ private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit)
 
 @Composable
 private fun TimelineRow(vm: DawViewModel, t: TrackM, totalBeats: Float, ppb: Float, onEdit: (TrackM) -> Unit) {
+    val RowH = if (LocalShort.current) RowHShort else RowHTall
     val density = LocalDensity.current
     val sel = vm.selected == t
     Box(Modifier.height(RowH).fillMaxWidth().background(if (sel) Zk.panel2.copy(alpha = .55f) else Zk.bg).border(0.5.dp, Zk.line)) {

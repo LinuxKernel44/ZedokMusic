@@ -30,24 +30,25 @@ fun AutomationView(vm: DawViewModel) {
     }
     val lane = vm.laneSelected?.takeIf { it in t.lanes } ?: t.lanes.firstOrNull()
     var picking by remember { mutableStateOf(false) }
+    val short = LocalShort.current
     var sel by remember(lane) { mutableIntStateOf(-1) }  // selected point (its outgoing segment gets the shape buttons)
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
-        Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 10.dp, vertical = if (short) 3.dp else 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(lane?.paramName ?: "No automation yet", color = t.color, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (vm.recording) "Recording: move a knob" else "${t.lanes.size} lane(s) · REC + move a knob to record", color = if (vm.recording) Zk.danger else Zk.dim, fontSize = 11.sp)
+                if (!short || vm.recording) Text(if (vm.recording) "Recording: move a knob" else "${t.lanes.size} lane(s) · REC + move a knob to record", color = if (vm.recording) Zk.danger else Zk.dim, fontSize = 11.sp)
             }
             LabelButton("+ Param", false, w = 78.dp) { picking = true }
             if (lane != null) LabelButton("Delete", false, w = 64.dp) { vm.removeLane(t, lane) }
         }
-        if (lane != null) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (lane != null) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = if (short) 2.dp else 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val cur = lane.points.getOrNull(sel)
             Text(if (cur == null) "Tap a point to choose its curve" else "Curve after the point:", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.weight(1f))
             listOf("Line" to 0, "Step" to 1, "Smooth" to 2).forEach { (label, sh) ->
                 LabelButton(label, cur?.shape == sh, w = 64.dp) { if (cur != null) { val pts = lane.points.toMutableList(); pts[sel] = cur.copy(shape = sh); vm.setLanePoints(t, lane, pts) } }
             }
         }
-        if (t.lanes.size > 1) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (t.lanes.size > 1) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = if (short) 2.dp else 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             t.lanes.take(6).forEach { l -> LabelButton(l.paramName.take(9), l === lane, w = 80.dp) { vm.laneSelected = l } }
         }
         if (lane == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Tap \"+ Param\" to automate a parameter.", color = Zk.dim, fontSize = 13.sp) }
@@ -129,7 +130,7 @@ private fun ParamPicker(vm: DawViewModel, t: TrackM, onPick: (Int) -> Unit, onDi
     AlertDialog(onDismissRequest = onDismiss, confirmButton = { TextButton(onDismiss) { Text("Cancel") } }, title = { Text("Automate a parameter") }, text = {
         Column {
             OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search") }, modifier = Modifier.fillMaxWidth())
-            LazyColumn(Modifier.heightIn(max = 360.dp)) {
+            LazyColumn(Modifier.heightIn(max = dialogListMax(360.dp))) {
                 items(shown, key = { it.index }) { p ->
                     Text(p.name, Modifier.fillMaxWidth().padding(vertical = 10.dp).androidClickable { onPick(p.index) }, color = Zk.text, fontSize = 14.sp)
                 }
