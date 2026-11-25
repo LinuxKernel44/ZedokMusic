@@ -172,13 +172,17 @@ class PluginHost(private val ctx: Context) {
         val extra = if (pluginPath != null) arrayOf("--edit", toWinPath(pluginPath)) else emptyArray()  // open this plugin's editor first
         val pb = env.wine(*(gui.desktopArgs("zdesk", w, h) + arrayOf(shell) + extra), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
         pb.directory(File(files, "home")); pb.redirectOutput(File(files, "desktop.log"))
-        desktop = try { pb.start() } catch (e: Exception) { return false }
+        val p = try { pb.start() } catch (e: Exception) { return false }
+        desktop = p
+        KeepAlive.acquire(ctx, "desktop", "The Windows desktop is running")
+        Thread { runCatching { p.waitFor() }; KeepAlive.release(ctx, "desktop") }.start()
         return true
     }
 
     /** Ends the desktop and everything it started, and frees the X screen so plugins get the standard one again. Blocking. */
     fun stopDesktop() {
         desktop?.destroyForcibly(); desktop = null
+        KeepAlive.release(ctx, "desktop")
         gui.reset()
     }
 
@@ -201,9 +205,11 @@ class PluginHost(private val ctx: Context) {
             pb.redirectOutput(File(files, "installer.log"))
             val p = try { pb.start() } catch (e: Exception) { onStarted(false); return@Thread }
             installer = p
+            KeepAlive.acquire(ctx, "installer", "Installing ${file.name}")
             onStarted(true)
             val code = p.waitFor()
             installer = null
+            KeepAlive.release(ctx, "installer")
             onExit(code)
         }.start()
     }
