@@ -604,6 +604,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         pendingLanes.clear(); pendingParams.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
     }
+    /** The name pre-filled when creating or saving a project (the user can type anything else). */
+    fun suggestProjectName(): String = store?.nextProjectName() ?: "Project_1"
     fun newProject(name: String) { val s = store ?: return; switchProject(s.uniqueName(name), create = true) }
     fun openProject(name: String) { if (name != projectName && store?.exists(name) == true) switchProject(name, create = false) }
     /** Re-reads the current project from disk (after restoring a backup). */

@@ -25,6 +25,17 @@ class ProjectStoreTest {
         assertEquals("Song (3)", s.uniqueName("Song"))
     }
 
+    @Test fun defaultNameIsTheFirstFreeProjectNumber() {
+        val s = store()
+        assertEquals("Project_1", s.nextProjectName())
+        s.create("Project_1"); s.file("Project_1").writeText("{}")
+        assertEquals("Project_2", s.nextProjectName())
+        s.create("Project_3"); s.file("Project_3").writeText("{}")      // a gap is filled before going past the highest
+        assertEquals("Project_2", s.nextProjectName())
+        s.create("Project_2"); s.file("Project_2").writeText("{}")
+        assertEquals("Project_4", s.nextProjectName())
+    }
+
     @Test fun nextVersionNameIncrements() {
         val s = store()
         assertEquals("Song_2", s.nextVersionName("Song"))

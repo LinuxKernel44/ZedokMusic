@@ -111,9 +111,9 @@ fun DawScreen(vm: DawViewModel) {
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })
         "exports" -> ExportsDialog(vm) { dialog = null }
-        "new" -> NameDialog("New project", "Untitled", "Create", "Your current project is saved first.", { vm.newProject(it) }, { dialog = null })
+        "new" -> NameDialog("New project", vm.suggestProjectName(), "Create", "Your current project is saved first.", { vm.newProject(it) }, { dialog = null })
         "open" -> ProjectsDialog(vm) { dialog = null }
-        "saveas" -> NameDialog("Save as", vm.projectName, "Save", "Creates a new project folder with a copy of this project's samples and presets.", { vm.saveAs(it) }, { dialog = null })
+        "saveas" -> NameDialog("Save as", vm.suggestProjectName(), "Save", "Creates a new project folder with a copy of this project's samples and presets.", { vm.saveAs(it) }, { dialog = null })
         "rename" -> NameDialog("Rename project", vm.projectName, "Rename", null, { vm.renameProject(it) }, { dialog = null })
         "version" -> { LaunchedEffect(Unit) { vm.saveNewVersion(); dialog = null } }
         "collect" -> { LaunchedEffect(Unit) { vm.collectSamples(); dialog = null } }

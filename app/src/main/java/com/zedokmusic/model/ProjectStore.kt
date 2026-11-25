@@ -38,6 +38,9 @@ class ProjectStore(val workspace: File) {
         return "$b ($n)"
     }
 
+    /** FL Studio's default name for a new project: "Project_1", else the first "Project_N" (N = 2, 3...) not taken yet. */
+    fun nextProjectName(): String { var n = 1; while (exists("Project_$n") || dir("Project_$n").exists()) n++; return "Project_$n" }
+
     /** "Song" -> "Song_2", "Song_2" -> "Song_3" (FL Studio's Save new version). */
     fun nextVersionName(name: String): String {
         val m = Regex("^(.*)_(\\d+)$").find(name)
