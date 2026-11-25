@@ -16,6 +16,7 @@ They run as separate programs inside the app's private runtime; none of them is 
 | libpixman, libunwind, libglvnd (libGL, libGLX, libGLdispatch), libselinux, liblz4, liblzma, libpcre2, libzstd, libcap, libcap-ng, libmd, libbsd (runtime libraries of Xvfb) | Ubuntu 24.04 (noble) packages | MIT / BSD / public domain / dual BSD-GPL | https://packages.ubuntu.com/noble/ |
 | libgcrypt, libgpg-error, libsystemd, libaudit (runtime libraries of Xvfb) | Ubuntu 24.04 (noble) packages | LGPL-2.1-or-later | https://packages.ubuntu.com/noble/ |
 | Mesa lavapipe (`libvulkan_lvp.so`, software Vulkan driver, Ubuntu 24.04 arm64 package 25.2.8) | 25.2.8 | MIT | https://www.mesa3d.org / https://packages.ubuntu.com/noble/mesa-vulkan-drivers |
+| Mesa Turnip (`libvulkan_freedreno.so`, open-source Vulkan driver for Qualcomm Adreno GPUs; build 26.2.0 taken from the Winlator 11.2 release) | 26.2.0 | MIT | https://www.mesa3d.org / https://gitlab.freedesktop.org/mesa/mesa |
 | LLVM (`libLLVM.so.20`, used by lavapipe) | 20.1 | Apache-2.0 with LLVM exceptions | https://llvm.org |
 | ICU (`libicuuc`, `libicudata`), libxml2, libdrm, libelf, libexpat, libffi, libedit, libwayland-client, libxcb-*, libxshmfence, libsensors, libpciaccess (runtime libraries of lavapipe) | Ubuntu 24.04 (noble) packages | Unicode / MIT / LGPL-2.1+ / BSD-style | https://packages.ubuntu.com/noble/ |
 | DXVK (d3d8/d3d9/d3d10core/d3d11/dxgi, from the Winlator 11.2 release) | 2.4.1 | zlib | https://github.com/doitsujin/dxvk |

@@ -43,4 +43,17 @@ cat > "$OUT/usr/share/vulkan/icd.d/lvp_icd.json" <<'JSON'
 JSON
 mkdir -p "$G/apk" && [ -f "$G/apk/assets/dxwrapper/dxvk-2.4.1.tzst" ] || unzip -q -o "$WORK/Winlator_11.2.apk" 'assets/dxwrapper/dxvk-2.4.1.tzst' -d "$G/apk"
 mkdir -p "$G/dxvk" && zstd -dc "$G/apk/assets/dxwrapper/dxvk-2.4.1.tzst" | tar -xf - -C "$G/dxvk" && cp "$G"/dxvk/system32/*.dll "$OUT/opt/dxvk/x64/"
+# Turnip, the open-source Adreno driver, from Winlator's graphics_driver assets; the ICD file points at our own path.
+unzip -q -o "$WORK/Winlator_11.2.apk" 'assets/graphics_driver/turnip-26.2.0.tzst' -d "$G/apk"
+mkdir -p "$G/turnip" && zstd -dc "$G/apk/assets/graphics_driver/turnip-26.2.0.tzst" | tar -xf - -C "$G/turnip"
+cp "$(find "$G/turnip" -name libvulkan_freedreno.so | head -1)" "$OUT/usr/lib/libvulkan_freedreno.so"
+cat > "$OUT/usr/share/vulkan/icd.d/tu_icd.json" <<'JSON'
+{ "ICD": { "api_version": "1.4.354", "library_arch": "64", "library_path": "/data/data/com.zedokmusic/files/root/usr/lib/libvulkan_freedreno.so" }, "file_format_version": "1.0.1" }
+JSON
+# Our Vulkan layer that shows the GPU's frames on the app's X screen (native/gpulayer).
+"$HERE/native/gpulayer/build.sh" "$OUT/usr/lib/libzpresent.so"
+mkdir -p "$OUT/usr/share/vulkan/explicit_layer.d"
+cat > "$OUT/usr/share/vulkan/explicit_layer.d/VkLayer_zedok_present.json" <<'JSON'
+{ "file_format_version": "1.1.2", "layer": { "name": "VK_LAYER_ZEDOK_present", "type": "GLOBAL", "library_path": "/data/data/com.zedokmusic/files/root/usr/lib/libzpresent.so", "api_version": "1.3.0", "implementation_version": "1", "description": "Shows GPU frames on the ZedokMusic X screen", "functions": { "vkNegotiateLoaderLayerInterfaceVersion": "zp_negotiate" } } }
+JSON
 echo "GPU overlay: $(du -sh "$OUT" | cut -f1) in $OUT"

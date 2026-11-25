@@ -33,3 +33,24 @@ The Mesa files are kept in `build/rootfs-work/mesa/overlay` (not in the shipped 
 
 **Dev aids added meanwhile.** `files/box64log` (BOX64_LOG value), `files/winedebug` (WINEDEBUG), per-plugin logs in `<workspace>/Logs`,
 `BOX64_SHOWSEGV=1`, and a debug build signed with the release key (to use `run-as` and `--es cmd` on a release device).
+
+## Phone GPU (Adreno) — 0.18.0
+
+Turnip 26.2.0 (Winlator's build) works under DXVK on the OnePlus 15 (Adreno 840, `/dev/kgsl-3d0` reachable): the Direct3D 11 test program
+(`native/testd3d`) sees "Adreno (TM) 840", feature level 12_0, and a CPU read-back of a cleared render target is correct.
+
+**Presenting is the hard part.** The app's X server (Xvfb) has no DRI3, so Mesa's X11 swapchain never frees its images (the third
+`vkAcquireNextImageKHR` blocks, with or without MIT-SHM, FIFO or immediate; without `MESA_VK_WSI_DEBUG=sw` swapchain creation itself hangs).
+Mesa's *headless* swapchain (`MESA_VK_WSI_HEADLESS_SWAPCHAIN=1`) renders at full speed (1300 fps in the test) but shows nothing, so
+`native/gpulayer/zpresent.c` is a Vulkan layer (`VK_LAYER_ZEDOK_present`, loaded with `VK_LAYER_PATH` + `VK_INSTANCE_LAYERS`) that, on each
+`vkQueuePresentKHR`, copies the swapchain image into host memory and draws it into the window with XCB `PutImage` strips, and caps the rate at 60 fps
+(`ZP_FPS`; `ZP_LOG=<file>` traces). Measured: 59.7 fps, frames visible in the X screen.
+
+Not usable: Winlator's Vortek renderer. Its native part calls back into Winlator's Java X server (`getWindowHardwareBuffer`), and the S10's
+Mali has no open driver, so the S10 stays on software Vulkan.
+
+**Serum 2 on the OnePlus 15, still failing (not a GPU problem).** With the full "Serum 2 Presets" folder installed, opening the editor ends in an access
+violation inside Serum2.vst3 (RVA 0x1815be: `gPlatformFactory->vfunc()->obj->field` is NULL; VSTGUI code), also with llvmpipe. With the presets folder
+absent, the editor opens and draws on the GPU ("Presets Folder Not Found"). The last things Serum does before crashing are probing for
+`Skins\Default\theme.json`, `Tables\S2 Tables\Default Shapes.txt` and licence files (all absent); Wine's `DCompositionCreateDevice2` is only a stub.
+`dcomp=d` did not help. Next ideas: system fonts (the prefix has only Wine's Tahoma), DirectWrite custom font collections, D2D.

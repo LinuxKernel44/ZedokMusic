@@ -29,6 +29,10 @@ class GuiServer(private val ctx: Context) {
 
     val available get() = xvfbBin.exists() && File(env.root, "usr/lib/libxshim.so").exists()
 
+    /** Does this phone have an Adreno GPU we can use (the Turnip driver and its layer are in the runtime, and the GPU device is reachable)? */
+    fun phoneGpuAvailable() = File("/dev/kgsl-3d0").exists() && File(env.root, "usr/lib/libvulkan_freedreno.so").exists() && File(env.root, "usr/lib/libzpresent.so").exists()
+    private fun phoneGpu() = when (com.zedokmusic.settings.AppSettings.gpu.value) { 1 -> phoneGpuAvailable(); 2 -> false; else -> phoneGpuAvailable() }
+
     /** Environment additions that let Wine (through Box64) reach the X server. */
     fun wineEnv(e: MutableMap<String, String>) {
         e["DISPLAY"] = ":0"
@@ -37,12 +41,23 @@ class GuiServer(private val ctx: Context) {
         e["ZSHIM_KEEP"] = "1"
         e["BOX64_LD_PRELOAD"] = File(env.root, "usr/lib/libzshmstub.so").absolutePath
         // Direct3D 9-11 through DXVK on Vulkan (software lavapipe from the runtime): plugin editors that draw with Direct3D 11 need it.
-        e["VK_ICD_FILENAMES"] = File(env.root, "usr/share/vulkan/icd.d/lvp_icd.json").absolutePath
+        if (phoneGpu()) {
+            // Turnip (the open-source Adreno driver) renders; its frames reach the X screen through our own layer (native/gpulayer), because
+            // the app's X server has no DRI3: Mesa makes a headless swapchain and the layer copies each presented frame into the window.
+            e["VK_ICD_FILENAMES"] = File(env.root, "usr/share/vulkan/icd.d/tu_icd.json").absolutePath
+            e["MESA_VK_WSI_DEBUG"] = "sw"
+            e["MESA_VK_WSI_HEADLESS_SWAPCHAIN"] = "1"
+            e["TU_DEBUG"] = "noconform"
+            e["VK_LAYER_PATH"] = File(env.root, "usr/share/vulkan/explicit_layer.d").absolutePath
+            e["VK_INSTANCE_LAYERS"] = "VK_LAYER_ZEDOK_present"
+        } else e["VK_ICD_FILENAMES"] = File(env.root, "usr/share/vulkan/icd.d/lvp_icd.json").absolutePath
         if (com.zedokmusic.settings.AppSettings.dxvk.on) {
             e["WINEDLLOVERRIDES"] = "mscoree,mshtml=;d3d11,d3d10core,dxgi,d3d9,d3d8=n,b"
             e["DXVK_LOG_LEVEL"] = if (com.zedokmusic.settings.AppSettings.wineLog.on) "info" else "warn"
             e["DXVK_LOG_PATH"] = "E:\\"
         }
+        // Developer aid: optional files/wineenv, one KEY=VALUE per line, to try other graphics drivers without rebuilding.
+        runCatching { File(env.files, "wineenv").takeIf { it.exists() }?.readLines()?.forEach { l -> l.indexOf('=').takeIf { it > 0 && !l.startsWith("#") }?.let { i -> e[l.substring(0, i).trim()] = l.substring(i + 1).trim() } } }
     }
 
     /** Starts Xvfb if needed and opens the display. Blocking (a few seconds the first time). Returns false when GUIs are unavailable. */

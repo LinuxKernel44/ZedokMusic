@@ -217,7 +217,8 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
 @Composable private fun PluginsSection() {
     ChoiceRow("Editor refresh rate", "How often a plugin's window is redrawn on screen. Lower saves battery and CPU.", listOf("10 fps", "15 fps", "30 fps", "60 fps"),
         listOf(10, 15, 30, 60).indexOf(AppSettings.editorFps.value).coerceAtLeast(0)) { AppSettings.editorFps.set(listOf(10, 15, 30, 60)[it]) }
-    SwitchRow("Direct3D plugins (DXVK)", "Lets plugins that draw their window with Direct3D (Serum 2) work: Direct3D runs on Vulkan, in software on the CPU (slower than a GPU). Applies the next time a plugin starts.", AppSettings.dxvk)
+    SwitchRow("Direct3D plugins (DXVK)", "Lets plugins that draw their window with Direct3D (Serum 2) work: Direct3D runs on Vulkan. Applies the next time a plugin starts.", AppSettings.dxvk)
+    ChoiceRow("Graphics for plugin windows", "Automatic uses your phone's Adreno GPU when it has one. Software draws on the CPU: slower, but works on any phone. Applies the next time a plugin starts.", listOf("Automatic", "Phone GPU", "Software"), AppSettings.gpu.value) { AppSettings.gpu.set(it) }
     SwitchRow("Verbose Wine log", "Records Wine's error messages for plugins and installers (applies the next time one starts). Use Storage → Share diagnostics to send it.", AppSettings.wineLog)
 }
 
