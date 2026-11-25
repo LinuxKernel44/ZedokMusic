@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -41,6 +42,8 @@ private fun isBlack(p: Int) = (p % 12) in intArrayOf(1, 3, 6, 8, 10)
 @Composable
 fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     val hs = rememberScrollState(); val vs = rememberScrollState(rememberStartScroll())
+    var viewportPx by remember { mutableIntStateOf(0) }
+    FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
     val density = LocalDensity.current
     val ppb = pxPerBeat
     val rows = TOP - BOTTOM + 1
@@ -58,15 +61,16 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
 
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(34.dp).background(Zk.panel), verticalAlignment = Alignment.CenterVertically) {
-            Text(track.name, color = track.color, fontSize = 13.sp, modifier = Modifier.width(KeysW + 8.dp).padding(start = 8.dp), maxLines = 1)
-            Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hs)) {
-                Canvas(Modifier.width(totalW).fillMaxHeight().pointerInput(ppb) { detectTapGestures { vm.seekBeat(it.x / density.density / ppb) } }) {
+            Text(track.name, color = track.color, fontSize = 13.sp, modifier = Modifier.width(KeysW).padding(start = 4.dp), maxLines = 1)
+            Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) {
+                Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekBeat(it) }) {
                     val pw = ppb * density.density; var b = 0
                     while (b <= beats) {
                         val x = b * pw; val bar = b % 4 == 0
                         drawLine(if (bar) Zk.dim else Zk.line, Offset(x, if (bar) 10.dp.toPx() else 20.dp.toPx()), Offset(x, size.height), 1f)
                         if (bar) drawText(tm.measure("${b / 4 + 1}", TextStyle(color = Zk.dim, fontSize = 10.sp)), topLeft = Offset(x + 4.dp.toPx(), 2.dp.toPx())); b++
                     }
+                    drawPlayhead(vm.playhead * pw, Zk.accent, head = true)
                 }
             }
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

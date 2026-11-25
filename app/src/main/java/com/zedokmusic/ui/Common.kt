@@ -3,12 +3,15 @@ package com.zedokmusic.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,3 +76,43 @@ val LocalShort = compositionLocalOf { false }
 /** Max height for a scrolling list inside a dialog: [base] on tall windows, less when the window is short (landscape). */
 @Composable
 fun dialogListMax(base: Dp): Dp = minOf(base, (LocalConfiguration.current.screenHeightDp * 0.42f).dp)
+
+// ---------- play cursor ----------
+
+/** Draws the play cursor: a line across the whole height and, when [head] is set, a small triangle at the top (rulers). */
+fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPlayhead(x: Float, color: Color, head: Boolean) {
+    drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2.dp.toPx())
+    if (head) {
+        val w = 6.dp.toPx(); val h = 9.dp.toPx()
+        drawPath(Path().apply { moveTo(x - w, 0f); lineTo(x + w, 0f); lineTo(x, h); close() }, color)
+    }
+}
+
+/**
+ * Keeps the play cursor in view: while playing, the timeline pages along when the cursor nears the right edge (or falls off the
+ * left); when stopped at the start it returns to the beginning. Hand scrolling is never fought, and [vm.followPlayhead] turns it off.
+ */
+@Composable
+fun FollowPlayhead(vm: com.zedokmusic.model.DawViewModel, scroll: androidx.compose.foundation.ScrollState, pxPerBeat: Float, viewportPx: Int) {
+    val d = androidx.compose.ui.platform.LocalDensity.current.density
+    androidx.compose.runtime.LaunchedEffect(vm.playhead, vm.playing, vm.followPlayhead, viewportPx) {
+        if (!vm.followPlayhead || viewportPx <= 0 || scroll.isScrollInProgress) return@LaunchedEffect
+        val x = vm.playhead * pxPerBeat * d
+        if (vm.playing) {
+            if (x > scroll.value + viewportPx * 0.88f || x < scroll.value) scroll.scrollTo((x - viewportPx * 0.12f).toInt().coerceAtLeast(0))
+        } else if (vm.playhead == 0f && scroll.value != 0) scroll.scrollTo(0)
+    }
+}
+
+/** Tap or drag on a ruler to move the play cursor. */
+fun Modifier.scrubRuler(pxPerBeat: Float, onSeek: (Float) -> Unit): Modifier =
+    this.pointerInput(pxPerBeat) {
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            onSeek(down.position.x / density / pxPerBeat)
+            do {
+                val e = awaitPointerEvent()
+                e.changes.firstOrNull()?.let { c -> if (c.pressed) { onSeek(c.position.x / density / pxPerBeat); c.consume() } }
+            } while (e.changes.any { it.pressed })
+        }
+    }

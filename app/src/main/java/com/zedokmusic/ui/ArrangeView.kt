@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -37,7 +38,7 @@ import kotlin.math.roundToInt
 
 private val RowHTall = 78.dp
 private val RowHShort = 62.dp
-private val HeaderW = 136.dp
+private val HeaderW = 150.dp
 private val RulerH = 28.dp
 
 /** Arrangement: track headers on the left, a scrolling timeline on the right (beats on the x axis). */
@@ -45,6 +46,8 @@ private val RulerH = 28.dp
 fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onEdit: (TrackM) -> Unit, onImport: (TrackM) -> Unit) {
     val RowH = if (LocalShort.current) RowHShort else RowHTall
     val hs = rememberScrollState(); val vs = rememberScrollState()
+    var viewportPx by remember { mutableIntStateOf(0) }
+    FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
     val density = LocalDensity.current
     val ppb = pxPerBeat
     val totalBeats = remember(vm.tracks.size, vm.bpm) { maxOf(64f, (vm.tracks.maxOfOrNull { it.lengthBeats(vm.bpm) } ?: 0f) + 32f) }
@@ -53,10 +56,12 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
         Row(Modifier.fillMaxWidth().height(RulerH).background(Zk.panel)) {
             Row(Modifier.width(HeaderW).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                 SquareButton(Glyph.Minus, size = 24.dp) { onZoom((ppb / 1.4f).coerceAtLeast(12f)) }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 SquareButton(Glyph.Plus, size = 24.dp) { onZoom((ppb * 1.4f).coerceAtMost(160f)) }
+                Spacer(Modifier.width(6.dp))
+                LabelButton("Follow", vm.followPlayhead, w = 50.dp, h = 24.dp) { vm.followPlayhead = !vm.followPlayhead }
             }
-            Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hs)) { Ruler(vm, totalBeats, ppb, totalW) }
+            Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) { Ruler(vm, totalBeats, ppb, totalW) }
         }
         Row(Modifier.fillMaxSize().verticalScroll(vs)) {
             Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint() }
@@ -65,8 +70,8 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                     Column {
                         vm.tracks.forEach { t -> TimelineRow(vm, t, totalBeats, ppb, onEdit) }
                     }
-                    val x = with(density) { (vm.playhead * ppb).dp.roundToPx() }
-                    Box(Modifier.offset { IntOffset(x, 0) }.width(2.dp).fillMaxHeight().background(Zk.accent))
+                    // matchParentSize: fillMaxHeight measures to nothing inside a vertically scrolling parent.
+                    Canvas(Modifier.matchParentSize()) { drawPlayhead(vm.playhead * ppb * density.density, Zk.accent, head = false) }
                 }
             }
         }
@@ -81,7 +86,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
 @Composable
 private fun Ruler(vm: DawViewModel, totalBeats: Float, ppb: Float, totalW: androidx.compose.ui.unit.Dp) {
     val tm = rememberTextMeasurer()
-    Canvas(Modifier.width(totalW).fillMaxHeight().pointerInput(ppb) { detectTapGestures { o -> vm.seekBeat(o.x / density / ppb) } }) {
+    Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekBeat(it) }) {
         val pw = ppb * density
         var b = 0
         while (b <= totalBeats) {
@@ -91,6 +96,7 @@ private fun Ruler(vm: DawViewModel, totalBeats: Float, ppb: Float, totalW: andro
             b++
         }
         if (vm.loop) drawRect(Zk.accent.copy(alpha = .35f), Offset(0f, size.height - 4.dp.toPx()), Size(vm.loopBars * 4 * pw, 4.dp.toPx()))
+        drawPlayhead(vm.playhead * pw, Zk.accent, head = true)
     }
 }
 

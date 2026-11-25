@@ -31,6 +31,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var bpm by mutableFloatStateOf(120f); private set
     var playing by mutableStateOf(false); private set
     var loop by mutableStateOf(false); private set
+    /** The timelines scroll along with the play cursor. */
+    var followPlayhead by mutableStateOf(true)
     var loopBars by mutableIntStateOf(4); private set
     var playhead by mutableFloatStateOf(0f); private set
     var selected by mutableStateOf<TrackM?>(null)

@@ -118,7 +118,7 @@ private fun LaneEditor(vm: DawViewModel, t: TrackM, lane: AutoLane, sel: Int, on
             pts.forEachIndexed { i, p -> drawCircle(if (i == drag || i == sel) Zk.warn else t.color, if (i == sel) 14f else 11f, Offset(X(p.beat), Y(p.value))) }
         }
         val px = vm.playhead.coerceIn(0f, beats) / beats * size.width
-        drawLine(Zk.text, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
+        drawPlayhead(px, Zk.accent, head = true)
     }
 }
 
