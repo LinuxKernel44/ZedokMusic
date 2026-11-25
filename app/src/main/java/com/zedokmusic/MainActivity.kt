@@ -16,6 +16,7 @@ import com.zedokmusic.ui.ZedokTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.zedokmusic.settings.AppSettings.init(this)
         val autoFolder = DebugHooks.autoFolder(intent)
         setContent {
             ZedokTheme {

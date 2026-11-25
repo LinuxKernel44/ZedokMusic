@@ -1,5 +1,6 @@
 // ZedokMusic native audio engine: project snapshot -> mixer -> Oboe output (and offline WAV render).
 #pragma once
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -73,6 +74,8 @@ public:
     Engine();
     ~Engine();
     bool start();
+    /** Audio output settings, used by the next start(): AAudio device id (0 = automatic), buffer = this many bursts, exclusive mode. */
+    void configure(int outDevice, int bufferMult, bool exclusive) { outDevice_ = outDevice; bufferMult_ = std::clamp(bufferMult, 2, 8); exclusive_ = exclusive; }
     void stop();
     bool running() const { return stream_ != nullptr; }
 
@@ -172,6 +175,7 @@ private:
     mutable std::atomic<float> meters_[kMaxTracks + 1];  // [kMaxTracks] = master
     std::shared_ptr<oboe::AudioStream> stream_;
     std::atomic<int64_t> callbacks_{0};
+    int outDevice_ = 0, bufferMult_ = 2; bool exclusive_ = true;  // see configure()
     std::atomic<bool> exporting_{false};  // offline render owns the plugin bridges: the audio callback stays away from them
     std::atomic<int64_t> cbNsTotal_{0};
     std::atomic<int64_t> cbNsMax_{0};

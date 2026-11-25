@@ -457,19 +457,26 @@ void Engine::onErrorAfterClose(oboe::AudioStream*, oboe::Result r) {
 bool Engine::start() {
     if (stream_) return true;
     audioMix_.scratch.assign(8192 * 2, 0.f);  // pre-size so the audio thread never allocates
-    oboe::AudioStreamBuilder b;
-    b.setDirection(oboe::Direction::Output)
-        ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-        ->setSharingMode(oboe::SharingMode::Exclusive)
-        ->setFormat(oboe::AudioFormat::Float)->setChannelCount(2)
-        ->setSampleRate(kProjectRate)->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium)
-        ->setUsage(oboe::Usage::Media)->setContentType(oboe::ContentType::Music)
-        ->setFramesPerDataCallback(kCallbackFrames)
-        ->setDataCallback(this)->setErrorCallback(this);
+    auto open = [&](int device, std::shared_ptr<oboe::AudioStream>& s) {
+        oboe::AudioStreamBuilder b;
+        b.setDirection(oboe::Direction::Output)
+            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+            ->setSharingMode(exclusive_ ? oboe::SharingMode::Exclusive : oboe::SharingMode::Shared)
+            ->setFormat(oboe::AudioFormat::Float)->setChannelCount(2)
+            ->setSampleRate(kProjectRate)->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium)
+            ->setUsage(oboe::Usage::Media)->setContentType(oboe::ContentType::Music)
+            ->setFramesPerDataCallback(kCallbackFrames)
+            ->setDataCallback(this)->setErrorCallback(this);
+        if (device > 0) b.setDeviceId(device);
+        return b.openStream(s);
+    };
     std::shared_ptr<oboe::AudioStream> s;
-    oboe::Result r = b.openStream(s);
+    oboe::Result r = open(outDevice_, s);
+    if (r != oboe::Result::OK && outDevice_ > 0) {  // the chosen device is gone: fall back to the default output
+        LOGE("openStream on device %d failed: %s; using the default", outDevice_, oboe::convertToText(r)); s.reset(); r = open(0, s);
+    }
     if (r != oboe::Result::OK) { LOGE("openStream failed: %s", oboe::convertToText(r)); return false; }
-    s->setBufferSizeInFrames(std::max(s->getFramesPerBurst() * 2, kCallbackFrames * 2));
+    s->setBufferSizeInFrames(std::max(s->getFramesPerBurst() * bufferMult_, kCallbackFrames * bufferMult_));
     r = s->requestStart();
     if (r != oboe::Result::OK) { LOGE("requestStart failed: %s", oboe::convertToText(r)); return false; }
     stream_ = s;

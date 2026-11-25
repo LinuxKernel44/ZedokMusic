@@ -63,7 +63,7 @@ fun EditorSurface(w: Int, h: Int, ox: Int, oy: Int, keyboard: Boolean) {
     val bmp = remember(w, h) { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }
     var tick by remember(bmp) { mutableIntStateOf(0) }
     LaunchedEffect(bmp, ox, oy) {
-        while (true) { withContext(Dispatchers.Default) { XDisplay.fbBlit(bmp, ox, oy, w, h) }; tick++; delay(33) }
+        while (true) { withContext(Dispatchers.Default) { XDisplay.fbBlit(bmp, ox, oy, w, h) }; tick++; delay(1000L / com.zedokmusic.settings.AppSettings.editorFps.value.coerceIn(5, 60)) }
     }
     if (keyboard) KeyCapture()
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.TopStart) {

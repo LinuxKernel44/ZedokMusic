@@ -34,6 +34,7 @@ fun DawScreen(vm: DawViewModel) {
     var octave by rememberSaveable { mutableIntStateOf(3) }
     var ppb by rememberSaveable { mutableFloatStateOf(44f) }
     var dialog by remember { mutableStateOf<String?>(null) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var plugins by remember { mutableStateOf(emptyList<PluginInfo>()) }
     val sel = vm.selected
     val ctx = LocalContext.current
@@ -55,7 +56,7 @@ fun DawScreen(vm: DawViewModel) {
             CompositionLocalProvider(LocalShort provides short) {
             Column(Modifier.fillMaxSize()) {
                 Transport(vm, !wide && !short, short, showKeys, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
-                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" })
+                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" }, onSettings = { showSettings = true })
                 if (short) {
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         Column(Modifier.width(74.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -109,6 +110,8 @@ fun DawScreen(vm: DawViewModel) {
     }
     if (vm.exporting) ExportingDialog()
     InstallerScreen(vm)
+    if (showSettings) SettingsScreen(vm) { showSettings = false }
+    DisplaySettingsEffect(vm.playing)
 }
 
 @Composable
@@ -140,7 +143,7 @@ private fun PanelChip(text: String, active: Boolean, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit) {
+private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys: Boolean, onRecord: () -> Unit, onMidi: () -> Unit, onKeys0: () -> Unit, onKeys: () -> Unit, onAddInstrument: () -> Unit, onAddAudio: () -> Unit, onTempo: () -> Unit, onSave: () -> Unit, onExport: () -> Unit, onExports: () -> Unit, onInstallers: () -> Unit, onSettings: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     // Phones: tighter sizes so the whole transport (stop, play, loop, rec, position, tempo) fits even on dense, narrow screens.
     val bs = if (compact || oneRow) 36.dp else 40.dp
@@ -173,6 +176,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
             }
         }
         SquareButton(Glyph.Keys, active = keys, size = 38.dp, onClick = onKeys)
+        SquareButton(Glyph.Gear, size = 38.dp, onClick = onSettings)
         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable(onClick = onMidi).padding(horizontal = 12.dp, vertical = 9.dp)) { Text("MIDI", color = if (vm.midi.devices.any { it.connected }) Zk.accent else Zk.dim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
         if (vm.recording && vm.selected?.kind == TrackKind.Audio) Box(Modifier.width(60.dp).height(10.dp)) { Meter(vm.recLevel, Modifier.fillMaxSize()) }
         if (vm.loop) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

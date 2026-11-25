@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.zedokmusic.settings.AppSettings
 import com.zedokmusic.engine.NativeEngine
 import com.zedokmusic.engine.MidiInput
 import com.zedokmusic.engine.AacEncoder
@@ -32,7 +33,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var playing by mutableStateOf(false); private set
     var loop by mutableStateOf(false); private set
     /** The timelines scroll along with the play cursor. */
-    var followPlayhead by mutableStateOf(true)
+    var followPlayhead: Boolean get() = AppSettings.follow.on; set(v) { AppSettings.follow.set(v) }
     var loopBars by mutableIntStateOf(4); private set
     var playhead by mutableFloatStateOf(0f); private set
     var selected by mutableStateOf<TrackM?>(null)
@@ -54,6 +55,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onMidi(status: Int, d1: Int, d2: Int) {
         val cmd = status and 0xF0
+        val only = AppSettings.midiChannel.value
+        if (only > 0 && cmd < 0xF0 && (status and 0x0F) != only - 1) return  // channel filter
         val t = selected?.takeIf { it.kind == TrackKind.Instrument } ?: tracks.firstOrNull { it.kind == TrackKind.Instrument } ?: return
         if (cmd == 0x90 && d2 > 0) keyEvent(t, true, d1, d2) else if (cmd == 0x80 || cmd == 0x90) keyEvent(t, false, d1, 0)
     }
@@ -75,7 +78,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             val dir = workspace?.let { File(it, "Samples/Recordings") } ?: return "No workspace folder."
             dir.mkdirs()
             val f = File(dir, "Take_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".wav")
-            val err = e.recStart(f.absolutePath, 0)
+            val err = e.recStart(f.absolutePath, AppSettings.inputDevice.value)
             if (err.isNotEmpty()) return err
             recPath = f
         }
@@ -110,7 +113,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val pendingLanes = HashMap<Int, List<Pair<String, List<AutoPoint>>>>()
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
     init {
+        e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
         engineOk = e.start()
+        midi.autoConnect = { AppSettings.midiAuto.on }
         midi.start()
         if (!engineOk) message = "Audio output could not be started."
         load()
@@ -136,9 +141,27 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val s = e.stats()
                 if (s[0] > 0) engineInfo = "%d Hz · %.1f ms · %d xruns".format(s[0].toInt(), s[6], s[3].toInt())
-                if (dirty && !playing) { save(); dirty = false }
+                if (dirty && !playing && AppSettings.autosave.on) { save(); dirty = false }
             }
         }
+    }
+
+    // ---------- audio settings ----------
+    /** Re-opens the audio output with the current settings (device, buffer size, exclusive mode). Stops playback first. */
+    fun restartAudio() {
+        if (recording) stopRecording()
+        e.pause(); playing = false
+        e.stop()
+        e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
+        engineOk = e.start()
+        message = if (engineOk) null else "Audio output could not be restarted."
+    }
+    /** Short description of the running audio stream for the Settings screen. */
+    fun audioStatus(): String {
+        val s = e.stats()
+        if (s[0] <= 0f) return "Audio is not running."
+        return "%d Hz · burst %d · buffer %d frames (%.1f ms) · %s · %d xruns · callback avg %.0f µs, max %.0f µs"
+            .format(s[0].toInt(), s[1].toInt(), s[2].toInt(), s[6], if (s[7] > 0f) "exclusive" else "shared", s[3].toInt(), s[4], s[5])
     }
 
     // ---------- transport ----------

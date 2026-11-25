@@ -58,16 +58,18 @@ class MidiInput(private val ctx: Context, private val onMessage: (status: Int, d
     val bleFound = mutableStateListOf<Dev>()     // devices seen while scanning
     var scanning by mutableStateOf(false); private set
     var status by mutableStateOf("")
+    /** Whether newly plugged (and already present) devices are opened automatically. */
+    var autoConnect: () -> Boolean = { true }
 
     private val callback = object : MidiManager.DeviceCallback() {
-        override fun onDeviceAdded(info: MidiDeviceInfo) { refresh(); connect(info) }
+        override fun onDeviceAdded(info: MidiDeviceInfo) { refresh(); if (autoConnect()) connect(info) }
         override fun onDeviceRemoved(info: MidiDeviceInfo) { open.remove(info.id)?.close(); refresh() }
     }
 
     fun start() {
         val m = mm ?: run { status = "This device has no MIDI support."; return }
         m.registerDeviceCallback(callback, handler)
-        refresh(); m.devices.forEach { connect(it) }
+        refresh(); if (autoConnect()) m.devices.forEach { connect(it) }
     }
 
     fun stop() { mm?.unregisterDeviceCallback(callback); stopScan(); open.values.forEach { it.close() }; open.clear() }

@@ -90,7 +90,7 @@ fun MidiDialog(midi: com.zedokmusic.engine.MidiInput, onScan: () -> Unit, onDism
 @Composable
 fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String, stems: Boolean) -> Unit, onDismiss: () -> Unit) {
     var range by remember { mutableIntStateOf(0) }
-    var format by remember { mutableIntStateOf(1) }
+    var format by remember { mutableIntStateOf(com.zedokmusic.settings.AppSettings.exportFormat.value) }
     var name by remember { mutableStateOf("Mix") }
     var stems by remember { mutableStateOf(false) }
     @Composable fun option(label: String, selected: Boolean, onClick: () -> Unit) {
@@ -121,7 +121,7 @@ fun ExportDialog(loopBars: Int, onExport: (range: Int, format: Int, name: String
             option("Each track separately (stems)", stems) { stems = true }
             Text("Saved in the Exports folder of your workspace.", color = Zk.dim, fontSize = 11.sp)
         }
-    }, confirmButton = { TextButton({ onExport(range, format, name, stems); onDismiss() }) { Text("Export") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+    }, confirmButton = { TextButton({ com.zedokmusic.settings.AppSettings.exportFormat.set(format); onExport(range, format, name, stems); onDismiss() }) { Text("Export") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
 
 @Composable

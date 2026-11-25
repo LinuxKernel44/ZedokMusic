@@ -17,6 +17,11 @@ class PluginHost(private val ctx: Context) {
     val gui = GuiServer(ctx)
     private val files get() = ctx.filesDir
 
+    /** WINEDEBUG value: a developer file `winedebug` wins, else "err+all" when verbose logging is on in Settings, else silent. */
+    private fun debugChannels(): String =
+        File(files, "winedebug").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null }
+            ?: if (com.zedokmusic.settings.AppSettings.wineLog.on) "err+all" else "-all"
+
     /** Maps an Android path to the Windows path Wine sees. */
     fun toWinPath(unixPath: String): String {
         // /sdcard, /storage/emulated/0 and /storage/self/primary are aliases of the same folder: compare canonical paths.
@@ -49,7 +54,7 @@ class PluginHost(private val ctx: Context) {
             val mode = File(files, "guimode").takeIf { it.exists() }?.readText()?.trim() ?: "full"
             val guiRunning = mode != "none" && gui.ensureRunning()
             val guiOn = guiRunning && mode == "full"  // ("kill" mode also ends up here with guiRunning = false)
-            val dbg = File(files, "winedebug").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null } ?: "-all"  // developer aid: a file holding a WINEDEBUG value
+            val dbg = debugChannels()
             val pb = env.wine(*(if (guiOn) gui.desktopArgs() + args else args), debug = dbg, extraEnv = if (guiOn) ({ e -> gui.wineEnv(e) }) else null)
             synchronized(processes) { processes[track] = pb.redirectOutput(File(files, "host_$track.log")).start() }
         }.start()
@@ -74,7 +79,7 @@ class PluginHost(private val ctx: Context) {
             val win = try { toWinPath(file.absolutePath) } catch (e: Exception) { onStarted(false); return@Thread }
             if (!gui.ensureRunning()) { onStarted(false); return@Thread }
             val args = if (file.extension.equals("msi", true)) arrayOf("msiexec", "/i", win) else arrayOf(win)
-            val pb = env.wine(*(gui.desktopArgs("zinst", GuiServer.INSTALLER_W, GuiServer.INSTALLER_H) + args), extraEnv = { e -> gui.wineEnv(e) })
+            val pb = env.wine(*(gui.desktopArgs("zinst", GuiServer.INSTALLER_W, GuiServer.INSTALLER_H) + args), debug = debugChannels(), extraEnv = { e -> gui.wineEnv(e) })
             file.parentFile?.let { pb.directory(it) }
             pb.redirectOutput(File(files, "installer.log"))
             val p = try { pb.start() } catch (e: Exception) { onStarted(false); return@Thread }

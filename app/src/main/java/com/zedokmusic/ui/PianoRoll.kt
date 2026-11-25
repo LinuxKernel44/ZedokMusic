@@ -34,7 +34,7 @@ private const val TOP = 96
 private const val BOTTOM = 36
 private val RowPx = 18.dp
 private val KeysW = 54.dp
-private const val SNAP = 0.25f
+private val SNAP get() = com.zedokmusic.settings.AppSettings.snapBeats
 private val NoteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private fun isBlack(p: Int) = (p % 12) in intArrayOf(1, 3, 6, 8, 10)
 
@@ -50,7 +50,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     val beats = maxOf(32f, track.lengthBeats(vm.bpm) + 8f)
     val totalW = (beats * ppb).dp
     val tm = rememberTextMeasurer()
-    var defaultLen by remember { mutableFloatStateOf(1f) }
+    var defaultLen by remember { mutableFloatStateOf(com.zedokmusic.settings.AppSettings.noteLengthBeats) }
     var preview by remember { mutableStateOf<Int?>(null) }
     // drag state
     var dragOld by remember { mutableStateOf<NoteM?>(null) }

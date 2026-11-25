@@ -11,6 +11,8 @@ object NativeEngine {
 
     external fun start(): Boolean
     external fun stop()
+    /** Output device (AudioDeviceInfo id, 0 = automatic), buffer size in bursts (2..8) and exclusive mode; applied by the next [start]. */
+    external fun configure(outDevice: Int, bufferMult: Int, exclusive: Boolean)
     external fun addTrack(): Int
     external fun removeTrack(id: Int): Boolean
     /** Loads a WAV into a new clip. Returns [clipId, frames] or null if unreadable. */
