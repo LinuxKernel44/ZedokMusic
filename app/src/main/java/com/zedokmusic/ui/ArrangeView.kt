@@ -45,7 +45,11 @@ private val RulerH = 28.dp
 @Composable
 fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onEdit: (TrackM) -> Unit, onImport: (TrackM) -> Unit) {
     val RowH = if (LocalShort.current) RowHShort else RowHTall
-    val hs = rememberScrollState(); val vs = rememberScrollState()
+    val hs = rememberScrollState(vm.arrangeX); val vs = rememberScrollState(vm.arrangeY)
+    // Remember where the timeline is scrolled (saved with the project); jump there when another project is opened.
+    LaunchedEffect(Unit) { snapshotFlow { hs.value to vs.value }.collect { (x, y) -> vm.viewScrolled(x, y) } }
+    var seenView by remember { mutableIntStateOf(vm.viewRevision) }
+    LaunchedEffect(vm.viewRevision) { if (vm.viewRevision != seenView) { seenView = vm.viewRevision; hs.scrollTo(vm.arrangeX); vs.scrollTo(vm.arrangeY) } }
     var viewportPx by remember { mutableIntStateOf(0) }
     FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
     val density = LocalDensity.current

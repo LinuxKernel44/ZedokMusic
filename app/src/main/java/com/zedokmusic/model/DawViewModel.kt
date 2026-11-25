@@ -124,11 +124,21 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // Declared before init: load() runs from init and fills them.
     private val pendingLanes = HashMap<Int, List<Pair<String, List<AutoPoint>>>>()
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
+    // ---- view state, saved with the project: zoom (pixels per beat) and where each timeline is scrolled to ----
+    private var ppbValue by mutableFloatStateOf(44f)
+    var ppb: Float get() = ppbValue; set(v) { if (v != ppbValue) { ppbValue = v; viewDirty = true } }
+    var arrangeX = 0; var arrangeY = 0; var rollX = 0; var rollY = -1   // -1: the piano roll's own default (around C5)
+    /** Bumped when another project's view was loaded, so the open timelines scroll to it. */
+    var viewRevision by mutableIntStateOf(0); private set
+    @Volatile var viewDirty = false
+    fun viewScrolled(ax: Int, ay: Int) { if (ax != arrangeX || ay != arrangeY) { arrangeX = ax; arrangeY = ay; viewDirty = true } }
+    fun rollScrolled(x: Int, y: Int) { if (x != rollX || y != rollY) { rollX = x; rollY = y; viewDirty = true } }
     /** The master's insert effects (a track's own are in [TrackM.fx]). Declared before init: load() fills it. */
     val masterFx = mutableStateListOf<TrackM>()
     /** The plugin the Plugin and Auto panels show: an effect picked in the mixer, otherwise the selected instrument. */
     var pluginTarget by mutableStateOf<TrackM?>(null)
     init {
+        current = this
         store?.create(projectName)
         e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
         engineOk = e.start()
@@ -159,7 +169,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val s = e.stats()
                 if (s[0] > 0) engineInfo = "%d Hz · %.1f ms · %d xruns".format(s[0].toInt(), s[6], s[3].toInt())
-                if (dirty && !playing && AppSettings.autosave.on) { save(); dirty = false }
+                if ((dirty || viewDirty) && !playing && AppSettings.autosave.on) { save(); dirty = false }
             }
         }
     }
@@ -548,8 +558,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun isSharedExport(f: File) = workspace != null && f.parentFile?.canonicalPath == File(workspace, "Exports").canonicalPath
 
     // ---------- persistence ----------
+    /** Writes the project when something changed, including the zoom and scroll positions (called when the app leaves the screen). */
+    fun flush() { if (!projectBusy && (dirty || viewDirty) && AppSettings.autosave.on && !recording) { save(); dirty = false } }
+
     fun save() {
         val f = projectFile ?: return
+        viewDirty = false
         store?.backup(projectName)
         store?.create(projectName)
         write(f)
@@ -557,7 +571,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
     private fun write(f: File, mapPath: (String) -> String = { it }) {
-        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("loopBars", loopBars)
+        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("loopBars", loopBars).put("loop", loop)
+            .put("view", JSONObject().put("ppb", ppb.toDouble()).put("ax", arrangeX).put("ay", arrangeY).put("rx", rollX).put("ry", rollY))
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
@@ -611,6 +626,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         tracks.toList().forEach { removeTrack(it) }
         masterFx.toList().forEach { removeEffect(null, it) }
         pluginTarget = null
+        loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
         bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); applyLoop()
         pendingLanes.clear(); pendingParams.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
@@ -739,7 +755,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val root = JSONObject(f.readText())
             bpm = root.optDouble("bpm", 120.0).toFloat(); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain)
-            loopBars = root.optInt("loopBars", 4)
+            loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
+            root.optJSONObject("view")?.let { v ->
+                ppbValue = v.optDouble("ppb", 44.0).toFloat().coerceIn(12f, 160f)
+                arrangeX = v.optInt("ax"); arrangeY = v.optInt("ay"); rollX = v.optInt("rx"); rollY = v.optInt("ry", -1)
+            } ?: run { ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1 }
+            viewRevision++
             val arr = root.getJSONArray("tracks")
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
@@ -766,5 +787,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         dirty = false
     }
 
-    override fun onCleared() { stopRecording(); midi.stop(); save(); host.stopAll(); e.pause(); e.stop() }
+    companion object { @Volatile var current: DawViewModel? = null }
+
+    override fun onCleared() { current = null; stopRecording(); midi.stop(); save(); host.stopAll(); e.pause(); e.stop() }
 }

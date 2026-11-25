@@ -45,7 +45,10 @@ private fun isBlack(p: Int) = (p % 12) in intArrayOf(1, 3, 6, 8, 10)
 /** Piano roll for an instrument track. Tap = add a note / select one; drag = move; drag a selected note's end handles (or the right part of any note) = stretch or shrink; −/+ in the header change the length by one grid step. */
 @Composable
 fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
-    val hs = rememberScrollState(); val vs = rememberScrollState(rememberStartScroll())
+    val hs = rememberScrollState(vm.rollX); val vs = rememberScrollState(if (vm.rollY >= 0) vm.rollY else rememberStartScroll())
+    LaunchedEffect(Unit) { snapshotFlow { hs.value to vs.value }.collect { (x, y) -> vm.rollScrolled(x, y) } }
+    var seenView by remember { mutableIntStateOf(vm.viewRevision) }
+    LaunchedEffect(vm.viewRevision) { if (vm.viewRevision != seenView) { seenView = vm.viewRevision; hs.scrollTo(vm.rollX); if (vm.rollY >= 0) vs.scrollTo(vm.rollY) } }
     var viewportPx by remember { mutableIntStateOf(0) }
     FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
     val density = LocalDensity.current

@@ -33,7 +33,7 @@ fun DawScreen(vm: DawViewModel) {
     var bottom by rememberSaveable { mutableStateOf(Panel.Piano) }
     var showKeys by rememberSaveable { mutableStateOf(false) }
     var octave by rememberSaveable { mutableIntStateOf(3) }
-    var ppb by rememberSaveable { mutableFloatStateOf(44f) }
+    var ppb by vm::ppb   // saved with the project
     var dialog by remember { mutableStateOf<String?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showUpdate by remember { mutableStateOf(false) }

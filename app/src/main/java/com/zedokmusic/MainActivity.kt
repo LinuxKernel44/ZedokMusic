@@ -14,6 +14,9 @@ import com.zedokmusic.ui.Onboarding
 import com.zedokmusic.ui.ZedokTheme
 
 class MainActivity : ComponentActivity() {
+    /** Saves the project (with zoom and scroll positions) whenever the app leaves the screen: Android may end the process without warning. */
+    override fun onStop() { super.onStop(); com.zedokmusic.model.DawViewModel.current?.flush() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.zedokmusic.settings.AppSettings.init(this)

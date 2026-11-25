@@ -120,12 +120,14 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPlayhead(x: Float, colo
 @Composable
 fun FollowPlayhead(vm: com.zedokmusic.model.DawViewModel, scroll: androidx.compose.foundation.ScrollState, pxPerBeat: Float, viewportPx: Int) {
     val d = androidx.compose.ui.platform.LocalDensity.current.density
+    val wasPlayingState = androidx.compose.runtime.remember { booleanArrayOf(vm.playing) }
     androidx.compose.runtime.LaunchedEffect(vm.playhead, vm.playing, vm.followPlayhead, viewportPx) {
+        val stoppedNow = wasPlayingState[0] && !vm.playing; wasPlayingState[0] = vm.playing
         if (!vm.followPlayhead || viewportPx <= 0 || scroll.isScrollInProgress) return@LaunchedEffect
         val x = vm.playhead * pxPerBeat * d
         if (vm.playing) {
             if (x > scroll.value + viewportPx * 0.88f || x < scroll.value) scroll.scrollTo((x - viewportPx * 0.12f).toInt().coerceAtLeast(0))
-        } else if (vm.playhead == 0f && scroll.value != 0) scroll.scrollTo(0)
+        } else if (stoppedNow && vm.playhead == 0f && scroll.value != 0) scroll.scrollTo(0)  // only when Stop was just pressed: not when the screen is (re)opened
     }
 }
 
