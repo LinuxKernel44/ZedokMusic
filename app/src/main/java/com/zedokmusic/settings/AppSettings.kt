@@ -40,6 +40,9 @@ object AppSettings {
     // MIDI
     val midiAuto = b("midi.auto", true)
     val midiChannel = s("midi.channel", 0)         // 0 = all, 1..16
+    // Updates
+    val updAuto = b("update.auto", true)           // look for a newer version once a day
+    val updPre = b("update.pre", true)             // every release so far is an alpha, so pre-releases count
     // Display
     val keepOn = s("display.keepon", 0)            // 0 never, 1 while playing, 2 always
     val orientation = s("display.orientation", 0)  // 0 automatic, 1 portrait, 2 landscape

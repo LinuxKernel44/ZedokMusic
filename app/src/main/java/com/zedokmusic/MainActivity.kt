@@ -17,6 +17,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.zedokmusic.settings.AppSettings.init(this)
+        com.zedokmusic.update.Updater.init(application)
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)  // the app lays itself out around the insets (see screenInsets), so it can also draw under the notch
         val autoFolder = DebugHooks.autoFolder(intent)
         setContent {

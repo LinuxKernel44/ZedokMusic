@@ -27,15 +27,17 @@ import androidx.compose.ui.unit.sp
 import com.zedokmusic.model.DawViewModel
 import com.zedokmusic.settings.AppSettings
 import com.zedokmusic.settings.Setting
+import com.zedokmusic.update.Updater
+import com.zedokmusic.update.Updater.Phase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private enum class Section(val label: String) { Audio("Audio"), Project("Project"), Plugins("Plugins"), Midi("MIDI"), Display("Display"), Storage("Storage"), About("About") }
+private enum class Section(val label: String) { Audio("Audio"), Project("Project"), Plugins("Plugins"), Midi("MIDI"), Display("Display"), Storage("Storage"), Updates("Updates"), About("About") }
 
 /** All user settings. Wide / landscape: a category list on the left and the chosen category on the right; narrow: one scrolling list. */
 @Composable
-fun SettingsScreen(vm: DawViewModel, onClose: () -> Unit) {
+fun SettingsScreen(vm: DawViewModel, onShowUpdate: () -> Unit, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
     var section by rememberSaveable { mutableStateOf(Section.Audio) }
     Surface(Modifier.fillMaxSize(), color = Zk.bg) {
@@ -51,10 +53,10 @@ fun SettingsScreen(vm: DawViewModel, onClose: () -> Unit) {
                     }
                     VerticalDivider(color = Zk.line)
                     Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        Box(Modifier.widthIn(max = 640.dp)) { Column { SectionContent(section, vm) } }
+                        Box(Modifier.widthIn(max = 640.dp)) { Column { SectionContent(section, vm, onShowUpdate) } }
                     }
                 } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 4.dp)) {
-                    Section.values().forEach { s -> Header(s.label); SectionContent(s, vm) }
+                    Section.values().forEach { s -> Header(s.label); SectionContent(s, vm, onShowUpdate) }
                     Spacer(Modifier.height(24.dp))
                 }
             }
@@ -139,7 +141,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
     }
 }
 
-@Composable private fun SectionContent(section: Section, vm: DawViewModel) {
+@Composable private fun SectionContent(section: Section, vm: DawViewModel, onShowUpdate: () -> Unit) {
     when (section) {
         Section.Audio -> AudioSection(vm)
         Section.Project -> ProjectSection()
@@ -147,6 +149,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
         Section.Midi -> MidiSection(vm)
         Section.Display -> DisplaySection()
         Section.Storage -> StorageSection(vm)
+        Section.Updates -> UpdatesSection(onShowUpdate)
         Section.About -> AboutSection()
     }
 }
@@ -219,6 +222,24 @@ private fun fmt(b: Long) = if (b >= 1L shl 30) "%.1f GB".format(b / 1073741824.0
             confirmButton = { TextButton({ ws?.let { File(it, dir).listFiles()?.forEach { f -> f.deleteRecursively() } }; confirm = null; refresh++ }) { Text("Delete", color = Zk.danger) } },
             dismissButton = { TextButton({ confirm = null }) { Text("Cancel") } })
     }
+}
+
+@Composable private fun UpdatesSection(onShowUpdate: () -> Unit) {
+    val phase = Updater.phase; val r = Updater.release
+    val last = Updater.lastChecked
+    InfoRow("Installed version", Updater.installedVersionName())
+    InfoRow("Latest check", if (last == 0L) "never" else java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(last))
+    when (phase) {
+        Phase.Checking -> Row2("Looking for updates…", null) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }
+        Phase.UpToDate -> Row2("You have the latest version", "Nothing newer is published.") {}
+        Phase.Failed -> if (r == null) Row2("Could not check", Updater.error) {}
+        else -> {}
+    }
+    if (r != null && phase != Phase.UpToDate) ActionRow("Version ${r.version} is available", "${"%.1f".format(r.apkSize / 1048576.0)} MB. See what's new, download and install.", "Details", onClick = onShowUpdate)
+    ActionRow("Check for updates", "Asks GitHub for the newest release. Nothing about you is sent.", "Check now", enabled = phase != Phase.Checking && phase != Phase.Downloading) { Updater.check(silent = false) }
+    SwitchRow("Check automatically", "Looks once a day when the app starts. It never downloads or installs without you.", AppSettings.updAuto)
+    SwitchRow("Include pre-releases", "All versions so far are alpha builds, so keep this on to receive them.", AppSettings.updPre)
+    if (Updater.skipped.isNotEmpty()) ActionRow("Skipped version", "${Updater.skipped} is hidden from automatic checks.", "Show again") { Updater.skipped = "" }
 }
 
 @Composable private fun AboutSection() {

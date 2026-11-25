@@ -23,6 +23,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.zedokmusic.model.*
+import com.zedokmusic.update.Updater
 
 private enum class Panel(val label: String) { Arrange("Tracks"), Piano("Piano"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
 
@@ -35,6 +36,11 @@ fun DawScreen(vm: DawViewModel) {
     var ppb by rememberSaveable { mutableFloatStateOf(44f) }
     var dialog by remember { mutableStateOf<String?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showUpdate by remember { mutableStateOf(false) }
+    // Once per start-up (and at most once a day): look for a newer version quietly, then offer it.
+    LaunchedEffect(Unit) { Updater.autoCheck() }
+    LaunchedEffect(Updater.phase) { if (Updater.phase == Updater.Phase.Available && !showSettings) showUpdate = true }
+    LaunchedEffect(Updater.justUpdatedTo) { Updater.justUpdatedTo?.let { vm.message = "Updated to $it."; Updater.justUpdatedTo = null } }
     var insertsOpen by remember { mutableStateOf(false) }
     var insertsOwner by remember { mutableStateOf<TrackM?>(null) }
     val openInserts: (TrackM?) -> Unit = { owner -> insertsOwner = owner; insertsOpen = true }
@@ -126,7 +132,8 @@ fun DawScreen(vm: DawViewModel) {
     if (vm.projectBusy) AlertDialog(onDismissRequest = {}, containerColor = Zk.panel, title = { Text("Opening project…") }, text = { LinearProgressIndicator(Modifier.fillMaxWidth()) }, confirmButton = {})
     if (insertsOpen) InsertsDialog(vm, insertsOwner, { fx -> insertsOwner?.let { vm.selected = it }; vm.pluginTarget = fx; panel = Panel.Plugin; bottom = Panel.Plugin; insertsOpen = false }, { dialog = "fxpicker" }, { insertsOpen = false })
     InstallerScreen(vm)
-    if (showSettings) SettingsScreen(vm) { showSettings = false }
+    if (showSettings) SettingsScreen(vm, { showUpdate = true }) { showSettings = false }
+    UpdateDialog(vm, showUpdate) { showUpdate = false; Updater.dismiss() }
     DisplaySettingsEffect(vm.playing)
 }
 
