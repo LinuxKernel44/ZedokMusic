@@ -8,6 +8,7 @@
 #include <vector>
 #include <algorithm>
 #include <memory>
+#include <chrono>
 #include <unistd.h>
 #include "../dsp/processor.h"
 using namespace zdsp;
@@ -44,6 +45,7 @@ int main(int argc, char** argv) {
     p->prepare(sr, 128);
     if (!strcmp(argv[1], "grain")) usleep(600000);   // the grain textures are built on a background thread
     for (auto& kv : states) if (!p->setState(kv.first, kv.second)) fprintf(stderr, "state %s rejected\n", kv.first.c_str());
+    const auto tStart = std::chrono::steady_clock::now();
     const int total = (int)(secs * sr); std::vector<float> L(total), R(total), zero(128, 0.f);
     std::vector<ZkEvent> ev;
     for (int pos = 0; pos < total; pos += 128) {
@@ -62,6 +64,7 @@ int main(int argc, char** argv) {
     }
     double e = 0, dc = 0, pk = 0; int bad = 0; for (int i = 0; i < total; i++) { for (float x : {L[i], R[i]}) { if (!std::isfinite(x)) { bad++; continue; } e += x * x; dc += x; pk = std::max(pk, (double)std::fabs(x)); } }
     printf("peak %.2f dBFS  rms %.2f dBFS  dc %.5f  nonfinite %d\n", 20 * log10(pk + 1e-12), 10 * log10(e / (2.0 * total) + 1e-12), dc / (2.0 * total), bad);
+    { const double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - tStart).count(); printf("cpu %.1f%% of real time (%.3f s for %.1f s)\n", 100.0 * el / secs, el, secs); }
     writeWav(argv[2], L, R, sr);
     return bad ? 3 : 0;
 }

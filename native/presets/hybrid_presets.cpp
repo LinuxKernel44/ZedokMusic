@@ -115,7 +115,7 @@ PresetList hybridPresets() {
     P("Soft Mallet", "Pluck", {"mallet", "soft", "ambient"}, A("Sine", 0.8) + B("Triangle", 0.3, "+1") + f1("LP 12", 3800, 0.05) + amp(1, 900, 0, 400) + fx(0.1, 0.15, 0.4, "1/4", 0.4, 0.7, 3.5));
     P("Pizzicato", "Pluck", {"strings", "pizz", "short"}, A("Saw", 0.6) + f1("LP 24", 900, 0.15, 0.55, 0.3) + e2(1, 120, 0, 80) + amp(1, 180, 0, 90) + fx(0, 0, 0.18, "1/8", 0.3, 0.4, 1.3));
     P("Chime Pluck", "Pluck", {"chime", "bright", "bell"}, AF(3.5, 1.5, 0.6) + BF(1, 0.6, 0.4) + amp(1, 900, 0, 350) + e3(0.5, 200, 0, 100) + mod(1, "Env 3", "Osc A FM Index", 0.4) + f1("LP 12", 11000, 0.05) + fx(0.1, 0.2, 0.3, "1/8 .", 0.4, 0.6, 2.6));
-    P("Analog Pluck Bass Key", "Pluck", {"analog", "pluck", "mono"}, A("Saw", 0.7) + B("Square", 0.5, "-1") + f1("Ladder", 800, 0.35, 0.5, 0.3, 0.1) + e2(1, 220, 0, 110) + amp(1, 300, 0, 110) + mono(0));
+    P("Analog Pluck Bass Key", "Pluck", {"analog", "pluck", "mono"}, A("Saw", 0.7) + B("Square", 0.5, "-1") + f1("Ladder", 1300, 0.3, 0.45, 0.3, 0.1) + e2(1, 220, 0, 110) + amp(1, 300, 0, 110) + mono(0));
     P("Trap Pluck", "Pluck", {"trap", "hip-hop", "dark"}, A("Triangle", 0.8) + B("Square", 0.3, "+1") + f1("LP 12", 2600, 0.12, 0.3) + e2(1, 160, 0, 100) + amp(1, 420, 0, 180) + fx(0.15, 0.2, 0.25, "1/8 .", 0.4, 0.5, 2.2));
     P("Hyperpop Pluck", "Pluck", {"hyperpop", "bright", "wide"}, A("Saw", 0.6, "0", "5", 30, 1.0) + B("Square", 0.4, "+1") + f1("LP 24", 5200, 0.15, 0.4, 0.3) + e2(1, 240, 0, 120) + amp(1, 360, 0, 150) + fx(0.4, 0.25, 0.25, "1/16 T", 0.35, 0.5, 2.0));
     P("Wood Block", "Pluck", {"percussive", "short", "wood"}, AF(2.5, 2.2, 0.7) + amp(0.5, 120, 0, 60) + e3(0.5, 40, 0, 20) + mod(1, "Env 3", "Osc A FM Index", 0.6) + f1("LP 12", 4000, 0.1) + fx(0, 0, 0.1));
@@ -153,7 +153,7 @@ PresetList hybridPresets() {
     P("Hand Bell", "Bell", {"bell", "hand", "soft"}, AF(3, 1.3, 0.7) + BF(1, 0.5, 0.3, 0, "+1") + amp(1, 1700, 0, 600) + e3(0.5, 700, 0, 250) + mod(1, "Env 3", "Osc A FM Index", 0.4) + f1("LP 12", 10000, 0.05) + fx(0, 0.1, 0.35));
 
     // ================================================================== FX & ATMOS
-    P("Noise Riser", "FX", {"riser", "noise", "build"}, noise(0.8, 0.0) + A("Sine", 0.0) + f1("BP 12", 300, 0.6, 1.0) + e2(5000, 1500, 1, 600) + amp(4000, 600, 1, 800) + fx(0, 0, 0.3, "1/4", 0.3, 0.6, 3.0) + V("Env2 Sustain", 1.0));
+    P("Noise Riser", "FX", {"riser", "noise", "build"}, noise(1.0, 0.0) + A("Sine", 0.0) + f1("BP 12", 300, 0.6, 1.0) + e2(2800, 1500, 1, 600) + amp(2200, 600, 1, 800) + fx(0, 0, 0.3, "1/4", 0.3, 0.6, 3.0) + V("Env2 Sustain", 1.0));
     P("Downlifter", "FX", {"downlifter", "noise", "transition"}, noise(0.7, 0.2) + A("Saw", 0.2, "-1") + f1("LP 24", 12000, 0.3, -0.9) + e2(1, 4000, 0.0, 800) + amp(5, 3500, 0.0, 1500) + fx(0, 0, 0.4, "1/4", 0.3, 0.7, 4.0));
     P("Laser Zap", "FX", {"laser", "sci-fi", "short"}, A("Saw", 0.8) + f1("LP 12", 9000, 0.3) + amp(1, 260, 0, 100) + e3(0.5, 150, 0, 60) + mod(1, "Env 3", "Pitch", 1.0) + fx(0, 0.2, 0.2, "1/8", 0.4, 0.4, 1.5));
     P("Sci-fi Drone", "FX", {"sci-fi", "drone", "dark"}, A("Saw", 0.5, "-1", "3", 30, 1.0) + B("Square", 0.4, "0", "1", 20, 0.6, 19) + f1("BP 12", 900, 0.55, 0.0) + amp(1800, 1000, 0.95, 3000) + lfo(1, "Smooth Random", 0.3) + lfo(2, "Sine", 0.17) + mod(1, "LFO 1", "Filter 1 Cutoff", 0.5) + mod(2, "LFO 2", "Filter 1 Res", 0.3) + fx(0.2, 0.2, 0.5, "1/4", 0.5, 0.9, 8.0));

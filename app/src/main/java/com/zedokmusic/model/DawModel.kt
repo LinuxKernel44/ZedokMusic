@@ -46,6 +46,8 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     var presetName by mutableStateOf("")
     var presetKey by mutableStateOf("")
     var abSlot by mutableIntStateOf(0)
+    /** Built-in plugins: extra state that is not a parameter (the sample a granular synth plays), saved with the project. */
+    val states = androidx.compose.runtime.mutableStateMapOf<String, String>()
     val abStore = arrayOfNulls<Map<Int, Float>>(2)
 
     /** End of the content in beats, rounded up to whole bars (min 1 bar). */
@@ -67,7 +69,7 @@ class AutoLane(val paramName: String, var paramIndex: Int) {
     var lastWrite = -1f  // recording: beat of the last point written in the current pass
 }
 
-class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int)
+class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int) { var group: String = "" }
 
 class PluginInfo(val name: String, val path: String, val kind: Int = 0, val blurb: String = "")  // kind: 0 unknown, 1 instrument, 2 effect
 

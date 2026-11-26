@@ -22,6 +22,11 @@ fun NativePluginView(vm: DawViewModel, t: TrackM, generic: @Composable () -> Uni
                 val ps = rememberPluginState(vm, t)
                 when (id) {
                     "hybrid" -> HybridScreen(ps)
+                    "eqcomp" -> EqCompScreen(ps)
+                    "space" -> SpaceScreen(ps)
+                    "color" -> ColorScreen(ps)
+                    "drums" -> DrumsScreen(ps)
+                    "grain" -> GrainScreen(ps)
                     else -> generic()
                 }
             }

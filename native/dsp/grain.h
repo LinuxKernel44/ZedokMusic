@@ -363,6 +363,7 @@ private:
         for (int i = 0; i < len; i++) {
             if ((i & 3) == 0 && p.fType != 0) { for (int c = 0; c < 2; c++) v.f[c].set(sr_, curC, res * 0.92f); if (p.fType == 2) for (int c = 0; c < 2; c++) v.f2[c].set(sr_, curC, res * 0.2f); }
             float l = 0.f, r = 0.f;
+            if (nI < 2) v.ng = 0;
             for (int gI = 0; gI < v.ng; gI++) {
                 GrainS& g = v.g[gI];
                 if (g.age >= g.len) { v.g[gI] = v.g[--v.ng]; gI--; continue; }
@@ -370,7 +371,8 @@ private:
                 float ph = (float)g.age * g.invLen; ph = ph < g.skew ? ph * g.invSkew : 0.5f + (ph - g.skew) * g.invRest;
                 const float ef = ph * kEnvN; const int ei = std::min((int)ef, kEnvN - 1); const float* et = envTab_[g.shape]; const float env = et[ei] + (et[ei + 1] - et[ei]) * (ef - ei);
                 // read the source (linear interpolation, wrapping)
-                double sp = g.pos; if (sp >= nD) sp -= nD; else if (sp < 0.0) sp += nD; g.pos = sp;
+                double sp = g.pos; if (sp >= nD || sp < 0.0) sp -= std::floor(sp / nD) * nD;   // a grain may outlive a source change or start far outside the buffer
+                if (sp >= nD) sp = 0.0; g.pos = sp;
                 const int i0 = (int)sp; const float fr = (float)(sp - i0); const int i1 = i0 + 1 >= nI ? 0 : i0 + 1;
                 const float sl = Lp[i0] + (Lp[i1] - Lp[i0]) * fr, sr2 = Rp[i0] + (Rp[i1] - Rp[i0]) * fr;
                 const float a = env * g.amp; l += sl * a * g.gl * 0.7f; r += sr2 * a * g.gr * 0.7f;

@@ -3,5 +3,5 @@
 set -e
 cd "$(dirname "$0")"
 OUT=../../app/src/main/assets/presets; mkdir -p "$OUT"
-g++ -std=c++17 -O2 -Wall -o /tmp/zpresetgen presetgen.cpp hybrid_presets.cpp ../dsp/registry.cpp
-for id in ${@:-hybrid}; do /tmp/zpresetgen "$id" "$OUT/$id.json" --report "/tmp/zpreset_$id.txt"; done
+g++ -std=c++17 -O2 -pthread -Wall -o /tmp/zpresetgen presetgen.cpp hybrid_presets.cpp eqcomp_presets.cpp space_presets.cpp color_presets.cpp drums_presets.cpp grain_presets.cpp ../dsp/registry.cpp ../../app/src/main/cpp/wav.cpp
+for id in ${@:-hybrid eqcomp space color drums grain}; do /tmp/zpresetgen "$id" "$OUT/$id.json" --report "/tmp/zpreset_$id.txt"; done

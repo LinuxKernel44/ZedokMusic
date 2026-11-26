@@ -77,6 +77,7 @@ J(jfloatArray, pluginTelemetry, jint track, jint what) {
     float buf[1024]; int n = eng().pluginTelemetry(track, what, buf, 1024);
     jfloatArray a = env->NewFloatArray(n); if (n > 0) env->SetFloatArrayRegion(a, 0, n, buf); return a;
 }
+J(jstring, paramGroup, jint track, jint index) { return env->NewStringUTF(eng().paramGroup(track, index).c_str()); }
 J(jstring, paramTextAt, jint track, jint index, jfloat norm) { return env->NewStringUTF(eng().paramTextAt(track, index, norm).c_str()); }
 J(void, setTempo, jdouble bpm) { eng().setTempo(bpm); }
 // The built-in plugins: "id|name|kind|description" (kind 1 instrument, 2 effect).

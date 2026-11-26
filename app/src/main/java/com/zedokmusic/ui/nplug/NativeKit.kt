@@ -164,7 +164,7 @@ fun Toggle(ps: PluginState, name: String, color: Color, label: String = name, mo
 /** A titled group of controls. */
 @Composable
 fun Section(title: String, color: Color, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel).border(1.dp, Zk.line, RoundedCornerShape(10.dp)).padding(10.dp)) {
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Zk.panel).border(1.dp, Zk.line, RoundedCornerShape(10.dp)).padding(10.dp)) {
         Text(title.uppercase(), color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 6.dp))
         content()
     }
@@ -223,3 +223,28 @@ fun EnvView(a: Float, d: Float, s: Float, r: Float, color: Color, modifier: Modi
 
 @Composable
 fun Header(text: String, color: Color) { Text(text, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp) }
+
+
+/**
+ * Lays out every parameter of one section automatically: knobs for continuous values, chips for short choice lists, a picker for long ones, a button for switches.
+ * [names] overrides the labels; [exclude] hides parameters a screen draws itself.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AutoGroup(ps: PluginState, group: String, color: Color, title: String = group, exclude: Set<String> = emptySet(), labels: Map<String, String> = emptyMap(), knobSize: Dp = 54.dp, modifier: Modifier = Modifier) {
+    val items = ps.params.filter { it.group == group && it.name !in exclude }
+    if (items.isEmpty()) return
+    Section(title, color, modifier) {
+        val choices = items.filter { it.steps > 0 }; val knobs = items.filter { it.steps == 0 }
+        choices.forEach { p ->
+            val l = ps.labels(p.name)
+            val label = labels[p.name] ?: p.name
+            when {
+                p.steps == 1 && l == listOf("Off", "On") -> Toggle(ps, p.name, color, label, Modifier.padding(bottom = 6.dp))
+                p.steps <= 5 -> Chips(ps, p.name, color, label, Modifier.padding(bottom = 6.dp))
+                else -> Picker(ps, p.name, color, label, Modifier.padding(bottom = 6.dp), width = 150.dp)
+            }
+        }
+        if (knobs.isNotEmpty()) Knobs { knobs.forEach { p -> PK(ps, p.name, color, labels[p.name] ?: p.name.removePrefix(group).trim().ifEmpty { p.name }, knobSize) } }
+    }
+}

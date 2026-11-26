@@ -80,7 +80,7 @@ inline BiquadCoef biquadDesign(BQ type, double sr, double f0, double q, double g
     case BQ::Peak:     b0 = 1 + alpha * A; b1 = -2 * cw; b2 = 1 - alpha * A; a0 = 1 + alpha / A; a1 = -2 * cw; a2 = 1 - alpha / A; break;
     case BQ::LowShelf: case BQ::HighShelf: {
         const double S = q;  // slope
-        const double al = sw / 2.0 * std::sqrt((A + 1 / A) * (1 / S - 1) + 2);
+        const double al = sw / 2.0 * std::sqrt(std::max(1e-4, (A + 1 / A) * (1 / S - 1) + 2));   // S above ~1 would make this negative (overshooting shelf): keep it real
         const double tsa = 2 * std::sqrt(A) * al;
         if (type == BQ::LowShelf) {
             b0 = A * ((A + 1) - (A - 1) * cw + tsa); b1 = 2 * A * ((A - 1) - (A + 1) * cw); b2 = A * ((A + 1) - (A - 1) * cw - tsa);

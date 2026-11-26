@@ -79,7 +79,7 @@ fun SettingsScreen(vm: DawViewModel, onShowUpdate: () -> Unit, onClose: () -> Un
         }
     }
     if (pickPlugin) {
-        val list = remember { vm.scanPlugins() }
+        val list = remember { vm.scanPlugins().filter { !it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) } }  // only Windows plugins open in the desktop
         AlertDialog(onDismissRequest = { pickPlugin = false }, containerColor = Zk.panel, title = { Text("Open a plugin in the desktop") }, text = {
             if (list.isEmpty()) Text("No plugin found yet. Install one first (Add → Install .exe, or the desktop's Start menu).", color = Zk.dim)
             else androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {

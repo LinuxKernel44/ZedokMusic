@@ -20,3 +20,8 @@ struct PresetDef {
 };
 using PresetList = std::vector<PresetDef>;
 PresetList hybridPresets();
+PresetList eqcompPresets();
+PresetList spacePresets();
+PresetList colorPresets();
+PresetList drumsPresets();
+PresetList grainPresets();

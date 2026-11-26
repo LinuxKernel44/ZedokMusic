@@ -125,6 +125,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // Declared before init: load() runs from init and fills them.
     private val pendingLanes = HashMap<Int, List<Pair<String, List<AutoPoint>>>>()
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
+    private val pendingStates = HashMap<Int, Pair<String, Map<String, String>>>()   // preset name + extra state (sample path...) of built-in plugins
     // ---- view state, saved with the project: zoom (pixels per beat) and where each timeline is scrolled to ----
     private var ppbValue by mutableFloatStateOf(44f)
     var ppb: Float get() = ppbValue; set(v) { if (v != ppbValue) { ppbValue = v; viewDirty = true } }
@@ -331,7 +332,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- plugin parameters ----------
     fun loadParams(t: TrackM): List<ParamM> {
         val n = e.paramCount(t.id); val out = FloatArray(2); val list = ArrayList<ParamM>(n)
-        for (i in 0 until n) e.paramInfo(t.id, i, out)?.let { list.add(ParamM(i, it[0], it[1], out[0], out[1].toInt())) }
+        val nat = t.pluginPath?.let { PluginHost.isNative(it) } == true
+        for (i in 0 until n) e.paramInfo(t.id, i, out)?.let { list.add(ParamM(i, it[0], it[1], out[0], out[1].toInt()).also { p -> if (nat) p.group = e.paramGroup(t.id, i) }) }
         t.paramNames = list.associate { it.index to it.name }
         return list
     }
@@ -389,6 +391,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     /** Re-applies saved values once the plugin is up (matching by name, so a plugin update that shifts indices stays safe). */
     private fun applyPending(t: TrackM) {
+        pendingStates.remove(t.id)?.let { (preset, st) -> t.presetName = preset; st.forEach { (k, x) -> t.states[k] = x; e.setPluginState(t.id, k, x) } }
         val lanes = pendingLanes.remove(t.id)
         val pending = pendingParams.remove(t.id)
         if (lanes == null && pending == null) return
@@ -613,7 +616,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
-            .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx))
+            .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("start", c.start.toDouble())) } }))
         root.put("tracks", arr).put("masterFx", fxJson(masterFx))
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
@@ -621,9 +624,11 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun paramsJson(t: TrackM) = JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } }
     private fun lanesJson(t: TrackM) = JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble()).put(p.shape)) } })) } }
-    private fun fxJson(list: List<TrackM>) = JSONArray().also { a -> list.forEach { f -> a.put(JSONObject().put("plugin", f.pluginPath).put("name", f.name).put("bypass", f.bypass).put("params", paramsJson(f)).put("lanes", lanesJson(f))) } }
+    private fun fxJson(list: List<TrackM>) = JSONArray().also { a -> list.forEach { f -> a.put(JSONObject().put("plugin", f.pluginPath).put("name", f.name).put("bypass", f.bypass).put("params", paramsJson(f)).put("lanes", lanesJson(f)).put("preset", f.presetName).put("nstate", JSONObject(f.states.toMap()))) } }
     /** Saved parameter values and automation, applied once the plugin is up (see applyPending). */
     private fun readPluginState(t: TrackM, o: JSONObject) {
+        val st = HashMap<String, String>(); o.optJSONObject("nstate")?.let { s -> s.keys().forEach { k -> st[k] = s.getString(k) } }
+        if (st.isNotEmpty() || o.optString("preset").isNotEmpty()) pendingStates[t.id] = o.optString("preset") to st
         o.optJSONArray("lanes")?.let { la -> pendingLanes[t.id] = (0 until la.length()).map { k -> val lo = la.getJSONObject(k); val pa = lo.getJSONArray("points")
             lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat(), x.optInt(2, 0)) } } } }
         o.optJSONArray("params")?.let { pa -> pendingParams[t.id] = (0 until pa.length()).map { k -> pa.getJSONArray(k).let { x -> x.getString(0) to x.getDouble(1).toFloat() } } }
@@ -632,7 +637,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (arr == null) return
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
-            val path = o.optString("plugin").takeIf { it.isNotEmpty() && File(it).exists() } ?: continue
+            val path = o.optString("plugin").takeIf { it.isNotEmpty() && (PluginHost.isNative(it) || File(it).exists()) } ?: continue
             val fx = addEffectInternal(owner, o.optString("name", File(path).nameWithoutExtension), path) ?: continue
             if (o.optBoolean("bypass")) { fx.bypass = true; e.setFxBypass(fx.id, true) }
             readPluginState(fx, o)
@@ -665,7 +670,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
         bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); applyLoop()
-        pendingLanes.clear(); pendingParams.clear()
+        pendingLanes.clear(); pendingParams.clear(); pendingStates.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
     }
     /** The name pre-filled when creating or saving a project (the user can type anything else). */
@@ -761,7 +766,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             e.setParam(t.id, pm.index, target)
             if (Math.abs(target - pm.default) > 1e-4f) t.paramOverrides[pm.index] = target else t.paramOverrides.remove(pm.index)
         }
-        p.state.forEach { (k, v) -> e.setPluginState(t.id, k, v) }
+        p.state.forEach { (k, x) -> e.setPluginState(t.id, k, x); t.states[k] = x }
         t.presetName = p.name; t.presetKey = p.key
         paramsRevision++; dirty = true
     }
@@ -777,7 +782,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         t.abSlot = next; paramsRevision++; dirty = true
     }
     fun pluginState(t: TrackM, key: String) = e.getPluginState(t.id, key)
-    fun setPluginState(t: TrackM, key: String, value: String) { e.setPluginState(t.id, key, value); dirty = true }
+    fun setPluginState(t: TrackM, key: String, value: String) { e.setPluginState(t.id, key, value); t.states[key] = value; dirty = true }
 
     // ---------- plugin presets (per project) ----------
     private fun presetDir(t: TrackM): File? = projectPresetsDir()?.let { File(it, (t.pluginName.ifBlank { t.name }).replace(Regex("[^A-Za-z0-9 _.()+-]"), "_")) }

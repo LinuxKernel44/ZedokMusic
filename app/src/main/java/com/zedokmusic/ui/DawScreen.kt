@@ -222,7 +222,7 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
                 GlyphIcon(Glyph.Plus, Zk.accent, 16.dp); Text("Add", color = Zk.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
             DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text("Instrument track (VST3)…") }, onClick = { menu = false; onAddInstrument() })
+                DropdownMenuItem(text = { Text("Instrument track…") }, onClick = { menu = false; onAddInstrument() })
                 DropdownMenuItem(text = { Text("Audio track") }, onClick = { menu = false; onAddAudio() })
                 DropdownMenuItem(text = { Text("Install plugin (.exe)…") }, onClick = { menu = false; onInstallers() })
             }
