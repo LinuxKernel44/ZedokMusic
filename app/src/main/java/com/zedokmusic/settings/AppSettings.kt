@@ -39,6 +39,8 @@ object AppSettings {
     val wineLog = b("plugin.winelog", false)
     val gpu = s("plugin.gpu", 0)                    // graphics for Direct3D plugin windows: 0 automatic (phone GPU when there is one), 1 phone GPU, 2 software
     val dxvk = b("plugin.dxvk", true)               // Direct3D 9-11 for plugin windows through DXVK (Vulkan)
+    // Sound browser (Tracks view): docked beside the tracks (1) or a drawer over them (0)
+    val browserDocked = b("browser.docked", true)
     // MIDI
     val midiAuto = b("midi.auto", true)
     val midiChannel = s("midi.channel", 0)         // 0 = all, 1..16

@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +22,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -43,7 +46,7 @@ private val RowHShort = 62.dp
 private val LocalRowScale = compositionLocalOf { 1f }
 /** Height of an arrangement track row: the base height (denser on short windows) times the vertical zoom, never too small for its buttons. */
 @Composable private fun rowH(): androidx.compose.ui.unit.Dp = ((if (LocalShort.current) RowHShort else RowHTall) * LocalRowScale.current).coerceAtLeast(54.dp)
-private val HeaderW = 150.dp
+private val HeaderW = 176.dp
 private val RulerH = 28.dp
 
 /** Arrangement: track headers on the left, a scrolling timeline on the right (beats on the x axis). */
@@ -64,6 +67,22 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
     var anchor by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     LaunchedEffect(ppb) { anchor?.let { (beat, cx) -> hs.scrollTo((beat * ppb * density.density - cx).toInt().coerceAtLeast(0)); anchor = null } }
     val ppbNow = rememberUpdatedState(ppb); val headerPx = with(density) { HeaderW.toPx() }
+    val dnd = LocalDnd.current
+    SideEffect { dnd.ppb = ppb; dnd.density = density.density }
+    DisposableEffect(Unit) { onDispose { dnd.arrangeRect = null; dnd.lanes.clear(); dnd.newZone = null } }
+    // While something is dragged, the tracks scroll when the finger is near an edge.
+    LaunchedEffect(dnd.payload != null) {
+        while (dnd.payload != null) {
+            kotlinx.coroutines.delay(16)
+            val r = dnd.arrangeRect; val at = dnd.pos
+            if (r != null && r.contains(at)) {
+                val edge = with(density) { 48.dp.toPx() }
+                if (at.y > r.bottom - edge) vs.scrollBy(18f) else if (at.y < r.top + edge) vs.scrollBy(-18f)
+                if (at.x > r.right - edge) hs.scrollBy(18f) else if (at.x < r.left + headerPx + edge) hs.scrollBy(-18f)
+                dnd.move(at)
+            }
+        }
+    }
     CompositionLocalProvider(LocalRowScale provides vm.rowScale) {
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(RulerH).background(Zk.panel)) {
@@ -73,10 +92,12 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                 SquareButton(Glyph.Plus, size = 24.dp) { onZoom((ppb * 1.4f).coerceAtMost(DawViewModel.ZOOM_MAX)) }
                 Spacer(Modifier.width(6.dp))
                 LabelButton("Follow", vm.followPlayhead, w = 50.dp, h = 24.dp) { vm.followPlayhead = !vm.followPlayhead }
+                Spacer(Modifier.width(6.dp))
+                LabelButton("♪", vm.browserOpen, w = 30.dp, h = 24.dp) { vm.browserOpen = !vm.browserOpen }
             }
             Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) { Ruler(vm, totalBeats, ppb, totalW) }
         }
-        Row(Modifier.fillMaxSize().pointerInput(Unit) {
+        Row(Modifier.fillMaxSize().onGloballyPositioned { dnd.arrangeRect = it.boundsInRoot() }.pointerInput(Unit) {
             // two fingers: apart/together horizontally = time zoom, vertically = track height
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
@@ -102,11 +123,12 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                 } while (ev.changes.any { it.pressed })
             }
         }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
-            Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint() }
+            Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint(); if (dnd.payload != null) Spacer(Modifier.height(rowH() * 0.8f)) }
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
                 Box(Modifier.width(totalW)) {
                     Column {
                         vm.tracks.forEach { t -> TimelineRow(vm, t, totalBeats, ppb, onEdit) }
+                        if (dnd.payload != null) NewTrackZone(dnd)
                     }
                     // matchParentSize: fillMaxHeight measures to nothing inside a vertically scrolling parent.
                     Canvas(Modifier.matchParentSize()) { drawPlayhead(vm.playhead * ppb * density.density, Zk.accent, head = false) }
@@ -115,6 +137,18 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
         }
     }
     }  // CompositionLocalProvider
+}
+
+/** Shown while dragging: dropping here creates a new track. */
+@Composable private fun NewTrackZone(dnd: DndState) {
+    val h = dnd.hover is Hover.NewTrack
+    val ok = h && dnd.payload?.let { dnd.accepts(it, Hover.NewTrack) } == true
+    DisposableEffect(Unit) { onDispose { dnd.newZone = null } }
+    Box(Modifier.fillMaxWidth().height(rowH() * 0.8f).onGloballyPositioned { dnd.newZone = it.boundsInRoot() }.padding(8.dp).clip(RoundedCornerShape(10.dp))
+        .background(if (ok) Zk.accent.copy(alpha = .14f) else Zk.panel.copy(alpha = .6f)).border(if (h) 2.dp else 1.dp, if (ok) Zk.accent else if (h) Zk.danger else Zk.line, RoundedCornerShape(10.dp))) {
+        Text(when { h && !ok -> "Not here"; dnd.payload?.isFolder == true -> "Drop for a new Zedok Drums track with this kit"; dnd.payload?.plugin != null -> "Drop for a new track"; else -> "Drop for a new audio track" },
+            color = if (ok) Zk.accent else Zk.dim, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterStart).padding(start = 12.dp))
+    }
 }
 
 @Composable private fun EmptyHint() {
@@ -175,7 +209,9 @@ private fun TimelineRow(vm: DawViewModel, t: TrackM, totalBeats: Float, ppb: Flo
     val RowH = rowH()
     val density = LocalDensity.current
     val sel = vm.selected == t
-    Box(Modifier.height(RowH).fillMaxWidth().background(if (sel) Zk.panel2.copy(alpha = .55f) else Zk.bg).border(0.5.dp, Zk.line)) {
+    val dnd = LocalDnd.current
+    DisposableEffect(t) { onDispose { dnd.lanes.remove(t) } }
+    Box(Modifier.height(RowH).fillMaxWidth().background(if (sel) Zk.panel2.copy(alpha = .55f) else Zk.bg).border(0.5.dp, Zk.line).onGloballyPositioned { dnd.lanes[t] = it.boundsInRoot() }) {
         Canvas(Modifier.matchParentSize()) {
             val pw = ppb * density.density
             var b = 0
@@ -197,6 +233,13 @@ private fun TimelineRow(vm: DawViewModel, t: TrackM, totalBeats: Float, ppb: Flo
             }
         }
         for (c in t.clips) ClipBlock(vm, t, c, ppb)
+        val dp = dnd.payload; val hv = dnd.hover
+        if (dp != null && hv is Hover.Lane && hv.track === t) {
+            val ok = dnd.accepts(dp, hv); val col = if (ok) Zk.accent else Zk.danger
+            Box(Modifier.matchParentSize().background(col.copy(alpha = .08f)).border(2.dp, col))
+            if (ok && t.kind == TrackKind.Audio && dp.isSound) Box(Modifier.offset { IntOffset(with(density) { (hv.beat * ppb).dp.roundToPx() }, 0) }.padding(vertical = 8.dp).width((ppb * 2).dp).fillMaxHeight()
+                .clip(RoundedCornerShape(8.dp)).background(col.copy(alpha = .22f)).border(1.5.dp, col, RoundedCornerShape(8.dp))) { Text(dp.title, color = col, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(5.dp)) }
+        }
     }
 }
 

@@ -901,6 +901,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         } else e.setPluginState(t.id, key, value)
     }
     val kits = KitManager(this, app)
+    /** The sound browser of the Tracks view is open. */
+    var browserOpen by mutableStateOf(false)
     internal fun markDirty() { dirty = true }
     internal fun bumpParams() { paramsRevision++ }
     fun pluginState(t: TrackM, key: String) = e.getPluginState(t.id, key)

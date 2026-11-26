@@ -207,6 +207,26 @@ object KitImporter {
         finally { runCatching { ex.release() } }
     }
 
+    /** Length in seconds of a PCM/float WAV file (0 when it cannot be read). */
+    fun wavSeconds(f: File): Double = runCatching {
+        f.inputStream().buffered().use { s ->
+            val h = ByteArray(12); if (s.read(h) < 12) return 0.0
+            var byteRate = 0L
+            while (true) {
+                val ch = ByteArray(8); if (s.read(ch) < 8) return 0.0
+                val len = (le(ch, 4).toLong() and 0xFFFF) or ((le(ch, 6).toLong() and 0xFFFF) shl 16)
+                val id = String(ch, 0, 4)
+                if (id == "fmt ") { val b = ByteArray(len.toInt().coerceAtMost(40)); s.read(b); byteRate = (le(b, 8).toLong() and 0xFFFF) or ((le(b, 10).toLong() and 0xFFFF) shl 16); if (len > b.size) s.skip(len - b.size) }
+                else if (id == "data") return if (byteRate > 0) len.toDouble() / byteRate else 0.0
+                else s.skip(len + (len and 1L))
+                if (id == "fmt " && (len and 1L) == 1L) s.skip(1)
+            }
+            0.0
+        }
+    }.getOrDefault(0.0)
+    /** Is [out] already a copy of [node] (same name, same size)? Dropping the same sound twice then reuses the file. */
+    fun sameSource(node: KitNode, out: File): Boolean = runCatching { node.open()?.use { it.available() >= 0 && out.length() > 0 && node.name.substringAfterLast('.', "").lowercase() in setOf("wav", "wave") && it.available().toLong() == out.length() } == true }.getOrDefault(false)
+
     fun safeName(s: String) = s.trim().replace(Regex("[^A-Za-z0-9 _.()+&'-]"), "_").trim('.', ' ').take(60).ifEmpty { "Kit" }
     /** A folder name for [seg] that is safe on every file system. */
     fun safePath(rel: String) = rel.split('/').filter { it.isNotEmpty() }.joinToString("/") { safeName(it) }

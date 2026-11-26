@@ -62,6 +62,8 @@ fun DawScreen(vm: DawViewModel) {
     }
     fun onScan() { if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) vm.midi.startScan() else locPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
 
+    val dnd = remember(vm) { DndState().also { d -> d.isDrums = { t -> vm.nativeId(t) == "drums" }; d.onDrop = { p, h -> handleDrop(vm, d, p, h) } } }
+    CompositionLocalProvider(LocalDnd provides dnd) {
     Box(Modifier.fillMaxSize().background(Zk.bg).windowInsetsPadding(screenInsets()).imePadding()) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 840.dp
@@ -86,7 +88,7 @@ fun DawScreen(vm: DawViewModel) {
                 } else if (wide) {
                     val expanded = vm.panelExpanded && bottom == Panel.Plugin
                     if (!expanded) {
-                        Box(Modifier.weight(1f)) { ArrangeView(vm, ppb, { ppb = it }, { panel = Panel.Piano; bottom = Panel.Piano }, { vm.selected = it; dialog = "samples" }) }
+                        Box(Modifier.weight(1f)) { ArrangeHost(vm, ppb, { ppb = it }, { panel = Panel.Piano; bottom = Panel.Piano }, { vm.selected = it; dialog = "samples" }) }
                         HorizontalDivider(color = Zk.line)
                     }
                     Column(Modifier.weight(if (expanded) 1f else 0.9f)) {
@@ -113,7 +115,9 @@ fun DawScreen(vm: DawViewModel) {
             }
             }  // CompositionLocalProvider
         }
+        DragLayer(dnd, Zk.accent) { n -> dnd.lastDrums?.let { vm.kits.padLabel(it, n - 1) } }
     }
+    }  // LocalDnd
     when (dialog) {
         "plugins" -> PluginPickerDialog(plugins.filter { it.kind != 2 }, vm.pluginDir()?.path ?: "", { plugins = vm.scanPlugins() }, { vm.addInstrument(it); dialog = null }, { dialog = null })
         "samples" -> SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { samplePicker.launch(arrayOf("audio/*", "application/octet-stream")) }, { f ->
@@ -146,7 +150,7 @@ fun DawScreen(vm: DawViewModel) {
 @Composable
 private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Float) -> Unit, openPiano: () -> Unit, importTo: (TrackM) -> Unit, onInserts: (TrackM?) -> Unit) {
     when (panel) {
-        Panel.Arrange -> ArrangeView(vm, ppb, setPpb, { openPiano() }, importTo)
+        Panel.Arrange -> ArrangeHost(vm, ppb, setPpb, { openPiano() }, importTo)
         Panel.Piano -> {
             val t = vm.selected?.takeIf { it.kind == TrackKind.Instrument } ?: vm.tracks.firstOrNull { it.kind == TrackKind.Instrument }
             if (t == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Add an instrument track to write notes.", color = Zk.dim) }

@@ -125,10 +125,10 @@ private fun ProjectKitsDialog(kits: KitManager, ps: PluginState, color: Color, o
 }
 
 /** One folder of the library tree: its sub-folders and the sounds directly in it. */
-private class Dir(val name: String, val path: String) { val dirs = java.util.TreeMap<String, Dir>(String.CASE_INSENSITIVE_ORDER); val files = ArrayList<Pair<String, KitNode>>(); var total = 0 }
-private sealed class TreeRow { class D(val dir: Dir, val depth: Int, val open: Boolean) : TreeRow(); class F(val path: String, val node: KitNode, val depth: Int) : TreeRow() }
+internal class Dir(val name: String, val path: String) { val dirs = java.util.TreeMap<String, Dir>(String.CASE_INSENSITIVE_ORDER); val files = ArrayList<Pair<String, KitNode>>(); var total = 0 }
+internal sealed class TreeRow { class D(val dir: Dir, val depth: Int, val open: Boolean) : TreeRow(); class F(val path: String, val node: KitNode, val depth: Int) : TreeRow() }
 
-private fun buildTree(items: List<Pair<String, KitNode>>): Dir {
+internal fun buildTree(items: List<Pair<String, KitNode>>): Dir {
     val root = Dir("", "")
     for (it in items) {
         val parts = it.first.split('/'); var d = root; d.total++
@@ -137,7 +137,7 @@ private fun buildTree(items: List<Pair<String, KitNode>>): Dir {
     }
     return root
 }
-private fun flatten(d: Dir, depth: Int, open: (String) -> Boolean, out: MutableList<TreeRow>) {
+internal fun flatten(d: Dir, depth: Int, open: (String) -> Boolean, out: MutableList<TreeRow>) {
     for (sub in d.dirs.values) { val o = open(sub.path); out.add(TreeRow.D(sub, depth, o)); if (o) flatten(sub, depth + 1, open, out) }
     for (f in d.files) out.add(TreeRow.F(f.first, f.second, depth))
 }

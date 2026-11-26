@@ -208,6 +208,43 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
         val root = SafNode.tree(ctx, uri) ?: return
         closeBrowser(); scan(b.t, if (folder.isEmpty()) root else KitScanner.resolve(root, folder) ?: root)
     }
+    /** Imports a folder of the library as a kit on [t] (the folder is found again from its path in the library). */
+    fun importLibraryFolder(t: TrackM, path: String) {
+        val uri = libraryUri() ?: return
+        worker.execute {
+            val root = SafNode.tree(ctx, uri) ?: return@execute
+            val node = if (path.isEmpty()) root else KitScanner.resolve(root, path) ?: root
+            ui { scan(t, node) }
+        }
+    }
+    /** Imports any folder (a kit stored in the project, for instance) as a kit on [t]. */
+    fun importFolder(t: TrackM, node: KitNode) = scan(t, node)
+
+    /** Dropped on an audio track: every sound becomes a clip, one after the other from [startBeat]; the files are copied (or decoded to WAV) into the project's Samples folder. */
+    fun addAsClips(t: TrackM, nodes: List<KitNode>, startBeat: Float) {
+        val dir = vm.projectSamplesDir()
+        if (dir == null) { vm.message = "There is no project folder."; return }
+        val bpm = vm.bpm
+        worker.execute {
+            val placed = ArrayList<Pair<File, Float>>(); var beat = startBeat
+            for (n in nodes) {
+                dir.mkdirs()
+                val base = KitImporter.safeName(n.name.substringBeforeLast('.'))
+                var out = File(dir, "$base.wav"); var i = 2
+                while (out.exists()) { if (KitImporter.sameSource(n, out)) break; out = File(dir, "$base ($i).wav"); i++ }
+                val f = if (out.exists()) out else KitImporter.copyOrConvert(n, out) ?: continue
+                placed.add(f to beat)
+                beat += Math.ceil((KitImporter.wavSeconds(f) * bpm / 60.0) * 4.0).toFloat() / 4f
+            }
+            ui {
+                if (placed.isEmpty()) vm.message = "Could not read ${if (nodes.size == 1) nodes[0].name else "those sounds"}."
+                else { placed.forEach { (f, b) -> vm.importClip(t, f, b) }; vm.message = "${placed.size} clip${if (placed.size > 1) "s" else ""} added on ${t.name}, copied into the project." }
+            }
+        }
+    }
+    /** Dropped on a pad of a Zedok Drums track: one sound per pad from [pad] (0-based) on. */
+    fun dropOnPads(t: TrackM, pad: Int, nodes: List<KitNode>) { nodes.forEachIndexed { i, n -> if (pad + i < 16) assignNodes(t, pad + i, listOf(n), append = false) } }
+
     fun loadToPad(pad: Int, nodes: List<KitNode>, append: Boolean, done: () -> Unit) {
         val b = browse ?: return
         browseStatus = "Copying ${nodes.size} sound${if (nodes.size > 1) "s" else ""} into the project…"
