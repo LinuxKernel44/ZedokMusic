@@ -75,7 +75,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekBeat(it) }) {
                     val pw = ppb * density.density; var b = 0
                     while (b <= beats) {
-                        val x = b * pw; val bar = b % 4 == 0
+                        val x = gridLineX(b * pw); val bar = b % 4 == 0
                         drawLine(if (bar) Zk.dim else Zk.line, Offset(x, if (bar) 10.dp.toPx() else 20.dp.toPx()), Offset(x, size.height), 1f)
                         if (bar) drawText(tm.measure("${b / 4 + 1}", TextStyle(color = Zk.dim, fontSize = 10.sp)), topLeft = Offset(x + 4.dp.toPx(), 2.dp.toPx())); b++
                     }
@@ -183,18 +183,21 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             drawRect(if (isBlack(p)) Color(0xFF121418) else Color(0xFF181B20), Offset(0f, y), Size(size.width, rowPx))
                             drawLine(if (p % 12 == 0) Zk.dim.copy(alpha = .5f) else Zk.line.copy(alpha = .5f), Offset(0f, y), Offset(size.width, y), 1f)
                         }
-                        var b = 0f
-                        while (b <= beats) { drawLine(if (b % 4 == 0f) Zk.dim.copy(alpha = .5f) else if (b % 1f == 0f) Zk.line else Zk.line.copy(alpha = .35f), Offset(b * pw, 0f), Offset(b * pw, size.height), 1f); b += if (ppb > 70) 0.25f else 1f }
+                        // Grid lines follow the snap setting (as fine as is still readable), so the lines you see are the positions notes snap to.
+                        var step = SNAP; while (step * pw < 9.dp.toPx() && step < 1f) step *= 2f
+                        if (step >= 1f) step = 1f
+                        var k = 0
+                        while (k * step <= beats) { val b = k * step; val gx = gridLineX(b * pw); drawLine(if (b % 4f == 0f) Zk.dim.copy(alpha = .5f) else if (b % 1f == 0f) Zk.line else Zk.line.copy(alpha = .35f), Offset(gx, 0f), Offset(gx, size.height), 1f); k++ }
                         for (n in track.notes) {
                             val shown = if (n === dragOld) dragNew ?: n else n
                             val y = (TOP - shown.pitch) * rowPx
-                            val w = maxOf(4f, shown.length * pw - 1)
-                            drawRoundRect(track.color, Offset(shown.start * pw, y + 1), Size(w, rowPx - 2), CornerRadius(4f))
+                            val nx = gridPx(shown.start * pw); val w = maxOf(4f, gridPx((shown.start + shown.length) * pw) - nx - 1)
+                            drawRoundRect(track.color, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f))
                             if (n === sel) {
-                                drawRoundRect(Color.White, Offset(shown.start * pw, y + 1), Size(w, rowPx - 2), CornerRadius(4f), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                                drawRoundRect(Color.White, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
                                 val cy = y + rowPx / 2
-                                for (hx in floatArrayOf(shown.start * pw, shown.start * pw + w)) { drawCircle(Color.White, 8.dp.toPx(), Offset(hx, cy)); drawCircle(track.color, 4.dp.toPx(), Offset(hx, cy)) }
-                                if (n === dragOld) drawText(tm.measure(beatsLabel(shown.length), TextStyle(color = Color.White, fontSize = 12.sp)), topLeft = Offset(shown.start * pw, maxOf(0f, y - 16.dp.toPx())))
+                                for (hx in floatArrayOf(nx, nx + w)) { drawCircle(Color.White, 8.dp.toPx(), Offset(hx, cy)); drawCircle(track.color, 4.dp.toPx(), Offset(hx, cy)) }
+                                if (n === dragOld) drawText(tm.measure(beatsLabel(shown.length), TextStyle(color = Color.White, fontSize = 12.sp)), topLeft = Offset(nx, maxOf(0f, y - 16.dp.toPx())))
                             }
                         }
                     }

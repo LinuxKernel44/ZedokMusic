@@ -102,10 +102,18 @@ val LocalShort = compositionLocalOf { false }
 @Composable
 fun dialogListMax(base: Dp): Dp = minOf(base, (LocalConfiguration.current.screenHeightDp * 0.42f).dp)
 
+// ---------- grid alignment ----------
+
+/** A position in pixels snapped to a whole pixel: everything on a timeline (ruler, grid lines, clips, notes, play cursor) uses it, so they line up exactly. */
+fun gridPx(x: Float): Float = Math.round(x).toFloat()
+/** Where to draw a 1 px grid line for position [x]: the middle of that pixel (a crisp line, never straddling two pixels). */
+fun gridLineX(x: Float): Float = gridPx(x) + 0.5f
+
 // ---------- play cursor ----------
 
 /** Draws the play cursor: a line across the whole height and, when [head] is set, a small triangle at the top (rulers). */
-fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPlayhead(x: Float, color: Color, head: Boolean) {
+fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPlayhead(px: Float, color: Color, head: Boolean) {
+    val x = gridPx(px)
     drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2.dp.toPx())
     if (head) {
         val w = 6.dp.toPx(); val h = 9.dp.toPx()

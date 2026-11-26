@@ -129,7 +129,7 @@ private fun Ruler(vm: DawViewModel, totalBeats: Float, ppb: Float, totalW: andro
         val pw = ppb * density
         var b = 0
         while (b <= totalBeats) {
-            val x = b * pw; val bar = b % 4 == 0
+            val x = gridLineX(b * pw); val bar = b % 4 == 0
             drawLine(if (bar) Zk.dim else Zk.line, Offset(x, if (bar) 8.dp.toPx() else 18.dp.toPx()), Offset(x, size.height), 1f)
             if (bar && pw * 4 > 40) drawText(tm.measure("${b / 4 + 1}", androidx.compose.ui.text.TextStyle(color = Zk.dim, fontSize = 10.sp)), topLeft = Offset(x + 4.dp.toPx(), 2.dp.toPx()))
             b++
@@ -179,18 +179,19 @@ private fun TimelineRow(vm: DawViewModel, t: TrackM, totalBeats: Float, ppb: Flo
         Canvas(Modifier.matchParentSize()) {
             val pw = ppb * density.density
             var b = 0
-            while (b <= totalBeats) { drawLine(if (b % 4 == 0) Zk.line else Zk.line.copy(alpha = .35f), Offset(b * pw, 0f), Offset(b * pw, size.height), 1f); b++ }
+            while (b <= totalBeats) { val gx = gridLineX(b * pw); drawLine(if (b % 4 == 0) Zk.line else Zk.line.copy(alpha = .35f), Offset(gx, 0f), Offset(gx, size.height), 1f); b++ }
         }
         if (t.kind == TrackKind.Instrument) {
             val len = t.lengthBeats(vm.bpm)
             Box(Modifier.padding(vertical = 8.dp).width((len * ppb).dp).fillMaxHeight().clip(RoundedCornerShape(8.dp))
                 .background(t.color.copy(alpha = .28f)).border(1.dp, t.color.copy(alpha = .8f), RoundedCornerShape(8.dp))
                 .clickable { vm.selected = t; onEdit(t) }) {
-                Canvas(Modifier.matchParentSize().padding(6.dp)) {
+                // No horizontal padding: a note at beat n sits exactly on beat line n of the ruler and the grid.
+                Canvas(Modifier.matchParentSize().padding(vertical = 6.dp)) {
                     if (t.notes.isEmpty()) return@Canvas
                     val lo = t.notes.minOf { it.pitch }; val hi = t.notes.maxOf { it.pitch }; val span = maxOf(1, hi - lo)
                     val ph = size.height / (span + 1); val pw = ppb * density.density
-                    for (n in t.notes) drawRoundRect(t.color, Offset(n.start * pw, (hi - n.pitch) * ph), Size(maxOf(2f, n.length * pw), maxOf(2f, ph * .8f)), CornerRadius(2f))
+                    for (n in t.notes) { val x0 = gridPx(n.start * pw); val x1 = gridPx((n.start + n.length) * pw); drawRoundRect(t.color, Offset(x0, (hi - n.pitch) * ph), Size(maxOf(2f, x1 - x0), maxOf(2f, ph * .8f)), CornerRadius(2f)) }
                 }
                 if (t.notes.isEmpty()) Text("Tap to write notes", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.align(Alignment.Center))
             }
@@ -211,7 +212,7 @@ private fun ClipBlock(vm: DawViewModel, t: TrackM, c: ClipM, ppb: Float) {
         .pointerInput(c, ppb, vm.bpm) {
             detectDragGestures(onDragEnd = {
                 val b = (c.start + drag / density.density / ppb); drag = 0f
-                vm.moveClip(c, (b * 4).roundToInt() / 4f)  // snap to 1/16 note
+                val snap = com.zedokmusic.settings.AppSettings.snapBeats; vm.moveClip(c, (b / snap).roundToInt() * snap)  // snap to the grid chosen in Settings
             }, onDragCancel = { drag = 0f }) { ch, d -> ch.consume(); drag += d.x }
         }.pointerInput(c) { detectTapGestures(onLongPress = { menu = true }) }) {
         Text(c.name, color = Zk.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
