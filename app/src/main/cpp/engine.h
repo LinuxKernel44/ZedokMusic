@@ -139,6 +139,7 @@ public:
     bool createNativePlugin(int track, const std::string& pluginId);
     bool setPluginState(int id, const std::string& key, const std::string& value);
     std::string getPluginState(int id, const std::string& key);
+    std::string paramTextAt(int id, int index, float norm);   // display text of a value the parameter does not have now (choice labels)
     int pluginTelemetry(int id, int what, float* out, int cap);   // plugin-specific display data
     void setTempo(double bpm) { tempo_.store(bpm < 20.0 ? 20.0 : bpm > 400.0 ? 400.0 : bpm); }
     bool detachPlugin(int track);

@@ -75,6 +75,9 @@ public:
         const float wetGain = mix_, dryGain = 1.f - 0.5f * mix_ * mix_ - 0.5f * mix_;   // approx equal power-ish blend
         const float dryG = std::sqrt(std::max(0.f, 1.f - mix_)), wetG = std::sqrt(mix_);
         (void)wetGain; (void)dryGain;
+        // level compensation (measured on noise): the wet signal of a steady input grows with the decay time and is weaker in the long-delay modes
+        static const float modeGain[4] = {2.5f, 2.4f, 4.2f, 4.3f};
+        const float outGain = modeGain[m] * clampf(std::sqrt(2.5f / decay_), 0.45f, 2.2f);
         for (int i = 0; i < n; i++) {
             const float sz = sizeS_.next();
             const float inL = L[i], inR = R[i];
@@ -124,8 +127,8 @@ public:
             float wl = mid + side, wr = mid - side;
             hpL_ = lcA * hpL_ + (1.f - lcA) * wl; wl -= hpL_; hpR_ = lcA * hpR_ + (1.f - lcA) * wr; wr -= hpR_;
             lpL_ = (1.f - hcA) * wl + hcA * lpL_; lpR_ = (1.f - hcA) * wr + hcA * lpR_;
-            L[i] = inL * dryG + lpL_ * wetG * 1.6f;
-            R[i] = inR * dryG + lpR_ * wetG * 1.6f;
+            L[i] = inL * dryG + lpL_ * wetG * outGain;
+            R[i] = inR * dryG + lpR_ * wetG * outGain;
         }
     }
 private:
@@ -294,6 +297,8 @@ public:
         }
     }
     int latency() const { return os_on_ ? (int)(HalfBand::latency() * 2) : 0; }
+    // Static transfer curve (input -> output) for drawing; includes drive, bias, compensation and output gain, not the filters.
+    float curve(float s) const { return shape(s) * comp_ * out_; }
 private:
     inline float shape(float s) const {
         const float x = s * drive_ + bias_ * 0.5f;

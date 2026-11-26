@@ -751,6 +751,34 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         reloadCurrent(); message = "Restored ${f.name}."
     }
 
+    // ---------- presets of the built-in plugins ----------
+    val presetLibrary = PresetLibrary(app, workspace)
+    fun nativeId(t: TrackM): String? = t.pluginPath?.takeIf { PluginHost.isNative(it) }?.removePrefix(PluginHost.NATIVE_PREFIX)
+    /** Applies a preset: every parameter takes the preset's value, or returns to its default when the preset does not list it. */
+    fun applyPreset(t: TrackM, p: Preset) {
+        for (pm in loadParams(t)) {
+            val target = p.values[pm.name] ?: pm.default
+            e.setParam(t.id, pm.index, target)
+            if (Math.abs(target - pm.default) > 1e-4f) t.paramOverrides[pm.index] = target else t.paramOverrides.remove(pm.index)
+        }
+        p.state.forEach { (k, v) -> e.setPluginState(t.id, k, v) }
+        t.presetName = p.name; t.presetKey = p.key
+        paramsRevision++; dirty = true
+    }
+    /** The parameters that differ from their defaults, by name (what a user preset stores). */
+    fun changedValues(t: TrackM): Map<String, Float> = loadParams(t).filter { Math.abs(paramValue(t, it.index) - it.default) > 1e-4f }.associate { it.name to paramValue(t, it.index) }
+    /** A/B comparison: switches between two snapshots of every parameter (the first switch keeps the current sound in the other slot). */
+    fun toggleAB(t: TrackM) {
+        val params = loadParams(t)
+        t.abStore[t.abSlot] = params.associate { it.index to paramValue(t, it.index) }
+        val next = 1 - t.abSlot
+        val snap = t.abStore[next] ?: t.abStore[t.abSlot]!!
+        for (pm in params) { val v = snap[pm.index] ?: pm.default; e.setParam(t.id, pm.index, v); if (Math.abs(v - pm.default) > 1e-4f) t.paramOverrides[pm.index] = v else t.paramOverrides.remove(pm.index) }
+        t.abSlot = next; paramsRevision++; dirty = true
+    }
+    fun pluginState(t: TrackM, key: String) = e.getPluginState(t.id, key)
+    fun setPluginState(t: TrackM, key: String, value: String) { e.setPluginState(t.id, key, value); dirty = true }
+
     // ---------- plugin presets (per project) ----------
     private fun presetDir(t: TrackM): File? = projectPresetsDir()?.let { File(it, (t.pluginName.ifBlank { t.name }).replace(Regex("[^A-Za-z0-9 _.()+-]"), "_")) }
     fun presets(t: TrackM): List<File> = presetDir(t)?.listFiles { f -> f.isFile && f.extension == "zpreset" }?.sortedBy { it.name.lowercase() } ?: emptyList()

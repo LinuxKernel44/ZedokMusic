@@ -8,6 +8,7 @@
 #include <vector>
 #include <algorithm>
 #include <memory>
+#include <unistd.h>
 #include "../dsp/processor.h"
 using namespace zdsp;
 static void writeWav(const char* path, const std::vector<float>& L, const std::vector<float>& R, int sr) {
@@ -28,6 +29,7 @@ int main(int argc, char** argv) {
     if (argc < 4) { fprintf(stderr, "usage\n"); return 1; }
     std::unique_ptr<Processor> p(createProcessor(argv[1])); if (!p) { fprintf(stderr, "unknown plugin\n"); return 1; }
     const int sr = 48000; const double secs = atof(argv[3]); double tempo = 120;
+    std::vector<std::pair<std::string, std::string>> states;
     std::vector<float> values; for (auto& s : p->params()) values.push_back(s.defNorm());
     struct Note { int pitch; double start, len; int vel; }; std::vector<Note> notes; std::vector<float> inL, inR;
     for (int i = 4; i < argc; i++) {
@@ -35,10 +37,13 @@ int main(int argc, char** argv) {
         if (a == "--notes" && i + 1 < argc) { std::string l = argv[++i]; size_t pos = 0; while (pos < l.size()) { size_t e = l.find(',', pos); if (e == std::string::npos) e = l.size(); int pi; double st, ln; int vel = 100; sscanf(l.substr(pos, e - pos).c_str(), "%d:%lf:%lf:%d", &pi, &st, &ln, &vel); notes.push_back({pi, st, ln, vel}); pos = e + 1; } }
         else if (a == "--in" && i + 1 < argc) { readWav(argv[++i], inL, inR); }
         else if (a == "--tempo" && i + 1 < argc) tempo = atof(argv[++i]);
+        else if (a == "--state" && i + 1 < argc) { std::string kv = argv[++i]; size_t e = kv.find('='); states.push_back({kv.substr(0, e), kv.substr(e + 1)}); }
         else { size_t eq = a.rfind('='); if (eq == std::string::npos) continue; std::string n = a.substr(0, eq), v = a.substr(eq + 1); int k = p->indexOf(n); if (k < 0) { fprintf(stderr, "unknown param '%s'\n", n.c_str()); return 2; }
             const ParamSpec& s = p->params()[k]; float real; if (s.curve == Curve::Choice) { int idx = -1; for (size_t j = 0; j < s.labels.size(); j++) if (s.labels[j] == v) idx = (int)j; real = idx >= 0 ? (float)idx : (float)atof(v.c_str()); } else real = (float)atof(v.c_str()); values[k] = s.toNorm(real); }
     }
     p->prepare(sr, 128);
+    if (!strcmp(argv[1], "grain")) usleep(600000);   // the grain textures are built on a background thread
+    for (auto& kv : states) if (!p->setState(kv.first, kv.second)) fprintf(stderr, "state %s rejected\n", kv.first.c_str());
     const int total = (int)(secs * sr); std::vector<float> L(total), R(total), zero(128, 0.f);
     std::vector<ZkEvent> ev;
     for (int pos = 0; pos < total; pos += 128) {

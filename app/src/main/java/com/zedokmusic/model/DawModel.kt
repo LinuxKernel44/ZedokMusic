@@ -42,6 +42,11 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     val fx = mutableStateListOf<TrackM>()
     /** For an insert effect: processing is skipped (the audio passes through). */
     var bypass by mutableStateOf(false)
+    /** Built-in plugins: the preset last loaded or saved (shown in the preset bar), and the two A/B comparison snapshots. */
+    var presetName by mutableStateOf("")
+    var presetKey by mutableStateOf("")
+    var abSlot by mutableIntStateOf(0)
+    val abStore = arrayOfNulls<Map<Int, Float>>(2)
 
     /** End of the content in beats, rounded up to whole bars (min 1 bar). */
     fun lengthBeats(bpm: Float): Float {

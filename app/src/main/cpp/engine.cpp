@@ -461,6 +461,10 @@ std::string Engine::getPluginState(int id, const std::string& key) {
     std::shared_ptr<PluginBridge> b; { std::lock_guard<std::mutex> lk(editMutex_); b = bridgeOf(current_, id); }
     return b && b->native() ? b->native()->getState(key) : "";
 }
+std::string Engine::paramTextAt(int id, int index, float norm) {
+    std::shared_ptr<PluginBridge> b; { std::lock_guard<std::mutex> lk(editMutex_); b = bridgeOf(current_, id); }
+    return b ? b->paramTextAt(index, norm) : "";
+}
 int Engine::pluginTelemetry(int id, int what, float* out, int cap) {
     std::shared_ptr<PluginBridge> b; { std::lock_guard<std::mutex> lk(editMutex_); b = bridgeOf(current_, id); }
     return b && b->native() ? b->native()->telemetry(what, out, cap) : 0;

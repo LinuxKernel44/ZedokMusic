@@ -72,6 +72,8 @@ object NativeEngine {
     external fun getPluginState(track: Int, key: String): String
     /** Display data of a built-in plugin: waveform, spectrum, gain reduction... (meaning depends on the plugin and [what]). */
     external fun pluginTelemetry(track: Int, what: Int): FloatArray
+    /** Display text a built-in plugin's parameter would show at normalized value [norm] (choice labels). */
+    external fun paramTextAt(track: Int, index: Int, norm: Float): String
     external fun setTempo(bpm: Double)
     /** The built-in plugins as "id|name|kind|description" (kind 1 = instrument, 2 = effect). */
     external fun nativePlugins(): Array<String>

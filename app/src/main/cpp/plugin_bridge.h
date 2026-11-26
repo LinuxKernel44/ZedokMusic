@@ -72,6 +72,7 @@ public:
         if (native_ && b_ && i >= 0 && i < paramCount()) return native_->params()[i].text(b_->values[i]);
         return paramTextRaw(i);
     }
+    std::string paramTextAt(int i, float norm) const { return native_ && i >= 0 && i < paramCount() ? native_->params()[i].text(norm) : std::string(); }
     std::string paramTextRaw(int i) const { return (b_ && i >= 0 && i < paramCount()) ? std::string(b_->texts[i], strnlen(b_->texts[i], sizeof b_->texts[i])) : ""; }
 
     // Parameter edits made in the plugin editor since the last call (index into the parameter table, normalized value).

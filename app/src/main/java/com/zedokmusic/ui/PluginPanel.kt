@@ -26,6 +26,13 @@ fun PluginPanel(vm: DawViewModel) {
         }
         return
     }
+    if (vm.nativeId(t) != null) {
+        Column(Modifier.fillMaxSize().background(Zk.bg)) {
+            PluginChooser(vm, t)
+            Box(Modifier.weight(1f)) { com.zedokmusic.ui.nplug.NativePluginView(vm, t) { GenericParams(vm, t) } }
+        }
+        return
+    }
     val editor = t.editorOpen
     var presetsOpen by remember(t.id) { mutableStateOf(false) }
     if (presetsOpen) PresetsDialog(vm, t) { presetsOpen = false }
@@ -67,6 +74,18 @@ fun PluginPanel(vm: DawViewModel) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
             items(shown, key = { it.index }) { p -> ParamRow(vm, t, p) }
         }
+    }
+}
+
+/** Plain list of every parameter with a search box (also used by the built-in plugins as an alternative to their own screen). */
+@Composable
+fun GenericParams(vm: DawViewModel, t: TrackM) {
+    var query by remember(t.id) { mutableStateOf("") }
+    val params = remember(t.id, t.pluginState) { vm.loadParams(t) }
+    val shown = remember(params, query) { params.filter { query.isBlank() || it.name.contains(query, true) } }
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search parameters") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp))
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) { items(shown, key = { it.index }) { p -> ParamRow(vm, t, p) } }
     }
 }
 
