@@ -65,6 +65,16 @@ object NativeEngine {
     external fun setNotes(track: Int, data: LongArray)
     /** Creates the shared-memory bridge file for [track]; the Wine host must then be launched on [path]. */
     external fun createPluginBridge(track: Int, path: String): Boolean
+    /** Creates a built-in plugin ([id] "hybrid", ...) on a track or effect slot; it is ready at once. */
+    external fun createNativePlugin(track: Int, id: String): Boolean
+    /** Extra state of a built-in plugin that is not a parameter (a sample path...), by key. */
+    external fun setPluginState(track: Int, key: String, value: String): Boolean
+    external fun getPluginState(track: Int, key: String): String
+    /** Display data of a built-in plugin: waveform, spectrum, gain reduction... (meaning depends on the plugin and [what]). */
+    external fun pluginTelemetry(track: Int, what: Int): FloatArray
+    external fun setTempo(bpm: Double)
+    /** The built-in plugins as "id|name|kind|description" (kind 1 = instrument, 2 = effect). */
+    external fun nativePlugins(): Array<String>
     external fun detachPlugin(track: Int): Boolean
     /** 0 none, 1 starting, 2 ready, 3 error */
     external fun pluginState(track: Int): Int

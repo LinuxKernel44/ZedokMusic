@@ -64,7 +64,15 @@ fun EffectPickerDialog(vm: DawViewModel, owner: TrackM?, onInstall: () -> Unit, 
             if (vm.probing) Text("Checking which plugins are effects…", color = Zk.accent, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
             if (effects.isEmpty()) Text("No effect plugin found.\n\nInstall one with Install .exe, or copy its .vst3 into:\n${vm.pluginDir()?.path ?: ""}", color = Zk.dim, fontSize = 13.sp)
             else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
-                items(effects, key = { it.path }) { p ->
+                val own = effects.filter { it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
+                if (own.isNotEmpty()) item { Text("ZEDOK", color = Zk.accent, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 4.dp)) }
+                items(own, key = { it.path }) { p ->
+                    Column(Modifier.fillMaxWidth().clickable { vm.addEffect(owner, p); onDismiss() }.padding(vertical = 10.dp)) { Text(p.name, color = Zk.text); Text(p.blurb, color = Zk.dim, fontSize = 11.sp) }
+                    HorizontalDivider(color = Zk.line)
+                }
+                val vst = effects.filter { !it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
+                if (vst.isNotEmpty()) item { Text("WINDOWS PLUGINS", color = Zk.dim, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 12.dp)) }
+                items(vst, key = { it.path }) { p ->
                     Row(Modifier.fillMaxWidth().clickable { vm.addEffect(owner, p); onDismiss() }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(p.name, Modifier.weight(1f), color = Zk.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(if (p.kind == 2) "effect" else "type unknown", color = Zk.dim, fontSize = 11.sp)

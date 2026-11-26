@@ -70,6 +70,20 @@ J(jint, callbackFrames) { return kCallbackFrames; }
 J(jboolean, addNote, jint track, jlong start, jlong len, jint pitch, jint vel) { return eng().addNote(track, start, len, pitch, vel); }
 J(void, clearNotes, jint track) { eng().clearNotes(track); }
 J(jboolean, createPluginBridge, jint track, jstring path) { return eng().createPluginBridge(track, str(env, path), kCallbackFrames); }
+J(jboolean, createNativePlugin, jint track, jstring id) { return eng().createNativePlugin(track, str(env, id)); }
+J(jboolean, setPluginState, jint track, jstring key, jstring value) { return eng().setPluginState(track, str(env, key), str(env, value)); }
+J(jstring, getPluginState, jint track, jstring key) { return env->NewStringUTF(eng().getPluginState(track, str(env, key)).c_str()); }
+J(jfloatArray, pluginTelemetry, jint track, jint what) {
+    float buf[1024]; int n = eng().pluginTelemetry(track, what, buf, 1024);
+    jfloatArray a = env->NewFloatArray(n); if (n > 0) env->SetFloatArrayRegion(a, 0, n, buf); return a;
+}
+J(void, setTempo, jdouble bpm) { eng().setTempo(bpm); }
+// The built-in plugins: "id|name|kind|description" (kind 1 instrument, 2 effect).
+J(jobjectArray, nativePlugins) {
+    const auto& l = zdsp::pluginList(); jclass sc = env->FindClass("java/lang/String"); jobjectArray a = env->NewObjectArray((jsize)l.size(), sc, nullptr);
+    for (size_t i = 0; i < l.size(); i++) { std::string s = std::string(l[i].id) + "|" + l[i].name + "|" + (l[i].instrument ? "1" : "2") + "|" + l[i].blurb; env->SetObjectArrayElement(a, (jsize)i, env->NewStringUTF(s.c_str())); }
+    return a;
+}
 J(jboolean, detachPlugin, jint track) { return eng().detachPlugin(track); }
 J(jint, pluginState, jint track) { return eng().pluginState(track); }
 J(jstring, pluginName, jint track) { return env->NewStringUTF(eng().pluginName(track).c_str()); }

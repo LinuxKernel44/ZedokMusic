@@ -72,8 +72,16 @@ class PluginHost(private val ctx: Context) {
         return exe
     }
 
-    /** Starts the host for [track]; returns false if the bridge could not be created. Poll [NativeEngine.pluginState]. */
+    private val nativeIds = HashSet<Int>()
+    companion object { const val NATIVE_PREFIX = "zedok:"; fun isNative(path: String?) = path != null && path.startsWith(NATIVE_PREFIX) }
+
+    /** Starts the host for [track]; returns false if the bridge could not be created. Poll [NativeEngine.pluginState]. Built-in plugins ("zedok:id") need no host. */
     fun launch(track: Int, pluginPath: String): Boolean {
+        if (isNative(pluginPath)) {
+            val ok = NativeEngine.createNativePlugin(track, pluginPath.removePrefix(NATIVE_PREFIX))
+            if (ok) synchronized(nativeIds) { nativeIds.add(track) }
+            return ok
+        }
         ensureHostExe()
         ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
         return startHost(track, pluginPath, 0)
@@ -126,7 +134,7 @@ class PluginHost(private val ctx: Context) {
     }
 
     /** Is a zhost for this track's bridge running? (Scans our own processes' command lines.) */
-    fun isRunning(track: Int): Boolean = hostRunning(track)
+    fun isRunning(track: Int): Boolean = synchronized(nativeIds) { track in nativeIds } || hostRunning(track)
     private fun hostRunning(track: Int): Boolean {
         val tag = "bridge_$track.bin"
         return File("/proc").listFiles()?.any { d ->
@@ -135,6 +143,7 @@ class PluginHost(private val ctx: Context) {
     }
 
     fun stop(track: Int) {
+        synchronized(nativeIds) { nativeIds.remove(track) }
         NativeEngine.detachPlugin(track)  // the bridge sets quit once its last snapshot is retired
         NativeEngine.releaseRetired()
         synchronized(processes) { processes.remove(track) }?.let { p -> Thread { if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly() }.start() }

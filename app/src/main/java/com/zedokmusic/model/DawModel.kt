@@ -64,7 +64,7 @@ class AutoLane(val paramName: String, var paramIndex: Int) {
 
 class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int)
 
-class PluginInfo(val name: String, val path: String, val kind: Int = 0)  // kind: 0 unknown, 1 instrument, 2 effect
+class PluginInfo(val name: String, val path: String, val kind: Int = 0, val blurb: String = "")  // kind: 0 unknown, 1 instrument, 2 effect
 
 val TrackColors = listOf(
     Color(0xFF3DDCC4), Color(0xFFFF7A59), Color(0xFF8E7CFF), Color(0xFFFFC857),

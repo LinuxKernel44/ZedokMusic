@@ -135,6 +135,12 @@ public:
     void setNotes(int track, std::vector<Note> notes);  // replaces all notes of a track in one snapshot
     // Creates the shared bridge file for a track; the caller then launches the Wine host on that file.
     bool createPluginBridge(int track, const std::string& path, int maxFrames);
+    // Built-in (native) plugin by id ("hybrid", ...): same endpoints as a Wine plugin, no process, ready at once. Returns false if unknown or no slot.
+    bool createNativePlugin(int track, const std::string& pluginId);
+    bool setPluginState(int id, const std::string& key, const std::string& value);
+    std::string getPluginState(int id, const std::string& key);
+    int pluginTelemetry(int id, int what, float* out, int cap);   // plugin-specific display data
+    void setTempo(double bpm) { tempo_.store(bpm < 20.0 ? 20.0 : bpm > 400.0 ? 400.0 : bpm); }
     bool detachPlugin(int track);
     int pluginState(int track);  // 0 none, 1 starting, 2 ready, 3 error
     std::string pluginName(int track);
@@ -230,6 +236,8 @@ private:
     uint64_t audioVersion_ = ~0ull;
     MixState audioMix_;
 
+    std::atomic<double> tempo_{120.0};
+    bool attachBridge(int id, std::shared_ptr<PluginBridge> bridge);
     std::atomic<bool> playing_{false};
     std::atomic<int64_t> pos_{0};
     mutable std::atomic<float> meters_[kMaxTracks + 1];  // [kMaxTracks] = master

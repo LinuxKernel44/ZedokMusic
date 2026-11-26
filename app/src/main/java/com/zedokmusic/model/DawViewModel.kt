@@ -215,6 +215,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun applyLoop() = e.setLoop(loop, 0, (loopBars * 4 * fpb).toLong())
     fun changeBpm(v: Float) {
         val old = bpm; bpm = v.coerceIn(30f, 300f)
+        e.setTempo(bpm.toDouble())
         if (old == bpm) return
         val beat = playhead
         tracks.forEach { syncNotes(it); syncLanes(it); it.clips.forEach { c -> e.moveClip(c.engineId, (c.start * fpb).toLong()) } }
@@ -402,8 +403,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun pluginDir(): File? = workspace?.let { File(it, "Plugins/VST3") }
     /** Where Windows installers put VST3 plugins: C:\Program Files\Common Files\VST3. */
     private fun installedPluginDir(): File? = workspace?.let { File(it, "C/Program Files/Common Files/VST3") }
+    /** The built-in Zedok plugins (path "zedok:id"). */
+    fun nativePlugins(): List<PluginInfo> = e.nativePlugins().mapNotNull { s -> s.split('|').takeIf { it.size >= 4 }?.let { PluginInfo(it[1], PluginHost.NATIVE_PREFIX + it[0], it[2].toInt(), it[3]) } }
     fun scanPlugins(): List<PluginInfo> {
-        val out = ArrayList<PluginInfo>()
+        val out = ArrayList<PluginInfo>(nativePlugins())
         for (dir in listOfNotNull(pluginDir(), installedPluginDir())) {
             dir.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { f ->
                 if (!f.name.endsWith(".vst3", true)) return@forEach
@@ -426,6 +429,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var pluginsVersion by mutableIntStateOf(0); private set
     private fun rememberKind(t: TrackM) {
         val p = t.pluginPath ?: return
+        if (PluginHost.isNative(p)) return
         val k = e.pluginKind(t.id)
         if (k in 1..2 && kindOfPath(p) != k) { setKind(p, k); pluginsVersion++ }
     }
@@ -789,7 +793,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (!f.exists()) return
         try {
             val root = JSONObject(f.readText())
-            bpm = root.optDouble("bpm", 120.0).toFloat(); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain)
+            bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain)
             loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
             root.optJSONObject("view")?.let { v ->
                 ppbValue = v.optDouble("ppb", 44.0).toFloat().coerceIn(12f, 160f)

@@ -219,6 +219,7 @@ void Engine::fxSubmit(const FxState& fx, const float* in, int frames, int64_t au
     if (autoPos < 0 || (lastPos && *lastPos != autoPos - frames)) for (int k = 0; k < kMaxLanes; k++) autoLast[k] = NAN;  // stopped or jumped: send the values again
     if (autoPos >= 0 && !fx.lanes.empty()) appendAutomation(fx.lanes, autoPos, autoLast, ch, nc);
     if (lastPos) *lastPos = autoPos;
+    fx.plugin->setTransport(tempo_.load(std::memory_order_relaxed), autoPos >= 0 ? (double)autoPos / kProjectRate * tempo_.load(std::memory_order_relaxed) / 60.0 : -1.0, autoPos >= 0);
     fx.plugin->submitAudio(in, frames, ch, nc);
 }
 
@@ -291,6 +292,7 @@ void Engine::fxOffline(const Project& p, MixState& ms, int frames, int64_t pos) 
             if (!fxActive(f)) continue;
             ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
             if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
+            f.plugin->setTransport(tempo_.load(), (double)pos / kProjectRate * tempo_.load() / 60.0, true);
             f.plugin->submitAudio(buf, frames, ch, nc);
             f.plugin->collect(buf, frames, kWait);
         }
@@ -302,6 +304,7 @@ void Engine::fxOfflineMaster(const Project& p, float* out, int frames, int64_t p
         if (!fxActive(f)) continue;
         ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
         if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
+        f.plugin->setTransport(tempo_.load(), (double)pos / kProjectRate * tempo_.load() / 60.0, true);
         f.plugin->submitAudio(out, frames, ch, nc);
         f.plugin->collect(out, frames, kWait);
     }
@@ -359,6 +362,7 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
                 if (pos == from) for (int k = 0; k < kMaxLanes; k++) last[k] = NAN;
                 appendAutomation(t.lanes, pos, last, ch, nc);
             }
+            t.plugin->setTransport(tempo_.load(), (double)pos / kProjectRate * tempo_.load() / 60.0, true);
             t.plugin->submit(ev, ne, plugFrames, ch, nc);
             t.plugin->collect(dst, plugFrames, kSyncWaitNs);
         }
@@ -422,9 +426,7 @@ static std::shared_ptr<PluginBridge> bridgeOf(const std::shared_ptr<const Projec
     return e.bridge ? *e.bridge : nullptr;
 }
 
-bool Engine::createPluginBridge(int id, const std::string& path, int maxFrames) {
-    auto bridge = std::make_shared<PluginBridge>();
-    if (!bridge->create(path, kProjectRate, maxFrames)) return false;
+bool Engine::attachBridge(int id, std::shared_ptr<PluginBridge> bridge) {
     bool ok = false;
     edit([&](Project& p) {
         bool used[kMaxPlugins] = {};
@@ -438,6 +440,30 @@ bool Engine::createPluginBridge(int id, const std::string& path, int maxFrames) 
         *e.bridge = bridge; *e.slot = slot; ok = true;
     });
     return ok;
+}
+bool Engine::createPluginBridge(int id, const std::string& path, int maxFrames) {
+    auto bridge = std::make_shared<PluginBridge>();
+    if (!bridge->create(path, kProjectRate, maxFrames)) return false;
+    return attachBridge(id, bridge);
+}
+bool Engine::createNativePlugin(int id, const std::string& pluginId) {
+    std::unique_ptr<zdsp::Processor> proc(zdsp::createProcessor(pluginId));
+    if (!proc) return false;
+    auto bridge = std::make_shared<PluginBridge>();
+    if (!bridge->createNative(std::move(proc), kProjectRate, kCallbackFrames)) return false;
+    return attachBridge(id, bridge);
+}
+bool Engine::setPluginState(int id, const std::string& key, const std::string& value) {
+    std::shared_ptr<PluginBridge> b; { std::lock_guard<std::mutex> lk(editMutex_); b = bridgeOf(current_, id); }
+    return b && b->native() && b->native()->setState(key, value);
+}
+std::string Engine::getPluginState(int id, const std::string& key) {
+    std::shared_ptr<PluginBridge> b; { std::lock_guard<std::mutex> lk(editMutex_); b = bridgeOf(current_, id); }
+    return b && b->native() ? b->native()->getState(key) : "";
+}
+int Engine::pluginTelemetry(int id, int what, float* out, int cap) {
+    std::shared_ptr<PluginBridge> b; { std::lock_guard<std::mutex> lk(editMutex_); b = bridgeOf(current_, id); }
+    return b && b->native() ? b->native()->telemetry(what, out, cap) : 0;
 }
 bool Engine::detachPlugin(int id) {
     bool ok = false;
@@ -609,6 +635,7 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)
             ev[n++] = ZkEvent{0, le[i].on ? (uint8_t)ZK_NOTE_ON : (uint8_t)ZK_NOTE_OFF, 0, le[i].pitch, le[i].vel};
+        t.plugin->setTransport(tempo_.load(std::memory_order_relaxed), playing ? (double)windowPos / kProjectRate * tempo_.load(std::memory_order_relaxed) / 60.0 : -1.0, playing);
         t.plugin->submit(ev, n, frames, ch, nc);
     }
 }

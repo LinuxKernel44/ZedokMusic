@@ -8,6 +8,8 @@
 #include <cstring>
 #include <string>
 #include "bridge.h"
+#include <memory>
+#include "../../../../native/dsp/processor.h"
 
 namespace zedok {
 
@@ -29,6 +31,32 @@ public:
         frames_ = maxFrames;
         return true;
     }
+    // A native (built-in) plugin: the "host" is a Processor run synchronously inside submit(), on the audio thread. The bridge memory is
+    // anonymous, but laid out exactly like the Wine one, so parameters, automation and presets work unchanged.
+    bool createNative(std::unique_ptr<zdsp::Processor> proc, int sampleRate, int maxFrames) {
+        void* m = mmap(nullptr, ZK_BRIDGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (m == MAP_FAILED) return false;
+        b_ = static_cast<ZkBridge*>(m);
+        memset(b_, 0, ZK_BRIDGE_SIZE);
+        b_->magic = ZK_MAGIC; b_->version = ZK_VERSION; b_->sample_rate = sampleRate; b_->max_frames = maxFrames; frames_ = maxFrames;
+        proc->prepare(sampleRate, maxFrames);
+        const auto& ps = proc->params();
+        const int n = (int)std::min<size_t>(ps.size(), ZK_MAX_PARAMS);
+        for (int i = 0; i < n; i++) {
+            ZkParamInfo& pi = b_->params[i]; pi.id = (uint32_t)i; pi.default_norm = ps[i].defNorm(); pi.step_count = (uint32_t)ps[i].steps(); pi.flags = 0;
+            strncpy(pi.name, ps[i].name.c_str(), sizeof pi.name - 1); strncpy(pi.units, ps[i].units.c_str(), sizeof pi.units - 1);
+            b_->values[i] = pi.default_norm;
+        }
+        b_->n_params = n;
+        strncpy(b_->plugin_name, proc->name(), sizeof b_->plugin_name - 1);
+        b_->plugin_kind = proc->isInstrument() ? 1 : 2; b_->in_channels = b_->out_channels = 2;
+        native_ = std::move(proc);
+        __atomic_store_n(&b_->host_state, (uint32_t)ZK_HOST_READY, __ATOMIC_RELEASE);
+        return true;
+    }
+    zdsp::Processor* native() const { return native_.get(); }
+    // Transport information for plugins that need tempo (delays, arpeggiators, LFO sync). Audio thread, before submit().
+    void setTransport(double bpm, double ppq, bool playing) { bpm_ = bpm; ppq_ = ppq; playingT_ = playing; }
     uint32_t hostState() const { return b_ ? __atomic_load_n(&b_->host_state, __ATOMIC_ACQUIRE) : ZK_HOST_ERROR; }
     bool ready() const { return hostState() == ZK_HOST_READY; }
     uint32_t hostError() const { return b_ ? b_->host_error : 0; }
@@ -40,7 +68,11 @@ public:
     const ZkParamInfo* paramInfo(int i) const { return (b_ && i >= 0 && i < paramCount()) ? &b_->params[i] : nullptr; }
     float paramValue(int i) const { return (b_ && i >= 0 && i < paramCount()) ? b_->values[i] : 0.f; }
     void setParamValue(int i, float v) { if (b_ && i >= 0 && i < paramCount()) b_->values[i] = v; }
-    std::string paramText(int i) const { return (b_ && i >= 0 && i < paramCount()) ? std::string(b_->texts[i], strnlen(b_->texts[i], sizeof b_->texts[i])) : ""; }
+    std::string paramText(int i) const {
+        if (native_ && b_ && i >= 0 && i < paramCount()) return native_->params()[i].text(b_->values[i]);
+        return paramTextRaw(i);
+    }
+    std::string paramTextRaw(int i) const { return (b_ && i >= 0 && i < paramCount()) ? std::string(b_->texts[i], strnlen(b_->texts[i], sizeof b_->texts[i])) : ""; }
 
     // Parameter edits made in the plugin editor since the last call (index into the parameter table, normalized value).
     int pollEdits(ZkParamChange* out, int max) {
@@ -59,6 +91,14 @@ public:
     void submit(const ZkEvent* ev, int n, int frames, const ZkParamChange* ch = nullptr, int nch = 0) {
         n = n > ZK_MAX_EVENTS ? ZK_MAX_EVENTS : n;
         nch = nch > ZK_MAX_PARAM_CHANGES ? ZK_MAX_PARAM_CHANGES : nch;
+        if (native_) {   // run the built-in plugin right here
+            for (int i = 0; i < nch; i++) if (ch[i].index < ZK_MAX_PARAMS && (int)ch[i].index < paramCount()) b_->values[ch[i].index] = ch[i].value;
+            const int f = frames > ZK_MAX_FRAMES ? ZK_MAX_FRAMES : frames;
+            zdsp::ProcessCtx c{ev, n, b_->in[0], b_->in[1], b_->out[0], b_->out[1], f, bpm_, ppq_, playingT_};
+            native_->process(c, b_->values);
+            seq_++; __atomic_store_n(&b_->ack_seq, seq_, __ATOMIC_RELEASE); pending_ = true;
+            return;
+        }
         if (n > 0) memcpy(b_->events, ev, n * sizeof(ZkEvent));
         if (nch > 0) memcpy(b_->changes, ch, nch * sizeof(ZkParamChange));
         b_->n_events = n; b_->n_changes = nch; b_->frames = frames;
@@ -112,6 +152,7 @@ public:
 private:
     ZkBridge* b_ = nullptr; int fd_ = -1, frames_ = 0;
     uint32_t editTail_ = 0;
+    std::unique_ptr<zdsp::Processor> native_; double bpm_ = 120.0, ppq_ = -1.0; bool playingT_ = false;
     uint32_t seq_ = 0; bool pending_ = false, skipped_ = false;
     std::atomic<int64_t> late_{0}, blocks_{0}, waitedBlocks_{0}, waitNsTotal_{0}, waitNsMax_{0};
 };
