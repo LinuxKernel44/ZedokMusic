@@ -71,7 +71,8 @@ class AutoLane(val paramName: String, var paramIndex: Int) {
 
 class ParamM(val index: Int, val name: String, val units: String, val default: Float, val steps: Int) { var group: String = "" }
 
-class PluginInfo(val name: String, val path: String, val kind: Int = 0, val blurb: String = "")  // kind: 0 unknown, 1 instrument, 2 effect
+/** kind: 0 unknown (offered as instrument and as effect), 1 instrument, 2 effect. [detected] is what the plugin reported; [manual] = the user chose [kind] in the plugin manager. */
+class PluginInfo(val name: String, val path: String, val kind: Int = 0, val blurb: String = "", val detected: Int = kind, val manual: Boolean = false, val hidden: Boolean = false)
 
 val TrackColors = listOf(
     Color(0xFF3DDCC4), Color(0xFFFF7A59), Color(0xFF8E7CFF), Color(0xFFFFC857),

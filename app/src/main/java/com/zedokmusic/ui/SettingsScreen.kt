@@ -182,7 +182,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
     when (section) {
         Section.Audio -> AudioSection(vm)
         Section.Project -> ProjectSection()
-        Section.Plugins -> PluginsSection()
+        Section.Plugins -> PluginsSection(vm)
         Section.Midi -> MidiSection(vm)
         Section.Display -> DisplaySection()
         Section.Storage -> StorageSection(vm)
@@ -214,7 +214,10 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
         listOf(0, 1, 2, 4, 5, 6, 7, 3).indexOf(AppSettings.exportFormat.value).coerceAtLeast(0)) { AppSettings.exportFormat.set(listOf(0, 1, 2, 4, 5, 6, 7, 3)[it]) }
 }
 
-@Composable private fun PluginsSection() {
+@Composable private fun PluginsSection(vm: DawViewModel) {
+    var manager by remember { mutableStateOf(false) }
+    if (manager) PluginManagerDialog(vm) { manager = false }
+    ActionRow("Plugin manager", "Choose whether each Windows plugin is offered as an instrument, an effect or both (for a plugin that was recognised wrongly), re-detect its type, or hide it from the lists.", "Open…") { manager = true }
     ChoiceRow("Editor refresh rate", "How often a plugin's window is redrawn on screen. Lower saves battery and CPU.", listOf("10 fps", "15 fps", "30 fps", "60 fps"),
         listOf(10, 15, 30, 60).indexOf(AppSettings.editorFps.value).coerceAtLeast(0)) { AppSettings.editorFps.set(listOf(10, 15, 30, 60)[it]) }
     SwitchRow("Direct3D plugins (DXVK)", "Lets plugins that draw their window with Direct3D (Serum 2) work: Direct3D runs on Vulkan. Applies the next time a plugin starts.", AppSettings.dxvk)
