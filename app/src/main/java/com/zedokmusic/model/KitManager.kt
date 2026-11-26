@@ -342,5 +342,20 @@ class SamplePreview(private val ctx: Context) {
             mp = p; playing = ref; p.prepareAsync()
         } catch (e: Exception) { stop() }
     }
-    fun stop() { runCatching { mp?.release() }; mp = null; playing = null }
+    /** Stops with a very short fade (about 70 ms) so that cutting a sound never clicks. */
+    fun stop() {
+        val p = mp; mp = null; playing = null
+        if (p == null) return
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        var step = 0
+        val tick = object : Runnable {
+            override fun run() {
+                step++
+                if (step >= 7) { runCatching { p.stop() }; runCatching { p.release() }; return }
+                runCatching { val v = 1f - step / 7f; p.setVolume(v, v) }
+                h.postDelayed(this, 10)
+            }
+        }
+        h.post(tick)
+    }
 }

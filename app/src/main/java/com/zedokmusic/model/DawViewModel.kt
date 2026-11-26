@@ -263,10 +263,90 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (t.pluginPath != null) { closeEditor(t); host.stop(t.id) }
         e.removeTrack(t.id); tracks.remove(t); if (selected == t) selected = tracks.firstOrNull(); dirty = true
     }
-    fun importClip(t: TrackM, wav: File, startBeat: Float = 0f) {
+    fun importClip(t: TrackM, wav: File, startBeat: Float = 0f): ClipM? {
         val r = e.loadClip(t.id, wav.absolutePath, (startBeat * fpb).toLong())
-        if (r == null) { message = "Could not read ${wav.name} (WAV only)."; return }
-        t.clips.add(ClipM(r[0].toInt(), wav.absolutePath, wav.nameWithoutExtension, startBeat, r[1])); dirty = true
+        if (r == null) { message = "Could not read ${wav.name} (WAV only)."; return null }
+        val c = ClipM(r[0].toInt(), wav.absolutePath, wav.nameWithoutExtension, startBeat, r[1])
+        t.clips.add(c); dirty = true; return c
+    }
+
+    // ---------- clip selection (like the notes of the piano roll) ----------
+    /** The selected clips and the Select tool of the arrangement. */
+    val clipSelection = androidx.compose.runtime.mutableStateListOf<ClipM>()
+    var clipSelectMode by mutableStateOf(false)
+    /** While a selected clip is dragged: how far (in beats) every selected clip follows it. */
+    var clipDragBeats by mutableFloatStateOf(0f)
+    var clipDragging by mutableStateOf(false)
+    fun trackOf(c: ClipM): TrackM? = tracks.firstOrNull { c in it.clips }
+    fun liveSelection(): List<ClipM> = clipSelection.filter { c -> tracks.any { c in it.clips } }
+    fun clearClipSelection() = clipSelection.clear()
+    /** A copy of [c] on [t] at [start] (same processed file, same gain / pitch / speed settings). */
+    private fun addClipLike(t: TrackM, c: ClipM, start: Float): ClipM? {
+        val n = importClip(t, File(c.path), start.coerceAtLeast(0f)) ?: return null
+        n.src = c.src; n.semis = c.semis; n.speed = c.speed; n.mode = c.mode; n.srcBpm = c.srcBpm
+        setClipGainDb(n, c.gainDb); return n
+    }
+    fun moveClips(list: List<ClipM>, delta: Float) {
+        if (list.isEmpty()) return
+        val d = maxOf(delta, -(list.minOf { it.start })); for (c in list) moveClip(c, c.start + d)
+    }
+    fun removeClips(list: List<ClipM>) { for (c in list) trackOf(c)?.let { removeClip(it, c) }; clipSelection.removeAll(list.toSet()) }
+    /** Clone (Ctrl+B in FL Studio): copies the selection right after its end. Returns the copies, which become the selection. */
+    fun cloneClips(sel: List<ClipM>): List<ClipM> {
+        if (sel.isEmpty()) return emptyList()
+        val span = sel.maxOf { it.start + it.lengthFrames / 48000f * bpm / 60f } - sel.minOf { it.start }
+        return sel.mapNotNull { c -> trackOf(c)?.let { addClipLike(it, c, c.start + span) } }
+    }
+    class ClipCopy(val track: TrackM, val src: ClipM, val rel: Float)
+    var clipClip by mutableStateOf<List<ClipCopy>>(emptyList()); private set
+    fun copyClips(sel: List<ClipM>) { if (sel.isEmpty()) return; val lo = sel.minOf { it.start }; clipClip = sel.mapNotNull { c -> trackOf(c)?.let { ClipCopy(it, c, c.start - lo) } } }
+    fun cutClips(sel: List<ClipM>) { copyClips(sel); removeClips(sel) }
+    fun pasteClips(at: Float): List<ClipM> = clipClip.mapNotNull { cc -> (if (cc.track in tracks) cc.track else tracks.firstOrNull { it.kind == TrackKind.Audio })?.let { addClipLike(it, cc.src, at + cc.rel) } }
+    /** Edits (pitch, speed) of the whole selection. */
+    fun applyClipEdits(list: List<ClipM>, semis: Float, speed: Float, mode: Int, srcBpm: Float) { for (c in list) trackOf(c)?.let { applyClipEdit(it, c, semis, speed, mode, srcBpm) } }
+
+    // ---------- clip editing: gain (live), pitch and speed (a processed copy of the sample, the original is kept) ----------
+    private fun processedDir() = projectSamplesDir()?.let { File(it, ".processed") }
+    private fun peaksDir() = projectDir()?.let { File(it, "Cache/Peaks") }
+    /** The waveform of a clip: min / max per [AudioFx.PEAK_FRAMES] frames, cached in the project's Cache folder (computed once). */
+    fun clipPeaks(c: ClipM): ByteArray? = AudioFx.peaks(File(c.path), peaksDir())
+    fun setClipGainDb(c: ClipM, db: Float) { c.gainDb = db.coerceIn(-48f, 24f); e.setClipGain(c.engineId, Math.pow(10.0, c.gainDb / 20.0).toFloat()); dirty = true }
+
+    /** Renders [c] with the pitch / speed / mode given (from its original file) and puts the result in its place. Runs in the background. */
+    fun applyClipEdit(t: TrackM, c: ClipM, semis: Float, speed: Float, mode: Int, srcBpm: Float) {
+        if (c.busy) return
+        val sp = speed.coerceIn(0.25f, 4f); val se = semis.coerceIn(-48f, 48f)
+        c.busy = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            var target: File? = File(c.src); var err: String? = null
+            if (Math.abs(se) > 1e-3f || Math.abs(sp - 1f) > 1e-4f) {
+                val dir = processedDir()
+                if (dir == null) err = "There is no project folder."
+                else {
+                    val name = File(c.src).nameWithoutExtension.replace(Regex("[^A-Za-z0-9 _.()+-]"), "_").take(40)
+                    val out = File(dir, "$name  %+.2f st  x%.3f  m$mode.wav".format(se, sp))
+                    if (!out.exists()) {
+                        val pcm = AudioFx.readWav(File(c.src))
+                        if (pcm == null) err = "Could not read ${File(c.src).name}."
+                        else runCatching { AudioFx.writeWav(out, AudioFx.process(pcm, 0f, se, sp, mode)) }.onFailure { err = "Could not process the clip: ${it.message}" }
+                    }
+                    target = out
+                }
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                c.busy = false
+                if (err != null) { message = err; return@withContext }
+                val f = target ?: return@withContext
+                val i = t.clips.indexOf(c); if (i < 0) return@withContext
+                val r = e.loadClip(t.id, f.absolutePath, (c.start * fpb).toLong())
+                if (r == null) { message = "Could not load the processed clip."; return@withContext }
+                e.removeClip(c.engineId)
+                val n = ClipM(r[0].toInt(), f.absolutePath, c.name, c.start, r[1])
+                n.src = c.src; n.gainDb = c.gainDb; n.semis = se; n.speed = sp; n.mode = mode; n.srcBpm = srcBpm
+                e.setClipGain(n.engineId, Math.pow(10.0, n.gainDb / 20.0).toFloat())
+                t.clips[i] = n; dirty = true
+            }
+        }
     }
     fun moveClip(c: ClipM, startBeat: Float) {
         c.start = startBeat.coerceAtLeast(0f); e.moveClip(c.engineId, (c.start * fpb).toLong()); dirty = true
@@ -668,7 +748,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun closeInstaller() { if (!installerRunning) installerName = null }
     /** Bumped when files are copied into the project's Samples folder, so open lists refresh. */
     var samplesVersion by mutableIntStateOf(0); private set
-    private fun wavs(dir: File?) = dir?.takeIf { it.isDirectory }?.walkTopDown()?.filter { f -> f.isFile && f.extension.equals("wav", true) }?.sortedBy { f -> f.name.lowercase() }?.toList() ?: emptyList()
+    private fun wavs(dir: File?) = dir?.takeIf { it.isDirectory }?.walkTopDown()?.filter { f -> f.isFile && f.extension.equals("wav", true) && !f.path.contains("/.processed/") }?.sortedBy { f -> f.name.lowercase() }?.toList() ?: emptyList()
     /** WAV files of this project (its own Samples folder, recordings included). */
     fun projectSamples(): List<File> { samplesVersion; return wavs(projectSamplesDir()) }
     /** WAV files of the shared library (workspace/Samples), kept from before samples became per project. */
@@ -765,7 +845,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
-            .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("start", c.start.toDouble())) } }))
+            .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
+                .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
         root.put("tracks", arr).put("masterFx", fxJson(masterFx))
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
     }
@@ -837,7 +918,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** Pointing every clip that lives in [from] at [to] (same file name), in memory. */
     private fun repoint(from: File, to: File) {
         val fp = from.absolutePath + "/"
-        tracks.forEach { t -> t.clips.forEach { c -> if (c.path.startsWith(fp)) c.path = File(to, c.path.removePrefix(fp)).absolutePath } }
+        tracks.forEach { t -> t.clips.forEach { c -> if (c.path.startsWith(fp)) c.path = File(to, c.path.removePrefix(fp)).absolutePath; if (c.src.startsWith(fp)) c.src = File(to, c.src.removePrefix(fp)).absolutePath } }
     }
 
     /** Save as: a new project folder with a copy of this project's samples and presets; it becomes the current project. */
@@ -1052,7 +1133,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 readPluginState(t, o)
                 loadFx(t, o.optJSONArray("fx"))
                 val ca = o.getJSONArray("clips")
-                for (k in 0 until ca.length()) { val c = ca.getJSONObject(k); val w = File(c.getString("path")); if (w.exists()) importClip(t, w, c.getDouble("start").toFloat()) }
+                for (k in 0 until ca.length()) { val c = ca.getJSONObject(k); val src = File(c.optString("src", c.getString("path"))); val w = File(c.getString("path")).takeIf { it.exists() } ?: src.takeIf { it.exists() }
+                    if (w != null) importClip(t, w, c.getDouble("start").toFloat())?.let { cl ->
+                        cl.src = src.absolutePath; cl.semis = c.optDouble("semis", 0.0).toFloat(); cl.speed = c.optDouble("speed", 1.0).toFloat(); cl.mode = c.optInt("mode", 1); cl.srcBpm = c.optDouble("srcBpm", 0.0).toFloat()
+                        if (w == src && (cl.semis != 0f || cl.speed != 1f)) { cl.semis = 0f; cl.speed = 1f }   // the processed copy is gone: back to the original
+                        setClipGainDb(cl, c.optDouble("gain", 0.0).toFloat()); dirty = false
+                    } }
             }
             loadFx(null, root.optJSONArray("masterFx"))
             selected = tracks.firstOrNull()

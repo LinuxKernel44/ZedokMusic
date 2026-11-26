@@ -1,6 +1,7 @@
 package com.zedokmusic.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,6 +37,7 @@ private enum class BTab(val label: String) { Kits("Drumkits"), Project("Project"
  * The sound browser of the Tracks view: the drum kit library (folders in a tree), the sounds of the project, and the plugins. Sounds, folders (kits) and
  * plugins are dragged onto the tracks: long press on a row, or drag the ⋮⋮ handle. Tap rows to select several sounds and drag them together.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClose: () -> Unit) {
     val kits = vm.kits; val dnd = LocalDnd.current; val color = Zk.accent
@@ -61,6 +63,8 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClo
         else flatten(tree, 0, open, out)
         out
     }
+    // Folding a folder away (or searching it out of the list) while one of its sounds is previewing stops the preview.
+    LaunchedEffect(rows, kits.preview.playing) { val pl = kits.preview.playing; if (pl != null && rows.none { it is TreeRow.F && it.node.ref == pl }) kits.preview.stop() }
     val plugins = remember(vm.pluginsVersion, tab) { if (tab == BTab.Plugins) vm.scanPlugins() else emptyList() }
 
     Column(modifier.background(Zk.panel)) {
@@ -109,17 +113,19 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClo
 
 @Composable private fun Hint(text: String) = Text(text, color = Zk.dim, fontSize = 12.sp, modifier = Modifier.padding(14.dp))
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun FolderRow(r: TreeRow.D, color: Color, dnd: DndState, onToggle: () -> Unit, payload: () -> DragPayload) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = (r.depth * 14).dp), verticalAlignment = Alignment.CenterVertically) {
         Text(if (r.open) "▾" else "▸", color = color, fontSize = 16.sp, textAlign = TextAlign.Center, modifier = Modifier.width(26.dp))
-        Text(r.dir.name, color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(vertical = 11.dp))
+        Text(r.dir.name, color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, modifier = Modifier.weight(1f).padding(vertical = 11.dp).basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200, velocity = 36.dp))
         Text("${r.dir.total}", color = Zk.dim, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp))
         Handle(dnd, payload)
     }
     HorizontalDivider(color = Zk.line)
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SoundRow(r: TreeRow.F, flat: Boolean, color: Color, dnd: DndState, kits: KitManager, selected: androidx.compose.runtime.snapshots.SnapshotStateList<String>, payload: () -> DragPayload) {
     val node = r.node; val on = node.ref in selected; val playing = kits.preview.playing == node.ref; val fav = kits.isFavorite(node)
@@ -127,7 +133,7 @@ private fun SoundRow(r: TreeRow.F, flat: Boolean, color: Color, dnd: DndState, k
         .dragSource(dnd, immediate = false, payload).padding(start = (r.depth * 14).dp), verticalAlignment = Alignment.CenterVertically) {
         Text(if (playing) "■" else "▶", color = if (playing) color else Zk.text, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.width(36.dp).clickable { kits.preview.toggle(node) }.padding(vertical = 10.dp))
         Column(Modifier.weight(1f)) {
-            Text(node.name, color = Zk.text, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(node.name, color = Zk.text, fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200, velocity = 36.dp))
             if (flat && r.path != node.name) Text(r.path.substringBeforeLast('/'), color = Zk.dim, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(if (fav) "★" else "☆", color = if (fav) Zk.warn else Zk.dim, fontSize = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.width(32.dp).clickable { kits.toggleFavorite(node, r.path.substringBeforeLast('/', "")) }.padding(vertical = 6.dp))
@@ -154,10 +160,11 @@ private fun PluginList(plugins: List<PluginInfo>, dnd: DndState, color: Color) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PluginRow(p: PluginInfo, dnd: DndState) {
     Row(Modifier.fillMaxWidth().dragSource(dnd, immediate = false) { DragPayload(p.name, plugin = p) }.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(p.name, color = Zk.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(vertical = 11.dp))
+        Text(p.name, color = Zk.text, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, modifier = Modifier.weight(1f).padding(vertical = 11.dp).basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200, velocity = 36.dp))
         Handle(dnd) { DragPayload(p.name, plugin = p) }
     }
     HorizontalDivider(color = Zk.line)

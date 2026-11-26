@@ -1,6 +1,7 @@
 package com.zedokmusic.ui
 
 import androidx.compose.foundation.Canvas
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,7 +47,7 @@ private val RowHShort = 62.dp
 private val LocalRowScale = compositionLocalOf { 1f }
 /** Height of an arrangement track row: the base height (denser on short windows) times the vertical zoom, never too small for its buttons. */
 @Composable private fun rowH(): androidx.compose.ui.unit.Dp = ((if (LocalShort.current) RowHShort else RowHTall) * LocalRowScale.current).coerceAtLeast(54.dp)
-private val HeaderW = 176.dp
+private val HeaderW = 196.dp
 private val RulerH = 28.dp
 
 /** Arrangement: track headers on the left, a scrolling timeline on the right (beats on the x axis). */
@@ -83,7 +84,42 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
             }
         }
     }
+    // ---- clip selection: rectangle (long press in empty space then drag, or drag with the Select tool); near an edge the timeline scrolls
+    var rectAnchor by remember { mutableStateOf<Offset?>(null) }
+    var rectFinger by remember { mutableStateOf<Offset?>(null) }
+    var rectSel by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var viewH by remember { mutableIntStateOf(0) }
+    val short = LocalShort.current
+    val rowHpx = with(density) { ((if (short) RowHShort else RowHTall) * vm.rowScale).coerceAtLeast(54.dp).toPx() }
+    val padPx = with(density) { 8.dp.toPx() }
+    fun clipBounds(c: ClipM, trackIndex: Int): androidx.compose.ui.geometry.Rect {
+        val pw = ppb * density.density; val len = c.lengthFrames / 48000f * vm.bpm / 60f
+        return androidx.compose.ui.geometry.Rect(c.start * pw, trackIndex * rowHpx + padPx, maxOf((c.start + len) * pw, c.start * pw + 12.dp.value * density.density), (trackIndex + 1) * rowHpx - padPx)
+    }
+    fun clipAt(p: Offset): ClipM? { for ((i, t) in vm.tracks.withIndex()) for (c in t.clips) if (clipBounds(c, i).contains(p)) return c; return null }
+    fun updateRect() {
+        val an = rectAnchor ?: return; val fg = rectFinger ?: return
+        val p = Offset(fg.x + hs.value, fg.y + vs.value)
+        val rc = androidx.compose.ui.geometry.Rect(minOf(an.x, p.x), minOf(an.y, p.y), maxOf(an.x, p.x), maxOf(an.y, p.y))
+        rectSel = rc
+        val hits = ArrayList<ClipM>()
+        for ((i, t) in vm.tracks.withIndex()) for (c in t.clips) if (clipBounds(c, i).overlaps(rc)) hits.add(c)
+        vm.clipSelection.clear(); vm.clipSelection.addAll(hits)
+    }
+    LaunchedEffect(rectAnchor != null) {
+        while (rectAnchor != null) {
+            kotlinx.coroutines.delay(16)
+            val fg = rectFinger ?: continue
+            val edge = with(density) { 44.dp.toPx() }; val step = with(density) { 14.dp.toPx() }
+            val dx = if (fg.x > viewportPx - edge) step else if (fg.x < edge) -step else 0f
+            val dy = if (fg.y > viewH - edge) step else if (fg.y < edge) -step else 0f
+            if (dx != 0f) hs.scrollBy(dx); if (dy != 0f) vs.scrollBy(dy)
+            if (dx != 0f || dy != 0f) updateRect()
+        }
+    }
+    var editClips by remember { mutableStateOf(false) }
     CompositionLocalProvider(LocalRowScale provides vm.rowScale) {
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(RulerH).background(Zk.panel)) {
             Row(Modifier.width(HeaderW).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -94,10 +130,12 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                 LabelButton("Follow", vm.followPlayhead, w = 50.dp, h = 24.dp) { vm.followPlayhead = !vm.followPlayhead }
                 Spacer(Modifier.width(6.dp))
                 LabelButton("♪", vm.browserOpen, w = 30.dp, h = 24.dp) { vm.browserOpen = !vm.browserOpen }
+                Spacer(Modifier.width(6.dp))
+                LabelButton("Sel", vm.clipSelectMode, w = 34.dp, h = 24.dp) { vm.clipSelectMode = !vm.clipSelectMode }
             }
             Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) { Ruler(vm, totalBeats, ppb, totalW) }
         }
-        Row(Modifier.fillMaxSize().onGloballyPositioned { dnd.arrangeRect = it.boundsInRoot() }.pointerInput(Unit) {
+        Row(Modifier.fillMaxSize().onGloballyPositioned { dnd.arrangeRect = it.boundsInRoot() }.onSizeChanged { viewH = it.height }.pointerInput(Unit) {
             // two fingers: apart/together horizontally = time zoom, vertically = track height
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
@@ -125,17 +163,67 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
         }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
             Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint(); if (dnd.payload != null) Spacer(Modifier.height(rowH() * 0.8f)) }
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
-                Box(Modifier.width(totalW)) {
+                Box(Modifier.width(totalW).pointerInput(ppb, vm.tracks.size, rowHpx) {
+                    val lp = viewConfiguration.longPressTimeoutMillis; val slop = viewConfiguration.touchSlop
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val t0 = System.currentTimeMillis(); var rect = false; var last = down.position
+                        while (true) {
+                            val waitLong = !vm.clipSelectMode
+                            val ev = if (waitLong) withTimeoutOrNull(maxOf(1L, lp - (System.currentTimeMillis() - t0))) { awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) }
+                                     else awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
+                            if (ev == null) { if ((last - down.position).getDistance() > slop || clipAt(down.position) != null) return@awaitEachGesture; rect = true; break }
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                            if (c.isConsumed) return@awaitEachGesture            // a clip took it (tap, drag, menu) or the timeline is scrolling
+                            last = c.position
+                            if (!c.pressed) { if (clipAt(down.position) == null) vm.clearClipSelection(); return@awaitEachGesture }
+                            if (vm.clipSelectMode && (c.position - down.position).getDistance() > slop && clipAt(down.position) == null) { rect = true; break }
+                        }
+                        if (rect) {
+                            rectAnchor = down.position; rectFinger = Offset(down.position.x - hs.value, down.position.y - vs.value); updateRect()
+                            while (true) {
+                                val ev = awaitPointerEvent(); val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!c.pressed) break
+                                c.consume(); rectFinger = Offset(c.position.x - hs.value, c.position.y - vs.value); updateRect()
+                            }
+                            rectAnchor = null; rectFinger = null; rectSel = null
+                        }
+                    }
+                }) {
                     Column {
                         vm.tracks.forEach { t -> TimelineRow(vm, t, totalBeats, ppb, onEdit) }
                         if (dnd.payload != null) NewTrackZone(dnd)
                     }
                     // matchParentSize: fillMaxHeight measures to nothing inside a vertically scrolling parent.
-                    Canvas(Modifier.matchParentSize()) { drawPlayhead(vm.playhead * ppb * density.density, Zk.accent, head = false) }
+                    Canvas(Modifier.matchParentSize()) {
+                        drawPlayhead(vm.playhead * ppb * density.density, Zk.accent, head = false)
+                        rectSel?.let { r -> drawRect(Zk.accent.copy(alpha = .14f), r.topLeft, r.size); drawRect(Zk.accent, r.topLeft, r.size, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx())) }
+                    }
                 }
             }
         }
     }
+    // The actions of the selection (and Paste) sit at the bottom, out of the way of the tracks.
+    val sel = vm.liveSelection()
+    if (sel.isNotEmpty() || vm.clipClip.isNotEmpty()) Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(40.dp).background(Zk.panel2).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        if (sel.isEmpty()) {
+            LabelButton("Paste ${vm.clipClip.size}", false, w = 78.dp, h = 30.dp) { val at = (vm.playhead / com.zedokmusic.settings.AppSettings.snapBeats).roundToInt() * com.zedokmusic.settings.AppSettings.snapBeats; val p = vm.pasteClips(at); vm.clipSelection.clear(); vm.clipSelection.addAll(p) }
+            Text("at the playhead", color = Zk.dim, fontSize = 11.sp)
+            LabelButton("All", false, w = 38.dp, h = 30.dp) { vm.clipSelection.clear(); vm.tracks.forEach { vm.clipSelection.addAll(it.clips) } }
+        } else {
+            Text("${sel.size} clip${if (sel.size > 1) "s" else ""}", color = Zk.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
+            LabelButton("Clone", false, w = 54.dp, h = 30.dp) { val n = vm.cloneClips(sel); vm.clipSelection.clear(); vm.clipSelection.addAll(n) }
+            LabelButton("Copy", false, w = 48.dp, h = 30.dp) { vm.copyClips(sel); vm.message = "${sel.size} clip${if (sel.size > 1) "s" else ""} copied." }
+            LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutClips(sel) }
+            LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeClips(sel) }
+            LabelButton("Edit", false, w = 44.dp, h = 30.dp) { editClips = true }
+            LabelButton("All", false, w = 38.dp, h = 30.dp) { vm.clipSelection.clear(); vm.tracks.forEach { vm.clipSelection.addAll(it.clips) } }
+            LabelButton("✕", false, w = 32.dp, h = 30.dp) { vm.clearClipSelection() }
+        }
+    }
+    if (editClips && sel.isNotEmpty()) vm.trackOf(sel[0])?.let { t0 -> ClipEditDialog(vm, t0, sel[0], sel) { editClips = false } } else if (editClips) editClips = false
+    }  // Box
     }  // CompositionLocalProvider
 }
 
@@ -248,17 +336,52 @@ private fun ClipBlock(vm: DawViewModel, t: TrackM, c: ClipM, ppb: Float) {
     val density = LocalDensity.current
     var drag by remember(c) { mutableFloatStateOf(0f) }
     var menu by remember { mutableStateOf(false) }
+    var edit by remember { mutableStateOf(false) }
+    var selfDrag by remember(c) { mutableStateOf(false) }
+    val selected = c in vm.clipSelection
     val lenBeats = c.lengthFrames / 48000f * vm.bpm / 60f
-    val x = with(density) { ((c.start * ppb) + drag).dp.roundToPx() }
+    val follow = if (selected && vm.clipDragging && !selfDrag) vm.clipDragBeats * ppb else drag
+    val x = with(density) { ((c.start * ppb) + follow).dp.roundToPx() }
+    // The real waveform, computed once and cached in the project (Cache/Peaks); it follows the processed copy when pitch / speed were changed.
+    val peaks by produceState<ByteArray?>(null, c.path) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.clipPeaks(c) } }
     Box(Modifier.offset { IntOffset(x, 0) }.padding(vertical = 8.dp).width((lenBeats * ppb).dp.coerceAtLeast(12.dp)).fillMaxHeight()
-        .clip(RoundedCornerShape(8.dp)).background(t.color.copy(alpha = .35f)).border(1.dp, t.color, RoundedCornerShape(8.dp))
+        .clip(RoundedCornerShape(8.dp)).background(t.color.copy(alpha = if (selected) .5f else .35f)).border(if (selected) 2.dp else 1.dp, if (selected) Color.White else t.color, RoundedCornerShape(8.dp))
         .pointerInput(c, ppb, vm.bpm) {
-            detectDragGestures(onDragEnd = {
-                val b = (c.start + drag / density.density / ppb); drag = 0f
-                val snap = com.zedokmusic.settings.AppSettings.snapBeats; vm.moveClip(c, (b / snap).roundToInt() * snap)  // snap to the grid chosen in Settings
-            }, onDragCancel = { drag = 0f }) { ch, d -> ch.consume(); drag += d.x }
-        }.pointerInput(c) { detectTapGestures(onLongPress = { menu = true }) }) {
-        Text(c.name, color = Zk.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
-        DropdownMenu(menu, { menu = false }) { DropdownMenuItem(text = { Text("Remove clip") }, onClick = { menu = false; vm.removeClip(t, c) }) }
+            detectDragGestures(onDragStart = { if (c !in vm.clipSelection) { vm.clipSelection.clear(); vm.clipSelection.add(c) }; selfDrag = true; vm.clipDragging = true; vm.clipDragBeats = 0f },
+                onDragEnd = {
+                    val snap = com.zedokmusic.settings.AppSettings.snapBeats
+                    val target = ((c.start + drag / density.density / ppb) / snap).roundToInt() * snap    // snap to the grid chosen in Settings
+                    val group = vm.liveSelection().ifEmpty { listOf(c) }
+                    drag = 0f; selfDrag = false; vm.clipDragging = false; vm.clipDragBeats = 0f
+                    vm.moveClips(group, target - c.start)
+                }, onDragCancel = { drag = 0f; selfDrag = false; vm.clipDragging = false; vm.clipDragBeats = 0f }) { ch, d -> ch.consume(); drag += d.x; vm.clipDragBeats = drag / density.density / ppb }
+        }.pointerInput(c) { detectTapGestures(onTap = { if (vm.clipSelectMode) { if (!vm.clipSelection.remove(c)) vm.clipSelection.add(c) } else { vm.clipSelection.clear(); vm.clipSelection.add(c) } }, onLongPress = { menu = true }) }) {
+        peaks?.let { pk ->
+            Canvas(Modifier.matchParentSize().padding(vertical = 2.dp)) {
+                val nb = pk.size / 2; if (nb == 0) return@Canvas
+                val w = size.width.toInt().coerceAtLeast(1); val mid = size.height / 2; val amp = size.height / 2 * 0.92f
+                for (px in 0 until w) {
+                    val b0 = (px.toLong() * nb / w).toInt(); val b1 = maxOf(b0 + 1, ((px + 1).toLong() * nb / w).toInt()).coerceAtMost(nb)
+                    var lo = 0; var hi = 0
+                    for (b in b0 until b1) { val l = pk[b * 2].toInt(); val h = pk[b * 2 + 1].toInt(); if (l < lo) lo = l; if (h > hi) hi = h }
+                    val y0 = mid - hi / 127f * amp; val y1 = mid - lo / 127f * amp
+                    drawLine(t.color.copy(alpha = .9f), Offset(px + 0.5f, y0), Offset(px + 0.5f, maxOf(y1, y0 + 1f)), 1f)
+                }
+            }
+        }
+        Text(c.name + (if (c.busy) "  · processing…" else if (c.edited) "  · " + clipSummary(c) else ""), color = Zk.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
+        DropdownMenu(menu, { menu = false }) {
+            // the full name, even when the clip is too short to show it
+            Text(java.io.File(c.src).name + if (c.edited) "\n" + clipSummary(c) else "", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.widthIn(max = 260.dp).padding(horizontal = 16.dp, vertical = 8.dp))
+            DropdownMenuItem(text = { Text("Edit clip…") }, onClick = { menu = false; edit = true })
+            DropdownMenuItem(text = { Text("Remove clip") }, onClick = { menu = false; vm.removeClip(t, c) })
+        }
     }
+    if (edit) ClipEditDialog(vm, t, c) { edit = false }
 }
+
+private fun clipSummary(c: ClipM): String = buildList {
+    if (c.gainDb != 0f) add("%+.1f dB".format(c.gainDb))
+    if (c.semis != 0f) add("%+.1f st".format(c.semis))
+    if (c.speed != 1f) add("×%.2f".format(c.speed))
+}.joinToString(" · ")

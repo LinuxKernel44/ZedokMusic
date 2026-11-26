@@ -1,6 +1,7 @@
 package com.zedokmusic.ui.nplug
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -146,6 +147,7 @@ internal fun flatten(d: Dir, depth: Int, open: (String) -> Boolean, out: Mutable
  * The sound browser: the drum kit library as a folder tree (tap a folder to fold or unfold it, "Collapse all" folds everything), or the favourites, or search
  * results. Each sound has a preview button and a star. Tap sounds to select, then Load to a pad (replaces the pad) or Add (round robin / layer); files are copied into the project.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SampleBrowser(kits: KitManager, startPad: Int, color: Color) {
     val b = kits.browse ?: return
@@ -161,6 +163,7 @@ private fun SampleBrowser(kits: KitManager, startPad: Int, color: Color) {
         else flatten(tree, 0, { kits.expandedDirs[it] == true }, out)
         out
     }
+    LaunchedEffect(rows, kits.preview.playing) { val pl = kits.preview.playing; if (pl != null && rows.none { it is TreeRow.F && it.node.ref == pl }) kits.preview.stop() }
     androidx.compose.ui.window.Dialog(onDismissRequest = { kits.closeBrowser() }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -210,7 +213,7 @@ private fun SampleBrowser(kits: KitManager, startPad: Int, color: Color) {
                                     Text(if (playing) "■" else "▶", color = if (playing) color else Zk.text, fontSize = 18.sp, textAlign = TextAlign.Center,
                                         modifier = Modifier.width(48.dp).clickable { kits.preview.toggle(node) }.padding(vertical = 12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(node.name, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(node.name, color = Zk.text, fontSize = 14.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200, velocity = 36.dp))
                                         if (flat && r.path != node.name) Text(r.path.substringBeforeLast('/'), color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Text(if (on) "✓" else "", color = color, fontSize = 16.sp, modifier = Modifier.width(26.dp), textAlign = TextAlign.Center)

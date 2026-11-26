@@ -17,6 +17,21 @@ class ClipM(val engineId: Int, path: String, val name: String, start: Float, val
     var start by mutableFloatStateOf(start)  // beats
     /** The WAV file; changes when the project is renamed, saved as another project or its samples are collected. */
     var path by androidx.compose.runtime.mutableStateOf(path)
+    /** The original recording / sample. [path] is the file the engine plays: this one, or a processed copy when pitch / speed were changed. */
+    var src by androidx.compose.runtime.mutableStateOf(path)
+    /** Clip gain in dB (applied live by the engine). */
+    var gainDb by mutableFloatStateOf(0f)
+    /** Pitch shift in semitones (with decimals for cents). */
+    var semis by mutableFloatStateOf(0f)
+    /** Playback speed: 1 = as recorded, 2 = twice as fast (half as long). */
+    var speed by mutableFloatStateOf(1f)
+    /** 0 = resample (pitch and speed together), 1 = stretch (independent). See AudioFx. */
+    var mode by androidx.compose.runtime.mutableIntStateOf(1)
+    /** Tempo of the original recording, for "fit to project BPM" (0 = unknown). */
+    var srcBpm by mutableFloatStateOf(0f)
+    /** True while a processed copy is being rendered. */
+    var busy by androidx.compose.runtime.mutableStateOf(false)
+    val edited get() = gainDb != 0f || semis != 0f || speed != 1f
 }
 
 class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, val pluginPath: String?) {
