@@ -178,10 +178,11 @@ fun Knobs(modifier: Modifier = Modifier, content: @Composable FlowRowScope.() ->
 
 @Composable
 fun TabBar(tabs: List<String>, selected: Int, color: Color, onSelect: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val short = com.zedokmusic.ui.LocalShort.current
+    Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = if (short) 2.dp else 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         tabs.forEachIndexed { i, s ->
             val on = i == selected
-            Box(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (on) color.copy(alpha = .2f) else Zk.panel2).clickable { onSelect(i) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (on) color.copy(alpha = .2f) else Zk.panel2).clickable { onSelect(i) }.padding(vertical = if (short) 5.dp else 8.dp), contentAlignment = Alignment.Center) {
                 Text(s, color = if (on) color else Zk.dim, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false)
             }
         }
@@ -246,5 +247,15 @@ fun AutoGroup(ps: PluginState, group: String, color: Color, title: String = grou
             }
         }
         if (knobs.isNotEmpty()) Knobs { knobs.forEach { p -> PK(ps, p.name, color, labels[p.name] ?: p.name.removePrefix(group).trim().ifEmpty { p.name }, knobSize) } }
+    }
+}
+
+
+/** Lays the parts side by side when the window is wide (landscape, tablets), one under the other otherwise. */
+@Composable
+fun Split(vararg parts: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth >= 640.dp && parts.size > 1) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { parts.forEach { p -> Box(Modifier.weight(1f)) { p() } } }
+        else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) { parts.forEach { it() } }
     }
 }

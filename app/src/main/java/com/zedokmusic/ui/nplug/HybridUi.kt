@@ -25,9 +25,10 @@ fun HybridScreen(ps: PluginState) {
     var tab by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         TabBar(listOf("Sound", "Filter", "Mod", "Matrix", "FX", "Arp"), tab, HY) { tab = it }
+        val short = com.zedokmusic.ui.LocalShort.current
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (tab) {
-                0 -> { SoundTab(ps) }
+                0 -> { SoundTab(ps); if (short) PerformBar(ps) }
                 1 -> FilterTab(ps)
                 2 -> ModTab(ps)
                 3 -> MatrixTab(ps)
@@ -35,7 +36,7 @@ fun HybridScreen(ps: PluginState) {
                 else -> ArpTab(ps)
             }
         }
-        PerformBar(ps)
+        if (!short) PerformBar(ps)
     }
 }
 
@@ -92,27 +93,38 @@ private fun OscSection(ps: PluginState, o: String, tel: Int, color: Color, t: co
 @Composable
 private fun SoundTab(ps: PluginState) {
     val t = ps.t
-    OscSection(ps, "A", 0, HY, t)
-    OscSection(ps, "B", 1, HY2, t)
-    Section("Sub & noise", HY3) {
-        Knobs { PK(ps, "Sub Level", HY3, "Sub"); PK(ps, "Noise Level", HY3, "Noise"); PK(ps, "Noise Color", HY3, "Color") }
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) { Chips(ps, "Sub Wave", HY3, "Sub wave"); Chips(ps, "Sub Octave", HY3, "Sub octave") }
-    }
-    Section("Voices", HY) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
-            Picker(ps, "Polyphony", HY, "Polyphony", width = 90.dp); Chips(ps, "Play Mode", HY, "Play mode"); Chips(ps, "Quality", HY, "Quality")
+    Split({ OscSection(ps, "A", 0, HY, t) }, { OscSection(ps, "B", 1, HY2, t) })
+    Split({
+        Section("Sub & noise", HY3) {
+            Knobs { PK(ps, "Sub Level", HY3, "Sub"); PK(ps, "Noise Level", HY3, "Noise"); PK(ps, "Noise Color", HY3, "Color") }
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) { Chips(ps, "Sub Wave", HY3, "Sub wave"); Chips(ps, "Sub Octave", HY3, "Sub octave") }
         }
-        Knobs { PK(ps, "Glide", HY, "Glide"); PK(ps, "Bend Range", HY, "Bend range") }
-    }
+    }, {
+        Section("Voices", HY) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
+                Picker(ps, "Polyphony", HY, "Polyphony", width = 90.dp); Chips(ps, "Play Mode", HY, "Play mode"); Chips(ps, "Quality", HY, "Quality")
+            }
+            Knobs { PK(ps, "Glide", HY, "Glide"); PK(ps, "Bend Range", HY, "Bend range") }
+        }
+    })
 }
 
 @Composable
 private fun FilterTab(ps: PluginState) {
+    Split({ Filter1Section(ps) }, { Filter2Section(ps) })
+}
+
+@Composable
+private fun Filter1Section(ps: PluginState) {
     Section("Filter 1", HY) {
         Chips(ps, "F1 Type", HY)
         Spacer(Modifier.height(6.dp))
         Knobs { PK(ps, "F1 Cutoff", HY, "Cutoff", 60.dp); PK(ps, "F1 Resonance", HY, "Resonance", 60.dp); PK(ps, "F1 Drive", HY, "Drive"); PK(ps, "F1 Env Amount", HY, "Env amount", bipolar = true); PK(ps, "F1 Key Track", HY, "Key track") }
     }
+}
+
+@Composable
+private fun Filter2Section(ps: PluginState) {
     Section("Filter 2", HY2) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) { Chips(ps, "F2 Type", HY2); }
         Spacer(Modifier.height(6.dp))
@@ -148,10 +160,8 @@ private fun LfoSection(ps: PluginState, n: Int, color: Color) {
 
 @Composable
 private fun ModTab(ps: PluginState) {
-    EnvSection(ps, "Amp envelope", "Amp", HY)
-    EnvSection(ps, "Envelope 2 (filter)", "Env2", HY2)
-    EnvSection(ps, "Envelope 3", "Env3", HY3)
-    LfoSection(ps, 1, HY); LfoSection(ps, 2, HY2); LfoSection(ps, 3, HY3)
+    Split({ EnvSection(ps, "Amp envelope", "Amp", HY) }, { EnvSection(ps, "Envelope 2 (filter)", "Env2", HY2) }, { EnvSection(ps, "Envelope 3", "Env3", HY3) })
+    Split({ LfoSection(ps, 1, HY) }, { LfoSection(ps, 2, HY2) }, { LfoSection(ps, 3, HY3) })
 }
 
 @Composable
@@ -172,13 +182,13 @@ private fun MatrixTab(ps: PluginState) {
 
 @Composable
 private fun FxTab(ps: PluginState) {
-    Section("Chorus", HY) { Knobs { PK(ps, "Chorus Mix", HY, "Mix"); PK(ps, "Chorus Rate", HY, "Rate"); PK(ps, "Chorus Depth", HY, "Depth") } }
-    Section("Delay", HY2) {
-        Chips(ps, "Delay Time", HY2, "Time (tempo synced)")
-        Spacer(Modifier.height(6.dp))
-        Knobs { PK(ps, "Delay Mix", HY2, "Mix"); PK(ps, "Delay Feedback", HY2, "Feedback"); PK(ps, "Delay Ping-Pong", HY2, "Ping-pong") }
-    }
-    Section("Reverb", HY3) { Knobs { PK(ps, "Reverb Mix", HY3, "Mix"); PK(ps, "Reverb Size", HY3, "Size"); PK(ps, "Reverb Decay", HY3, "Decay"); PK(ps, "Reverb Damping", HY3, "Damping") } }
+    Split({ Section("Chorus", HY) { Knobs { PK(ps, "Chorus Mix", HY, "Mix"); PK(ps, "Chorus Rate", HY, "Rate"); PK(ps, "Chorus Depth", HY, "Depth") } } }, {
+        Section("Delay", HY2) {
+            Chips(ps, "Delay Time", HY2, "Time (tempo synced)")
+            Spacer(Modifier.height(6.dp))
+            Knobs { PK(ps, "Delay Mix", HY2, "Mix"); PK(ps, "Delay Feedback", HY2, "Feedback"); PK(ps, "Delay Ping-Pong", HY2, "Ping-pong") }
+        }
+    }, { Section("Reverb", HY3) { Knobs { PK(ps, "Reverb Mix", HY3, "Mix"); PK(ps, "Reverb Size", HY3, "Size"); PK(ps, "Reverb Decay", HY3, "Decay"); PK(ps, "Reverb Damping", HY3, "Damping") } } })
 }
 
 @Composable

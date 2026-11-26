@@ -53,7 +53,7 @@ fun SpaceScreen(ps: PluginState) {
         Box(Modifier.weight(1f)) {
             Scroll {
                 when (tab) {
-                    0 -> {
+                    0 -> Split({
                         Section("Reverb", SP) {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { Toggle(ps, "Reverb On", SP, "On"); Chips(ps, "Reverb Mode", SP) }
                             Spacer(Modifier.height(8.dp))
@@ -61,9 +61,10 @@ fun SpaceScreen(ps: PluginState) {
                             Spacer(Modifier.height(6.dp))
                             Knobs { PK(ps, "Reverb Mix", SP, "Mix", 60.dp); PK(ps, "Size", SP, "Size", 60.dp); PK(ps, "Decay", SP, "Decay", 60.dp); PK(ps, "Pre-Delay", SP, "Pre-delay") }
                         }
+                    }, {
                         Section("Tone", SP2) { Knobs { PK(ps, "Damping", SP2, "Damping"); PK(ps, "Diffusion", SP2, "Diffusion"); PK(ps, "Modulation", SP2, "Modulation"); PK(ps, "Reverb Low Cut", SP2, "Low cut"); PK(ps, "Reverb High Cut", SP2, "High cut"); PK(ps, "Width", SP2, "Width"); PK(ps, "Shimmer", SP2, "Shimmer") } }
-                    }
-                    1 -> {
+                    })
+                    1 -> Split({
                         Section("Delay", SP) {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { Toggle(ps, "Delay On", SP, "On"); Chips(ps, "Time Mode", SP) }
                             Spacer(Modifier.height(8.dp))
@@ -72,8 +73,7 @@ fun SpaceScreen(ps: PluginState) {
                             Spacer(Modifier.height(6.dp))
                             Knobs { PK(ps, "Delay Mix", SP, "Mix", 60.dp); PK(ps, "Feedback", SP, "Feedback", 60.dp); PK(ps, "Ping-Pong", SP, "Ping-pong") }
                         }
-                        Section("Character", SP2) { Knobs { PK(ps, "Delay Low Cut", SP2, "Low cut"); PK(ps, "Delay High Cut", SP2, "High cut"); PK(ps, "Tape Drive", SP2, "Tape"); PK(ps, "Wobble Rate", SP2, "Wobble rate"); PK(ps, "Wobble Depth", SP2, "Wobble"); PK(ps, "Duck", SP2, "Duck") } }
-                    }
+                    }, { Section("Character", SP2) { Knobs { PK(ps, "Delay Low Cut", SP2, "Low cut"); PK(ps, "Delay High Cut", SP2, "High cut"); PK(ps, "Tape Drive", SP2, "Tape"); PK(ps, "Wobble Rate", SP2, "Wobble rate"); PK(ps, "Wobble Depth", SP2, "Wobble"); PK(ps, "Duck", SP2, "Duck") } } })
                     else -> Section("Main", SP) { Chips(ps, "Routing", SP); Spacer(Modifier.height(8.dp)); Knobs { PK(ps, "Output Gain", SP, "Output", 60.dp, bipolar = true) } }
                 }
                 LevelBar(ps, SP)

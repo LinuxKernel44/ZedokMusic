@@ -50,7 +50,9 @@ private fun EqTab(ps: PluginState, band: Int, onBand: (Int) -> Unit) {
     val bandCurve by rememberTelemetry(ps.t, 10 + band, 80)
     // per-band values used by the handles
     val state = rememberUpdatedState(ps)
-    Canvas(Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF0A0B0E)).pointerInput(Unit) {
+    val short = com.zedokmusic.ui.LocalShort.current
+    Split({ Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Canvas(Modifier.fillMaxWidth().height(if (short) 150.dp else 210.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF0A0B0E)).pointerInput(Unit) {
         var drag = -1
         detectDragGestures(onDragStart = { o ->
             val w = size.width.toFloat(); val h = size.height.toFloat(); var best = -1; var bd = 56.dp.toPx()
@@ -92,6 +94,8 @@ private fun EqTab(ps: PluginState, band: Int, onBand: (Int) -> Unit) {
             drawCircle(if (on) BAND[b] else Color.Transparent, if (sel) 15f else 12f, Offset(x, y)); drawCircle(BAND[b], if (sel) 15f else 12f, Offset(x, y), style = Stroke(if (sel) 3f else 2f))
         }
     }
+    androidx.compose.material3.Text("Drag a dot to set frequency and gain. Long-press a number to switch a band on or off.", color = Zk.dim, fontSize = 11.sp)
+    } }, { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         for (b in 0 until 6) {
             val on = ps.on("B${b + 1} On"); val sel = b == band
@@ -112,7 +116,7 @@ private fun EqTab(ps: PluginState, band: Int, onBand: (Int) -> Unit) {
         if (isCut(ps, n)) { Spacer(Modifier.height(4.dp)); Chips(ps, n + "Slope", BAND[band], "Slope") }
     }
     Section("Processing", EQ) { Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) { Toggle(ps, "EQ On", EQ, "EQ on"); Chips(ps, "EQ Mode", EQ) } }
-    androidx.compose.material3.Text("Drag a dot to set frequency and gain. Long-press a number to switch a band on or off.", color = Zk.dim, fontSize = 11.sp)
+    } })
 }
 
 private fun realFreq(ps: PluginState, n: String): Float = 20f * Math.pow(1000.0, ps.v(n + "Freq").toDouble()).toFloat()
@@ -137,6 +141,7 @@ private fun Meter(label: String, db: Float, color: Color, modifier: Modifier = M
 @Composable
 private fun DynTab(ps: PluginState) {
     val meters by rememberTelemetry(ps.t, 1, 50)
+    Split({
     Section("Compressor", EQ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f)) {
@@ -150,7 +155,9 @@ private fun DynTab(ps: PluginState) {
         Spacer(Modifier.height(4.dp)); Chips(ps, "Detector", EQ, "Detector")
         Knobs { PK(ps, "Lookahead", EQ, "Lookahead"); PK(ps, "Sidechain HP", EQ, "SC high-pass"); PK(ps, "Stereo Link", EQ, "Link") }
     }
+    }, {
     Section("Limiter", Zk.danger) { Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) { Toggle(ps, "Limiter On", Zk.danger, "Limiter on"); PK(ps, "Ceiling", Zk.danger, "Ceiling"); PK(ps, "Limiter Release", Zk.danger, "Release") } }
+    })
 }
 
 /** Static compression curve (threshold, ratio, knee) with the threshold marked. */

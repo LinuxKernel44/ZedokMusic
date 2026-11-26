@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,16 +47,21 @@ fun PresetBar(vm: DawViewModel, t: TrackM, color: Color, showParams: Boolean, on
         val n = if (i < 0) (if (d > 0) 0 else list.size - 1) else (i + d + list.size) % list.size
         vm.applyPreset(t, list[n])
     }
-    Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        LabelButton("◀", false, w = 36.dp, h = 34.dp) { step(-1) }
-        Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).clickable { browser = true }.padding(horizontal = 10.dp, vertical = 4.dp)) {
-            Text(t.presetName.ifBlank { "Init" }, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(list.firstOrNull { it.key == t.presetKey }?.category ?: "Tap to browse presets", color = Zk.dim, fontSize = 10.sp, maxLines = 1)
+    val short = com.zedokmusic.ui.LocalShort.current
+    val bh = if (short) 28.dp else 34.dp
+    Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = if (short) 2.dp else 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        LabelButton("◀", false, w = 36.dp, h = bh) { step(-1) }
+        Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).clickable { browser = true }.padding(horizontal = 10.dp, vertical = if (short) 3.dp else 4.dp)) {
+            if (short) Text(t.presetName.ifBlank { "Init" } + (list.firstOrNull { it.key == t.presetKey }?.category?.let { "  ·  $it" } ?: ""), color = Zk.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            else {
+                Text(t.presetName.ifBlank { "Init" }, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(list.firstOrNull { it.key == t.presetKey }?.category ?: "Tap to browse presets", color = Zk.dim, fontSize = 10.sp, maxLines = 1)
+            }
         }
-        LabelButton("▶", false, w = 36.dp, h = 34.dp) { step(1) }
-        LabelButton(if (t.abSlot == 0) "A" else "B", t.abSlot == 1, color, w = 36.dp, h = 34.dp) { vm.toggleAB(t) }
-        LabelButton("Save", false, w = 52.dp, h = 34.dp) { saving = true }
-        LabelButton(if (showParams) "UI" else "List", showParams, w = 46.dp, h = 34.dp, onClick = onParams)
+        LabelButton("▶", false, w = 36.dp, h = bh) { step(1) }
+        LabelButton(if (t.abSlot == 0) "A" else "B", t.abSlot == 1, color, w = 36.dp, h = bh) { vm.toggleAB(t) }
+        LabelButton("Save", false, w = 52.dp, h = bh) { saving = true }
+        LabelButton(if (showParams) "UI" else "List", showParams, w = 46.dp, h = bh, onClick = onParams)
     }
     if (browser) PresetBrowser(vm, t, id, color, revision, { revision++ }) { browser = false }
     if (saving) SavePresetDialog(vm, t, id, { revision++; saving = false }) { saving = false }
@@ -87,42 +93,57 @@ fun PresetBrowser(vm: DawViewModel, t: TrackM, id: String, color: Color, revisio
         }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding().padding(10.dp)) {
+        val short = com.zedokmusic.ui.LocalShort.current
+        val state = rememberLazyListState()
+        LaunchedEffect(Unit) { val i = shown.indexOfFirst { it.key == t.presetKey }; if (i > 0) state.scrollToItem(i) }
+        val chipOf: @Composable (String) -> Unit = { c ->
+            val on = c == filter
+            Box(Modifier.clip(RoundedCornerShape(14.dp)).background(if (on) color else Zk.panel2).clickable { filter = c }.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Text(if (c == "★") "★ Favourites" else c, color = if (on) Color(0xFF0B0D10) else Zk.dim, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false)
+            }
+        }
+        val allCats = listOf("All", "★", "User") + cats.filter { it != "User" }
+        val titleRow: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${t.pluginName.ifBlank { t.name }} · presets", color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("${t.pluginName.ifBlank { t.name }} · presets", color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 LabelButton("Import", false, w = 64.dp, h = 32.dp) { importer.launch("*/*") }
                 LabelButton("Close", true, color, w = 60.dp, h = 32.dp, onClick = onDismiss)
             }
-            Spacer(Modifier.height(6.dp))
-            OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search name, category or tag") }, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(6.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                (listOf("All", "★", "User") + cats.filter { it != "User" }).forEach { c ->
-                    val on = c == filter
-                    Box(Modifier.clip(RoundedCornerShape(14.dp)).background(if (on) color else Zk.panel2).clickable { filter = c }.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                        Text(if (c == "★") "★ Favourites" else c, color = if (on) Color(0xFF0B0D10) else Zk.dim, fontSize = 12.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false)
-                    }
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text("${shown.size} presets", color = Zk.dim, fontSize = 11.sp)
-            val state = rememberLazyListState()
-            LaunchedEffect(Unit) { val i = shown.indexOfFirst { it.key == t.presetKey }; if (i > 0) state.scrollToItem(i) }
-            LazyColumn(Modifier.fillMaxSize(), state) {
-                items(shown, key = { it.key }) { p ->
-                    val cur = p.key == t.presetKey
-                    Row(Modifier.fillMaxWidth().background(if (cur) color.copy(alpha = .14f) else Color.Transparent).clickable { vm.applyPreset(t, p) }.padding(vertical = 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(p.name, color = if (cur) color else Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(p.category + (if (p.tags.isNotEmpty()) " · " + p.tags.joinToString(", ") else "") + if (!p.factory) " · yours" else "", color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        val searchBox: @Composable () -> Unit = { OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search name, category or tag") }, modifier = Modifier.fillMaxWidth()) }
+        val presetList: @Composable (Modifier) -> Unit = { m ->
+            Column(m) {
+                Text("${shown.size} presets", color = Zk.dim, fontSize = 11.sp)
+                LazyColumn(Modifier.fillMaxSize(), state) {
+                    items(shown, key = { it.key }) { p ->
+                        val cur = p.key == t.presetKey
+                        Row(Modifier.fillMaxWidth().background(if (cur) color.copy(alpha = .14f) else Color.Transparent).clickable { vm.applyPreset(t, p) }.padding(vertical = if (short) 5.dp else 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(p.name, color = if (cur) color else Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(p.category + (if (p.tags.isNotEmpty()) " · " + p.tags.joinToString(", ") else "") + if (!p.factory) " · yours" else "", color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            val fav = favs.contains(p.key)
+                            Text(if (fav) "★" else "☆", color = if (fav) Zk.warn else Zk.dim, fontSize = 22.sp, modifier = Modifier.clickable { lib.toggleFavorite(p.key); rev++ }.padding(horizontal = 10.dp))
+                            if (!p.factory) Box { Text("⋮", color = Zk.dim, fontSize = 20.sp, modifier = Modifier.clickable { menu = p }.padding(horizontal = 8.dp)) }
                         }
-                        val fav = favs.contains(p.key)
-                        Text(if (fav) "★" else "☆", color = if (fav) Zk.warn else Zk.dim, fontSize = 22.sp, modifier = Modifier.clickable { lib.toggleFavorite(p.key); rev++ }.padding(horizontal = 10.dp))
-                        if (!p.factory) Box { Text("⋮", color = Zk.dim, fontSize = 20.sp, modifier = Modifier.clickable { menu = p }.padding(horizontal = 8.dp)) }
+                        HorizontalDivider(color = Zk.line)
                     }
-                    HorizontalDivider(color = Zk.line)
                 }
             }
+        }
+        if (short) Row(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // landscape: title, search and categories on the left, the list takes the whole height on the right
+            Column(Modifier.width(260.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                titleRow(); searchBox()
+                @OptIn(ExperimentalLayoutApi::class) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { allCats.forEach { chipOf(it) } }
+            }
+            presetList(Modifier.weight(1f).fillMaxHeight())
+        } else Column(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding().padding(10.dp)) {
+            titleRow()
+            Spacer(Modifier.height(6.dp)); searchBox(); Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { allCats.forEach { chipOf(it) } }
+            Spacer(Modifier.height(6.dp))
+            presetList(Modifier.fillMaxSize())
         }
         menu?.let { p ->
             AlertDialog(onDismissRequest = { menu = null }, containerColor = Zk.panel, title = { Text(p.name) }, text = {

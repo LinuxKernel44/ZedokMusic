@@ -94,10 +94,11 @@ fun PluginChooser(vm: DawViewModel, current: TrackM) {
         vm.masterFx.forEach { add(("Master · " + it.name) to it) }
     }
     if (items.size < 2) return
-    Row(Modifier.fillMaxWidth().background(Zk.panel).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val short = LocalShort.current
+    Row(Modifier.fillMaxWidth().background(Zk.panel).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = if (short) 2.dp else 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         items.forEach { (label, t) ->
             val active = t === current
-            Box(Modifier.clip(RoundedCornerShape(14.dp)).background(if (active) Zk.accent.copy(alpha = .2f) else Zk.panel2).clickable { vm.pluginTarget = t }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Box(Modifier.clip(RoundedCornerShape(14.dp)).background(if (active) Zk.accent.copy(alpha = .2f) else Zk.panel2).clickable { vm.pluginTarget = t }.padding(horizontal = 10.dp, vertical = if (short) 3.dp else 6.dp)) {
                 Text(label, color = if (active) Zk.accent else Zk.dim, fontSize = 12.sp, maxLines = 1, softWrap = false)
             }
         }
