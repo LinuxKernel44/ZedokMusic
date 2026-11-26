@@ -114,7 +114,7 @@ fun DawScreen(vm: DawViewModel) {
                         val kh = (AppSettings.keysHeight.value.takeIf { it > 0 } ?: defaultH).coerceIn(70, maxH)
                         var live by remember { mutableFloatStateOf(kh.toFloat()) }
                         LaunchedEffect(kh) { live = kh.toFloat() }
-                        PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(kh.dp),
+                        PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(kh.dp), active = vm.activePitches(t),
                             onResize = { dy -> live = (live + dy).coerceIn(70f, maxH.toFloat()); AppSettings.keysHeight.set(live.toInt()) })
                     }
                 }

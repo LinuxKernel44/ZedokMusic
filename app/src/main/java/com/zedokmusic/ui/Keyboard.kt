@@ -29,7 +29,7 @@ private fun Modifier.press(onDown: () -> Unit, onUp: () -> Unit) = pointerInput(
 
 /** Two-octave on-screen piano; multi-touch works because every key tracks its own pointer. */
 @Composable
-fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote: (Boolean, Int) -> Unit, modifier: Modifier = Modifier, onResize: ((Float) -> Unit)? = null) {
+fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote: (Boolean, Int) -> Unit, modifier: Modifier = Modifier, onResize: ((Float) -> Unit)? = null, active: Set<Int> = emptySet()) {
     val base = (baseOctave + 1) * 12
     Column(modifier.background(Zk.panel)) {
         Row(Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -52,7 +52,7 @@ fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote
             Row(Modifier.fillMaxSize()) {
                 for (i in 0 until 14) {
                     val pitch = base + (i / 7) * 12 + WhiteSteps[i % 7]
-                    Box(Modifier.width(whiteW).fillMaxHeight().border(0.5.dp, Color(0xFF9AA0AC)).background(Color(0xFFF1F2F5)).press({ onNote(true, pitch) }, { onNote(false, pitch) }), contentAlignment = Alignment.BottomCenter) {
+                    Box(Modifier.width(whiteW).fillMaxHeight().border(0.5.dp, Color(0xFF9AA0AC)).background(if ((pitch in active)) color.copy(alpha = .75f) else Color(0xFFF1F2F5)).press({ onNote(true, pitch) }, { onNote(false, pitch) }), contentAlignment = Alignment.BottomCenter) {
                         if (i % 7 == 0) Text("C${baseOctave + i / 7}", fontSize = 9.sp, color = Color(0xFF555B68), modifier = Modifier.padding(bottom = 4.dp))
                     }
                 }
@@ -60,7 +60,7 @@ fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote
             for (i in 0 until 14) {
                 val semis = BlackAfter[i % 7] ?: continue
                 val pitch = base + (i / 7) * 12 + semis
-                Box(Modifier.offset(x = whiteW * (i + 1) - blackW / 2).width(blackW).fillMaxHeight(0.6f).background(Color(0xFF14161A)).border(0.5.dp, Color.Black).press({ onNote(true, pitch) }, { onNote(false, pitch) }))
+                Box(Modifier.offset(x = whiteW * (i + 1) - blackW / 2).width(blackW).fillMaxHeight(0.6f).background(if (pitch in active) color else Color(0xFF14161A)).border(0.5.dp, Color.Black).press({ onNote(true, pitch) }, { onNote(false, pitch) }))
             }
         }
     }

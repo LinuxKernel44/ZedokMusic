@@ -74,7 +74,18 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (cmd == 0x90 && d2 > 0) keyEvent(t, true, d1, d2) else if (cmd == 0x80 || cmd == 0x90) keyEvent(t, false, d1, 0)
     }
     /** Single entry point for notes played live (MIDI keyboard or on-screen keys): sounds the plugin and, when recording, captures the note. */
+    /** Notes held right now by a finger, a MIDI keyboard or a preview: track id * 128 + pitch -> how many. The keyboards light these keys. */
+    private val liveHeld = androidx.compose.runtime.mutableStateMapOf<Int, Int>()
+    /** Keys to light on a keyboard of [t]: played live (finger, MIDI, preview) or sounding from the notes of the track at the playhead. */
+    fun activePitches(t: TrackM): Set<Int> {
+        val out = HashSet<Int>()
+        for ((k, n) in liveHeld) if (n > 0 && k / 128 == t.id) out.add(k % 128)
+        if (playing) { val ph = playhead; for (n in t.notes) if (ph >= n.start && ph < n.start + n.length) out.add(n.pitch) }
+        return out
+    }
     fun keyEvent(t: TrackM, on: Boolean, pitch: Int, velocity: Int) {
+        val hk = t.id * 128 + pitch.coerceIn(0, 127)
+        if (on) liveHeld[hk] = (liveHeld[hk] ?: 0) + 1 else (liveHeld[hk] ?: 0).let { c -> if (c <= 1) liveHeld.remove(hk) else liveHeld[hk] = c - 1 }
         e.liveNote(t.id, on, pitch, if (velocity > 0) velocity else 100)
         if (!recording || !recMidi || recTrack != t || !e.isPlaying()) return
         if (on) openNotes[pitch] = playhead to velocity.coerceIn(1, 127)

@@ -178,8 +178,9 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
         }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
             // keyboard column
             Column(Modifier.width(KeysW)) {
+                val lit = vm.activePitches(track)
                 for (p in TOP downTo BOTTOM) {
-                    Box(Modifier.fillMaxWidth().height(RowPx).background(if (isBlack(p)) Color(0xFF15171C) else Color(0xFFD9DCE2)).border(0.5.dp, Zk.line)
+                    Box(Modifier.fillMaxWidth().height(RowPx).background(if (p in lit) (if (isBlack(p)) track.color else track.color.copy(alpha = .75f)) else if (isBlack(p)) Color(0xFF15171C) else Color(0xFFD9DCE2)).border(0.5.dp, Zk.line)
                         .pointerInput(p) { detectTapGestures(onPress = { vm.liveNote(track, true, p); tryAwaitRelease(); vm.liveNote(track, false, p) }) },
                         contentAlignment = Alignment.CenterEnd) {
                         if (p % 12 == 0) Text("C${p / 12 - 1}", fontSize = 9.sp, color = Color(0xFF333843), modifier = Modifier.padding(end = 4.dp))
