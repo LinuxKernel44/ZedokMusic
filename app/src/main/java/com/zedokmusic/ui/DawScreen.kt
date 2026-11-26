@@ -23,6 +23,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.zedokmusic.model.*
+import com.zedokmusic.settings.AppSettings
 import com.zedokmusic.update.Updater
 
 private enum class Panel(val label: String) { Arrange("Tracks"), Piano("Piano"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
@@ -107,7 +108,15 @@ fun DawScreen(vm: DawViewModel) {
                 }
                 if (showKeys && !rollOpen) {
                     val t = if (sel?.kind == TrackKind.Instrument) sel else vm.tracks.firstOrNull { it.kind == TrackKind.Instrument }
-                    if (t != null) PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(if (short) 88.dp else if (wide) 150.dp else 130.dp))
+                    if (t != null) {
+                        val defaultH = if (short) 88 else if (wide) 150 else 130
+                        val maxH = (this@BoxWithConstraints.maxHeight.value * 0.7f).toInt().coerceAtLeast(120)
+                        val kh = (AppSettings.keysHeight.value.takeIf { it > 0 } ?: defaultH).coerceIn(70, maxH)
+                        var live by remember { mutableFloatStateOf(kh.toFloat()) }
+                        LaunchedEffect(kh) { live = kh.toFloat() }
+                        PianoKeyboard(octave, { octave = it }, t.color, { on, p -> vm.liveNote(t, on, p) }, Modifier.fillMaxWidth().height(kh.dp),
+                            onResize = { dy -> live = (live + dy).coerceIn(70f, maxH.toFloat()); AppSettings.keysHeight.set(live.toInt()) })
+                    }
                 }
             }
             if (vm.message != null) {

@@ -9,6 +9,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -27,7 +29,7 @@ private fun Modifier.press(onDown: () -> Unit, onUp: () -> Unit) = pointerInput(
 
 /** Two-octave on-screen piano; multi-touch works because every key tracks its own pointer. */
 @Composable
-fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote: (Boolean, Int) -> Unit, modifier: Modifier = Modifier) {
+fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote: (Boolean, Int) -> Unit, modifier: Modifier = Modifier, onResize: ((Float) -> Unit)? = null) {
     val base = (baseOctave + 1) * 12
     Column(modifier.background(Zk.panel)) {
         Row(Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -35,6 +37,15 @@ fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote
             LabelButton("−", w = 28.dp, h = 22.dp) { onOctave((baseOctave - 1).coerceAtLeast(0)) }
             Text("C$baseOctave – B${baseOctave + 1}", color = Zk.text, fontSize = 11.sp)
             LabelButton("+", w = 28.dp, h = 22.dp) { onOctave((baseOctave + 1).coerceAtMost(7)) }
+            // Handle: drag up to make the keyboard taller, down to make it shorter (the size is remembered).
+            if (onResize != null) {
+                val d = androidx.compose.ui.platform.LocalDensity.current
+                Box(Modifier.weight(1f).fillMaxHeight().pointerInput(Unit) {
+                    detectDragGestures { ch, drag -> ch.consume(); onResize(-drag.y / d.density) }
+                }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(72.dp).height(6.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(3.dp)).background(Zk.dim))
+                }
+            }
         }
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             val whiteW = maxWidth / 14; val blackW = whiteW * 0.62f

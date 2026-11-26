@@ -39,6 +39,8 @@ object AppSettings {
     val wineLog = b("plugin.winelog", false)
     val gpu = s("plugin.gpu", 0)                    // graphics for Direct3D plugin windows: 0 automatic (phone GPU when there is one), 1 phone GPU, 2 software
     val dxvk = b("plugin.dxvk", true)               // Direct3D 9-11 for plugin windows through DXVK (Vulkan)
+    // Height of the on-screen keyboard in dp (0 = the default for the screen); set by dragging its handle
+    val keysHeight = s("keys.height", 0)
     // Hybrid presets: the note played when a preset is chosen (0 = C4, 1 = C5, 2 = nothing)
     val presetPreviewNote = s("plugin.presetpreview", 0)
     // Sound browser (Tracks view): docked beside the tracks (1) or a drawer over them (0)
