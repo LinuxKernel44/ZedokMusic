@@ -127,6 +127,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private val pendingParams = HashMap<Int, List<Pair<String, Float>>>()
     private val pendingStates = HashMap<Int, Pair<String, Map<String, String>>>()   // preset name + extra state (sample path...) of built-in plugins
     // ---- view state, saved with the project: zoom (pixels per beat) and where each timeline is scrolled to ----
+    /** Height factor of the arrangement's track rows (pinch vertically to change it). */
+    var rowScale by mutableFloatStateOf(1f)
     private var ppbValue by mutableFloatStateOf(44f)
     var ppb: Float get() = ppbValue; set(v) { if (v != ppbValue) { ppbValue = v; viewDirty = true } }
     var arrangeX = 0; var arrangeY = 0; var rollX = 0; var rollY = -1   // -1: the piano roll's own default (around C5)
@@ -829,7 +831,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain)
             loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
             root.optJSONObject("view")?.let { v ->
-                ppbValue = v.optDouble("ppb", 44.0).toFloat().coerceIn(12f, 160f)
+                ppbValue = v.optDouble("ppb", 44.0).toFloat().coerceIn(ZOOM_MIN, ZOOM_MAX)
                 arrangeX = v.optInt("ax"); arrangeY = v.optInt("ay"); rollX = v.optInt("rx"); rollY = v.optInt("ry", -1)
             } ?: run { ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1 }
             viewRevision++
@@ -859,7 +861,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         dirty = false
     }
 
-    companion object { @Volatile var current: DawViewModel? = null }
+    companion object { @Volatile var current: DawViewModel? = null; const val ZOOM_MIN = 4f; const val ZOOM_MAX = 400f }
 
     override fun onCleared() { current = null; stopRecording(); midi.stop(); save(); host.stopAll(); e.pause(); e.stop() }
 }

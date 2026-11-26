@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -38,13 +40,15 @@ import kotlin.math.roundToInt
 
 private val RowHTall = 78.dp
 private val RowHShort = 62.dp
+private val LocalRowScale = compositionLocalOf { 1f }
+/** Height of an arrangement track row: the base height (denser on short windows) times the vertical zoom, never too small for its buttons. */
+@Composable private fun rowH(): androidx.compose.ui.unit.Dp = ((if (LocalShort.current) RowHShort else RowHTall) * LocalRowScale.current).coerceAtLeast(54.dp)
 private val HeaderW = 150.dp
 private val RulerH = 28.dp
 
 /** Arrangement: track headers on the left, a scrolling timeline on the right (beats on the x axis). */
 @Composable
 fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onEdit: (TrackM) -> Unit, onImport: (TrackM) -> Unit) {
-    val RowH = if (LocalShort.current) RowHShort else RowHTall
     val hs = rememberScrollState(vm.arrangeX); val vs = rememberScrollState(vm.arrangeY)
     // Remember where the timeline is scrolled (saved with the project); jump there when another project is opened.
     LaunchedEffect(Unit) { snapshotFlow { hs.value to vs.value }.collect { (x, y) -> vm.viewScrolled(x, y) } }
@@ -56,18 +60,48 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
     val ppb = pxPerBeat
     val totalBeats = remember(vm.tracks.size, vm.bpm) { maxOf(64f, (vm.tracks.maxOfOrNull { it.lengthBeats(vm.bpm) } ?: 0f) + 32f) }
     val totalW = (totalBeats * ppb).dp
+    // Pinch zoom: the beat under the fingers stays under them (the scroll position is corrected once the new width is laid out).
+    var anchor by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    LaunchedEffect(ppb) { anchor?.let { (beat, cx) -> hs.scrollTo((beat * ppb * density.density - cx).toInt().coerceAtLeast(0)); anchor = null } }
+    val ppbNow = rememberUpdatedState(ppb); val headerPx = with(density) { HeaderW.toPx() }
+    CompositionLocalProvider(LocalRowScale provides vm.rowScale) {
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(RulerH).background(Zk.panel)) {
             Row(Modifier.width(HeaderW).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                SquareButton(Glyph.Minus, size = 24.dp) { onZoom((ppb / 1.4f).coerceAtLeast(12f)) }
+                SquareButton(Glyph.Minus, size = 24.dp) { onZoom((ppb / 1.4f).coerceAtLeast(DawViewModel.ZOOM_MIN)) }
                 Spacer(Modifier.width(6.dp))
-                SquareButton(Glyph.Plus, size = 24.dp) { onZoom((ppb * 1.4f).coerceAtMost(160f)) }
+                SquareButton(Glyph.Plus, size = 24.dp) { onZoom((ppb * 1.4f).coerceAtMost(DawViewModel.ZOOM_MAX)) }
                 Spacer(Modifier.width(6.dp))
                 LabelButton("Follow", vm.followPlayhead, w = 50.dp, h = 24.dp) { vm.followPlayhead = !vm.followPlayhead }
             }
             Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) { Ruler(vm, totalBeats, ppb, totalW) }
         }
-        Row(Modifier.fillMaxSize().verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
+        Row(Modifier.fillMaxSize().pointerInput(Unit) {
+            // two fingers: apart/together horizontally = time zoom, vertically = track height
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                var prevX = 0f; var prevY = 0f; var pinching = false
+                var cur = ppbNow.value; var beat0 = 0f   // the zoom is tracked here (the state follows a frame later), and the beat under the fingers when the pinch began
+                do {
+                    val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    val pts = ev.changes.filter { it.pressed }
+                    if (pts.size >= 2) {
+                        val p0 = pts[0].position; val p1 = pts[1].position
+                        val sx = kotlin.math.abs(p0.x - p1.x); val sy = kotlin.math.abs(p0.y - p1.y); val cx = (p0.x + p1.x) / 2f - headerPx
+                        if (!pinching) beat0 = (hs.value + cx) / (cur * density.density)
+                        if (pinching) {
+                            if (sy > sx * 1.5f && prevY > 40f && sy > 40f) vm.rowScale = (vm.rowScale * sy / prevY).coerceIn(0.7f, 2.4f)
+                            else if (prevX > 40f && sx > 40f) {
+                                val nw = (cur * sx / prevX).coerceIn(DawViewModel.ZOOM_MIN, DawViewModel.ZOOM_MAX)
+                                if (nw != cur) { cur = nw; anchor = beat0 to cx; vm.ppb = nw }
+                            }
+                            ev.changes.forEach { it.consume() }
+                        }
+                        prevX = sx; prevY = sy; pinching = true
+                    } else pinching = false
+                } while (ev.changes.any { it.pressed })
+            }
+        }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
             Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint() }
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
                 Box(Modifier.width(totalW)) {
@@ -80,10 +114,11 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
             }
         }
     }
+    }  // CompositionLocalProvider
 }
 
 @Composable private fun EmptyHint() {
-    val RowH = if (LocalShort.current) RowHShort else RowHTall
+    val RowH = rowH()
     Box(Modifier.width(HeaderW).height(RowH), contentAlignment = Alignment.Center) { Text("Add a track with +", color = Zk.dim, fontSize = 12.sp) }
 }
 
@@ -106,7 +141,7 @@ private fun Ruler(vm: DawViewModel, totalBeats: Float, ppb: Float, totalW: andro
 
 @Composable
 private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit) {
-    val RowH = if (LocalShort.current) RowHShort else RowHTall
+    val RowH = rowH()
     val sel = vm.selected == t
     var menu by remember { mutableStateOf(false) }
     Box(Modifier.width(HeaderW).height(RowH).background(if (sel) Zk.panel2 else Zk.panel).border(0.5.dp, Zk.line).clickable { vm.selected = t }) {
@@ -137,7 +172,7 @@ private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit)
 
 @Composable
 private fun TimelineRow(vm: DawViewModel, t: TrackM, totalBeats: Float, ppb: Float, onEdit: (TrackM) -> Unit) {
-    val RowH = if (LocalShort.current) RowHShort else RowHTall
+    val RowH = rowH()
     val density = LocalDensity.current
     val sel = vm.selected == t
     Box(Modifier.height(RowH).fillMaxWidth().background(if (sel) Zk.panel2.copy(alpha = .55f) else Zk.bg).border(0.5.dp, Zk.line)) {
