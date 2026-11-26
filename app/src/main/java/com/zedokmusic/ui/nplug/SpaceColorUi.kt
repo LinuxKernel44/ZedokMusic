@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zedokmusic.ui.ScrollBottomPad
 import com.zedokmusic.ui.Zk
 
 private val SP = Color(0xFF8E7CFF)
@@ -25,7 +26,7 @@ private val CO2 = Color(0xFFFFA94D)
 
 @Composable
 private fun Scroll(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
 }
 
 @Composable

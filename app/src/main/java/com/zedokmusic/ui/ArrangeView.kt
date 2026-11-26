@@ -67,7 +67,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
             }
             Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) { Ruler(vm, totalBeats, ppb, totalW) }
         }
-        Row(Modifier.fillMaxSize().verticalScroll(vs)) {
+        Row(Modifier.fillMaxSize().verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
             Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint() }
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
                 Box(Modifier.width(totalW)) {

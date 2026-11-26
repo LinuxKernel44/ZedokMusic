@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zedokmusic.ui.ScrollBottomPad
 import com.zedokmusic.ui.Zk
 
 private val HY = Color(0xFF3DDCC4)
@@ -26,7 +27,7 @@ fun HybridScreen(ps: PluginState) {
     Column(Modifier.fillMaxSize()) {
         TabBar(listOf("Sound", "Filter", "Mod", "Matrix", "FX", "Arp"), tab, HY) { tab = it }
         val short = com.zedokmusic.ui.LocalShort.current
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (tab) {
                 0 -> { SoundTab(ps); if (short) PerformBar(ps) }
                 1 -> FilterTab(ps)

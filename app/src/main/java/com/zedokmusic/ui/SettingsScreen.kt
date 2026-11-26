@@ -64,14 +64,14 @@ fun SettingsScreen(vm: DawViewModel, onShowUpdate: () -> Unit, onClose: () -> Un
             }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 if (maxWidth >= 700.dp) Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.width(170.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(Modifier.width(170.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Section.values().forEach { s -> CategoryChip(s.label, s == section) { section = s } }
                     }
                     VerticalDivider(color = Zk.line)
-                    Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = ScrollBottomPad)) {
                         Box(Modifier.widthIn(max = 640.dp)) { Column { SectionContent(section, vm, onShowUpdate, onOpenDesktop, onOpenPlugin) } }
                     }
-                } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 4.dp)) {
+                } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = ScrollBottomPad)) {
                     Section.values().forEach { s -> Header(s.label); SectionContent(s, vm, onShowUpdate, onOpenDesktop, onOpenPlugin) }
                     Spacer(Modifier.height(24.dp))
                 }

@@ -96,7 +96,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 }
             }
         }
-        Row(Modifier.fillMaxSize().verticalScroll(vs)) {
+        // The bottom padding is part of the scrolled content: the lowest notes can be scrolled up away from the screen edge, where the system's gesture bar is.
+        Row(Modifier.fillMaxSize().verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
             // keyboard column
             Column(Modifier.width(KeysW)) {
                 for (p in TOP downTo BOTTOM) {
@@ -206,3 +207,6 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
 }
 
 @Composable private fun rememberStartScroll(): Int = with(LocalDensity.current) { (RowPx.toPx() * (TOP - 84)).toInt() }  // start around C6 -> C4 area
+
+/** Empty room kept below scrolling content so that the last rows are not under the thumb / the system navigation gesture. */
+val ScrollBottomPad = 120.dp

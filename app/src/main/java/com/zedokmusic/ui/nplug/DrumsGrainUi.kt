@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zedokmusic.ui.LabelButton
 import com.zedokmusic.ui.SamplePickerDialog
+import com.zedokmusic.ui.ScrollBottomPad
 import com.zedokmusic.ui.Zk
 
 private val DR = Color(0xFFFF9F43)
@@ -49,7 +50,7 @@ fun DrumsScreen(ps: PluginState) {
         val grid: @Composable (Modifier) -> Unit = { m -> PadGrid(ps, pad, light, m) { pad = it } }
         if (wide) Row(Modifier.fillMaxSize()) {
             grid(Modifier.weight(0.9f).fillMaxHeight().padding(6.dp))
-            Column(Modifier.weight(1.2f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { PadEditor(ps, pad); MasterSection(ps) }
+            Column(Modifier.weight(1.2f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) { PadEditor(ps, pad); MasterSection(ps) }
         } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             grid(Modifier.fillMaxWidth().padding(8.dp))
             Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { PadEditor(ps, pad); MasterSection(ps) }
@@ -111,7 +112,7 @@ fun GrainScreen(ps: PluginState) {
     if (picker) SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { picker = false }, { f -> vm.setPluginState(t, "sample", f.absolutePath); ps.setChoice("Source", 0); picker = false }, { picker = false })
     Column(Modifier.fillMaxSize()) {
         TabBar(listOf("Cloud", "Voice", "Sound", "Mod", "FX"), tab, GR) { tab = it }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (tab) {
                 0 -> Split({ Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     CloudView(ps)

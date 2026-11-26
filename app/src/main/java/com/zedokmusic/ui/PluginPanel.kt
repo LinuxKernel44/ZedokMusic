@@ -71,7 +71,7 @@ fun PluginPanel(vm: DawViewModel) {
         }
         OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search parameters") },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = if (short) 0.dp else 4.dp))
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 4.dp, bottom = ScrollBottomPad)) {
             items(shown, key = { it.index }) { p -> ParamRow(vm, t, p) }
         }
     }
@@ -85,7 +85,7 @@ fun GenericParams(vm: DawViewModel, t: TrackM) {
     val shown = remember(params, query) { params.filter { query.isBlank() || it.name.contains(query, true) } }
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search parameters") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp))
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) { items(shown, key = { it.index }) { p -> ParamRow(vm, t, p) } }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 4.dp, bottom = ScrollBottomPad)) { items(shown, key = { it.index }) { p -> ParamRow(vm, t, p) } }
     }
 }
 

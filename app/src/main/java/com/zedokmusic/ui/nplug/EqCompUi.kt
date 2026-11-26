@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zedokmusic.ui.ScrollBottomPad
 import com.zedokmusic.ui.Zk
 
 private val EQ = Color(0xFFFFC857)
@@ -30,7 +31,7 @@ fun EqCompScreen(ps: PluginState) {
     var band by remember { mutableIntStateOf(2) }
     Column(Modifier.fillMaxSize()) {
         TabBar(listOf("EQ", "Dynamics", "Main"), tab, EQ) { tab = it }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (tab) {
                 0 -> EqTab(ps, band) { band = it }
                 1 -> DynTab(ps)
