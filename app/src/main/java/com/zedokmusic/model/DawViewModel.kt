@@ -427,7 +427,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 val kids = d.listFiles() ?: return
                 for (f in kids) {
                     if (f.name.startsWith(".")) continue
-                    if (f.name.endsWith(".vst3", true)) {
+                    if (f.isFile && f.name.endsWith(".dll", true) && f.path.contains("vst", true)) found.add(f)   // VST2 plugins in a folder with "vst" in its path
+                    else if (f.name.endsWith(".vst3", true)) {
                         val dll = if (f.isFile) f else f.walkTopDown().maxDepth(4).firstOrNull { it.isFile && it.name.endsWith(".vst3", true) && it.path.contains("x86_64-win") }
                         if (dll != null) found.add(dll)
                     } else if (f.isDirectory && depth < 4 && !(depth == 0 && f.name == "Android") && (skip == null || runCatching { f.canonicalFile }.getOrNull() != skip)) walk(f, depth + 1)
@@ -439,6 +440,17 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }.start()
     }
 
+    /** 64-bit VST2 plugins are .dll files; every .dll of the usual plugin folders (and of the phone storage, in folders named vst...) is a candidate until a probe says whether it is a plugin. */
+    private fun dllCandidates(): List<File> {
+        val ws = workspace ?: return storagePlugins.filter { it.name.endsWith(".dll", true) }
+        val dirs = listOf("Plugins/VST2", "Plugins/VST3", "C/Program Files/VSTPlugins", "C/Program Files/Steinberg/VstPlugins", "C/Program Files/Common Files/VST2",
+            "C/Program Files/Common Files/Steinberg/VST2", "C/Program Files/Common Files/VST3").map { File(ws, it) }
+        val out = ArrayList<File>()
+        fun walk(d: File, depth: Int) { d.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { f -> if (f.isFile && f.name.endsWith(".dll", true)) out.add(f) else if (f.isDirectory && depth < 2 && !f.name.endsWith(".vst3", true)) walk(f, depth + 1) } }
+        dirs.forEach { if (it.isDirectory) walk(it, 0) }
+        out.addAll(storagePlugins.filter { it.name.endsWith(".dll", true) && out.none { o -> o.path == it.path } })
+        return out
+    }
     /** The plugins offered in the pickers: built-in ones and the Windows plugins found, with the type the user chose in the plugin manager (if any) and without the hidden ones. */
     fun scanPlugins(includeHidden: Boolean = false): List<PluginInfo> {
         val out = ArrayList<PluginInfo>(nativePlugins())
@@ -453,8 +465,16 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        for (dll in storagePlugins) {
+        for (dll in dllCandidates()) {
             if (out.any { it.path == dll.path }) continue
+            val detected = kindOfPath(dll.path)
+            if (detected == 0 || detected == 4) continue     // not checked yet (probeUnknown does it) or not a plugin at all
+            val ov = pluginOverride(dll.path); val hidden = isPluginHidden(dll.path)
+            if (hidden && !includeHidden) continue
+            out.add(PluginInfo(dll.nameWithoutExtension, dll.path, ov ?: detected, "", detected, ov != null, hidden))
+        }
+        for (dll in storagePlugins) {
+            if (dll.name.endsWith(".dll", true) || out.any { it.path == dll.path }) continue
             val name = (if (dll.path.contains("x86_64-win")) dll.parentFile?.parentFile?.parentFile?.name ?: dll.name else dll.name).removeSuffix(".vst3").replace(Regex("\\s*\\((x64|64-?bit)\\)$", RegexOption.IGNORE_CASE), "")
             val detected = kindOfPath(dll.path); val ov = pluginOverride(dll.path); val hidden = isPluginHidden(dll.path)
             if (hidden && !includeHidden) continue
@@ -492,7 +512,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private var kindCache: JSONObject? = null
     private fun kinds(): JSONObject = kindCache ?: (runCatching { JSONObject(kindFile.readText()) }.getOrNull() ?: JSONObject()).also { kindCache = it }
     private fun stamp(f: File) = "${f.length()}:${f.lastModified()}"
-    /** 0 = not checked yet, 1 instrument, 2 effect, 3 checked but the plugin does not say. Stale when the file changed. */
+    /** 0 = not checked yet, 1 instrument, 2 effect, 3 checked but the plugin does not say, 4 not a plugin (a .dll that is no VST2). Stale when the file changed. */
     fun kindOfPath(path: String): Int { val a = kinds().optJSONArray(path) ?: return 0; return if (a.optString(0) == stamp(File(path))) a.optInt(1) else 0 }
     private fun setKind(path: String, kind: Int) { kinds().put(path, JSONArray().put(stamp(File(path))).put(kind)); runCatching { kindFile.writeText(kinds().toString()) } }
     /** Bumped when plugin kinds become known, so open pickers re-list. */
@@ -507,11 +527,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var probing by mutableStateOf(false); private set
     /** Reads the type (instrument / effect) of plugins not seen before, one by one, without starting them. */
     fun probeUnknown(plugins: List<PluginInfo>) {
-        val todo = plugins.filter { it.kind == 0 && !it.manual && !PluginHost.isNative(it.path) }
+        val todo = plugins.filter { it.kind == 0 && !it.manual && !PluginHost.isNative(it.path) } +
+            dllCandidates().filter { d -> kindOfPath(d.path) == 0 && plugins.none { it.path == d.path } }.map { PluginInfo(it.nameWithoutExtension, it.path) }
         if (probing || todo.isEmpty()) return
         probing = true
         Thread {
-            try { for (p in todo) { val k = host.probe(p.path); setKind(p.path, if (k in 1..2) k else 3); pluginsVersion++ } }
+            try { for (p in todo) { val k = host.probe(p.path); setKind(p.path, if (k in 1..2) k else if (k < 0) 4 else 3); pluginsVersion++ } }
             finally { probing = false }
         }.start()
     }
@@ -836,6 +857,28 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }
         p.state.forEach { (k, x) -> sendPluginState(t, k, x); t.states[k] = x }
         t.presetName = p.name; t.presetKey = p.key
+        paramsRevision++; dirty = true
+    }
+    /** True when the user changed the current sound: a control differs from what the selected preset (or the defaults) gives, or something was loaded into the plugin (samples, a kit, ...). */
+    fun isTouched(t: TrackM): Boolean {
+        val preset = nativeId(t)?.let { id -> presetLibrary.all(id).firstOrNull { it.key == t.presetKey } }
+        for (pm in loadParams(t)) if (Math.abs(paramValue(t, pm.index) - (preset?.values?.get(pm.name) ?: pm.default)) > 1e-4f) return true
+        return t.states.any { (k, x) -> x.isNotBlank() && x != (preset?.state?.get(k) ?: "") }
+    }
+    /** "Init preset": every control back to its default and everything loaded in the plugin removed (samples, kit...). Files stay in the project folder. Sent in small batches (the engine's queue is short). */
+    fun initPlugin(t: TrackM) {
+        for (k in t.states.keys.toList()) sendPluginState(t, k, "")
+        t.states.clear(); t.presetName = ""; t.presetKey = ""; t.abStore[0] = null; t.abStore[1] = null; t.abSlot = 0
+        val params = loadParams(t)
+        viewModelScope.launch {
+            var sent = 0
+            for (p in params) {
+                if (Math.abs(paramValue(t, p.index) - p.default) < 1e-4f) { t.paramOverrides.remove(p.index); continue }
+                e.setParam(t.id, p.index, p.default); t.paramOverrides.remove(p.index)
+                if (++sent % 64 == 0) kotlinx.coroutines.delay(25)
+            }
+            paramsRevision++; dirty = true; message = "${t.pluginName.ifBlank { t.name }} reset to Init."
+        }
         paramsRevision++; dirty = true
     }
     /** The parameters that differ from their defaults, by name (what a user preset stores). */

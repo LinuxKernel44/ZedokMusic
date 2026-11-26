@@ -100,10 +100,16 @@ fun ProjectInfoDialog(vm: DawViewModel, onDismiss: () -> Unit) {
 fun PresetsDialog(vm: DawViewModel, t: TrackM, onDismiss: () -> Unit) {
     var list by remember { mutableStateOf(vm.presets(t)) }
     var naming by remember { mutableStateOf(false) }
+    var confirmInit by remember { mutableStateOf(false) }
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("${t.pluginName.ifBlank { t.name }} presets") }, text = {
         Column {
             Text("Stored in this project's Presets folder.", color = Zk.dim, fontSize = 12.sp)
             Spacer(Modifier.height(6.dp))
+            Column(Modifier.fillMaxWidth().clickable { if (vm.isTouched(t)) confirmInit = true else { vm.initPlugin(t); onDismiss() } }.padding(vertical = 8.dp)) {
+                Text("Init preset", color = Zk.accent, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text("Every control back to its default", color = Zk.dim, fontSize = 10.sp)
+            }
+            HorizontalDivider(color = Zk.line)
             if (list.isEmpty()) Text("No preset yet. Set the sound you like, then tap Save current.", color = Zk.dim, fontSize = 13.sp)
             else LazyColumn(Modifier.heightIn(max = dialogListMax(300.dp))) {
                 items(list, key = { it.absolutePath }) { f ->
@@ -117,5 +123,6 @@ fun PresetsDialog(vm: DawViewModel, t: TrackM, onDismiss: () -> Unit) {
             }
         }
     }, confirmButton = { TextButton({ naming = true }) { Text("Save current…") } }, dismissButton = { TextButton(onDismiss) { Text("Close") } })
+    if (confirmInit) com.zedokmusic.ui.nplug.InitConfirmDialog(vm, t) { confirmInit = false; onDismiss() }
     if (naming) NameDialog("Save preset", "", "Save", onConfirm = { if (vm.savePreset(t, it)) list = vm.presets(t) }, onDismiss = { naming = false })
 }

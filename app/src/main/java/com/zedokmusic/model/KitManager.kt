@@ -141,36 +141,71 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
     }
 
     // ------------------------------------------------------------------ sound browser: preview, favourites, load to a pad
-    /** What the sound browser shows: the audio files of a folder (or only the favourites when [root] is null). */
-    class BrowseState(val t: TrackM, val title: String, val root: KitNode?, val items: List<Pair<String, KitNode>>)
+    /** The sound browser: the drum kit library (the folder chosen in Settings, scanned once) or only the favourites. */
+    class BrowseState(val t: TrackM, val favoritesFirst: Boolean)
     var browse by mutableStateOf<BrowseState?>(null); private set
-    var browseLoading by mutableStateOf(false); private set
     var browseStatus by mutableStateOf(""); private set
     val preview = SamplePreview(ctx)
     private val prefs = ctx.getSharedPreferences("kits", Context.MODE_PRIVATE)
 
-    /** Opens the browser on a folder picked with the folder picker (read access is kept so the folder and its favourites are still there next time). */
-    fun browseTree(t: TrackM, uri: Uri) {
-        runCatching { ctx.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        prefs.edit().putString("lastTree", uri.toString()).apply()
-        val root = SafNode.tree(ctx, uri)
-        if (root == null) { vm.message = "That folder cannot be read." } else openBrowser(t, root)
-    }
-    /** The folder used last time, if it can still be read. */
-    fun lastTree(): Uri? = prefs.getString("lastTree", null)?.let { Uri.parse(it) }?.takeIf { u -> ctx.contentResolver.persistedUriPermissions.any { it.uri == u && it.isReadPermission } }
-    fun browseLast(t: TrackM): Boolean { val u = lastTree() ?: return false; browseTree(t, u); return true }
-    fun browseFavorites(t: TrackM) { browse = BrowseState(t, "Favourites", null, emptyList()) }
-    fun openBrowser(t: TrackM, root: KitNode) {
-        browseLoading = true; browseStatus = ""
-        browse = BrowseState(t, root.name.ifEmpty { "Sounds" }, root, emptyList())
+    // ---- the drum kit library: ONE folder, chosen in Settings, scanned once (the index is stored) and scanned again only when the folder is changed there
+    var libraryItems by mutableStateOf<List<Pair<String, KitNode>>>(emptyList()); private set
+    var libraryName by mutableStateOf(prefs.getString("libraryName", "") ?: ""); private set
+    var libraryScanning by mutableStateOf(false); private set
+    var libraryStatus by mutableStateOf(""); private set
+    fun libraryUri(): Uri? = prefs.getString("libraryUri", null)?.let { Uri.parse(it) }
+    private val indexFile get() = File(ctx.filesDir, "kit_library.json")
+
+    /** Loads the stored index at start (instant); scans when there is a folder but no usable index. */
+    fun loadLibrary() {
+        val uri = libraryUri() ?: return
         worker.execute {
-            val items = try { KitScanner.listAudio(root) } catch (e: Exception) { emptyList() }
-            ui { browseLoading = false; browse = BrowseState(t, root.name.ifEmpty { "Sounds" }, root, items); if (items.isEmpty()) browseStatus = "No audio files in this folder." }
+            val items = runCatching {
+                val o = JSONObject(indexFile.readText())
+                if (o.getString("uri") != uri.toString()) null
+                else o.getJSONArray("items").let { a -> (0 until a.length()).map { i -> a.getJSONArray(i).let { x -> x.getString(0) to RefNode(ctx, x.getString(1), x.getString(2)) as KitNode } } }
+            }.getOrNull()
+            if (items != null) ui { libraryItems = items; libraryStatus = "${items.size} sounds" } else ui { rescanLibrary() }
         }
     }
+    /** Called from Settings when the user picks the folder: remembered, access kept, and scanned (again). */
+    fun setLibrary(uri: Uri) {
+        runCatching { ctx.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        val old = libraryUri(); if (old != null && old != uri) runCatching { ctx.contentResolver.releasePersistableUriPermission(old, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        val name = SafNode.tree(ctx, uri)?.name ?: "Drum kits"
+        prefs.edit().putString("libraryUri", uri.toString()).putString("libraryName", name).apply()
+        libraryName = name; libraryItems = emptyList(); rescanLibrary()
+    }
+    fun forgetLibrary() {
+        libraryUri()?.let { runCatching { ctx.contentResolver.releasePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
+        prefs.edit().remove("libraryUri").remove("libraryName").apply(); runCatching { indexFile.delete() }
+        libraryName = ""; libraryItems = emptyList(); libraryStatus = ""; closeBrowser()
+    }
+    fun rescanLibrary() {
+        val uri = libraryUri() ?: return
+        if (libraryScanning) return
+        libraryScanning = true; libraryStatus = "Scanning…"
+        worker.execute {
+            try {
+                val root = SafNode.tree(ctx, uri) ?: throw IllegalStateException("the folder cannot be read")
+                val found = KitScanner.listAudio(root).map { (p, n) -> p to RefNode(ctx, n.name, n.ref) as KitNode }
+                val arr = JSONArray(); found.forEach { (p, n) -> arr.put(JSONArray().put(p).put(n.name).put(n.ref)) }
+                runCatching { indexFile.writeText(JSONObject().put("uri", uri.toString()).put("items", arr).toString()) }
+                ui { libraryItems = found; libraryStatus = "${found.size} sounds"; libraryScanning = false }
+            } catch (e: Exception) { ui { libraryStatus = "Could not scan the folder: ${e.message}"; libraryScanning = false } }
+        }
+    }
+
+    /** True when the library can be browsed; false when no folder was chosen yet (the UI tells the user to choose it in Settings). */
+    fun openLibrary(t: TrackM): Boolean { if (libraryUri() == null) return false; browseStatus = ""; browse = BrowseState(t, false); return true }
+    fun browseFavorites(t: TrackM) { browseStatus = ""; browse = BrowseState(t, true) }
     fun closeBrowser() { preview.stop(); browse = null; browseStatus = "" }
     /** Imports the whole browsed folder as a kit (the one-shot / multikit / SFZ detection of Load kit). */
-    fun importBrowsed() { val b = browse ?: return; val r = b.root ?: return; closeBrowser(); scan(b.t, r) }
+    fun importBrowsed(folder: String) {
+        val b = browse ?: return; val uri = libraryUri() ?: return
+        val root = SafNode.tree(ctx, uri) ?: return
+        closeBrowser(); scan(b.t, if (folder.isEmpty()) root else KitScanner.resolve(root, folder) ?: root)
+    }
     fun loadToPad(pad: Int, nodes: List<KitNode>, append: Boolean, done: () -> Unit) {
         val b = browse ?: return
         browseStatus = "Copying ${nodes.size} sound${if (nodes.size > 1) "s" else ""} into the project…"
@@ -191,7 +226,7 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
         runCatching { favFile?.let { f -> f.parentFile?.mkdirs(); f.writeText(JSONArray().also { a -> favorites.forEach { a.put(JSONObject().put("ref", it.ref).put("name", it.name).put("folder", it.folder)) } }.toString()) } }
     }
     /** The favourites as browser rows (files that moved or lost their access are left out). */
-    fun favoriteItems(): List<Pair<String, KitNode>> = favorites.mapNotNull { f -> SafNode.fromRef(ctx, f.ref)?.let { n -> (if (f.folder.isNotEmpty()) f.folder + "/" else "") + f.name to n } }
+    fun favoriteItems(): List<Pair<String, KitNode>> = favorites.map { f -> (if (f.folder.isNotEmpty()) f.folder + "/" else "") + f.name to (RefNode(ctx, f.name, f.ref) as KitNode) }
 
     // ------------------------------------------------------------------ pad state helpers
     fun zones(t: TrackM, pad: Int): List<KitMapper.Zone> = KitMapper.parseZoneText(t.states["pad${pad + 1}"] ?: "")
@@ -244,6 +279,8 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
         }
     }
     fun deleteProjectKit(dir: File) { runCatching { dir.deleteRecursively() }; revision++ }
+
+    init { loadLibrary() }   // last: it uses the properties declared above
 }
 
 /** Plays a sound for the browser's preview (Android's own player: it works with any file the folder picker gives access to). */

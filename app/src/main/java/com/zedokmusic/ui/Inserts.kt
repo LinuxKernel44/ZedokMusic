@@ -62,7 +62,7 @@ fun EffectPickerDialog(vm: DawViewModel, owner: TrackM?, onInstall: () -> Unit, 
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Add effect · " + (owner?.name ?: "Master")) }, text = {
         Column {
             if (vm.probing) Text("Checking which plugins are effects…", color = Zk.accent, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
-            if (effects.isEmpty()) Text("No effect plugin found.\n\nInstall one with Install .exe, or copy its .vst3 into:\n${vm.pluginDir()?.path ?: ""}", color = Zk.dim, fontSize = 13.sp)
+            if (effects.isEmpty()) Text("No effect plugin found.\n\nInstall one with Install .exe, or copy its .vst3 or VST2 .dll into:\n${vm.pluginDir()?.path ?: ""}", color = Zk.dim, fontSize = 13.sp)
             else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
                 val own = effects.filter { it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
                 if (own.isNotEmpty()) item { Text("ZEDOK", color = Zk.accent, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 4.dp)) }

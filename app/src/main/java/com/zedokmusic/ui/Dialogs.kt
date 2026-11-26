@@ -20,7 +20,7 @@ fun PluginPickerDialog(plugins: List<PluginInfo>, folder: String, onRescan: () -
         title = { Text("Add instrument") },
         text = {
             Column {
-                if (plugins.isEmpty()) Text("No plugins found.\n\nCopy your Windows .vst3 files into:\n$folder\n\nthen tap Rescan.\n\nOr use Add → Install plugin (.exe) to run the plugin's Windows installer.", color = Zk.dim, fontSize = 13.sp)
+                if (plugins.isEmpty()) Text("No plugins found.\n\nCopy your Windows plugins (.vst3, or 64-bit VST2 .dll) into:\n$folder\n\nthen tap Rescan.\n\nOr use Add → Install plugin (.exe) to run the plugin's Windows installer.", color = Zk.dim, fontSize = 13.sp)
                 else LazyColumn(Modifier.heightIn(max = dialogListMax(320.dp))) {
                     val own = plugins.filter { it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
                     if (own.isNotEmpty()) item { Text("ZEDOK", color = Zk.accent, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 4.dp)) }

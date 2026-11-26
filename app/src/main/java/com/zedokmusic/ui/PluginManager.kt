@@ -30,6 +30,7 @@ private fun kindLabel(k: Int) = when (k) { 1 -> "instrument"; 2 -> "effect"; els
 @Composable
 fun PluginManagerDialog(vm: DawViewModel, onDismiss: () -> Unit) {
     val list = remember(vm.pluginsVersion) { vm.scanPlugins(includeHidden = true) }
+    LaunchedEffect(Unit) { vm.probeUnknown(vm.scanPlugins()) }
     val builtIn = list.filter { it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
     val windows = list.filter { !it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -44,7 +45,7 @@ fun PluginManagerDialog(vm: DawViewModel, onDismiss: () -> Unit) {
             Text("A plugin that was seen as the wrong kind (an effect listed as an instrument, for example) can be set here. Tracks and effects you already created keep working; the choice applies to the lists you pick plugins from.", color = Zk.dim, fontSize = 12.sp)
             Spacer(Modifier.height(8.dp))
             LazyColumn(Modifier.fillMaxSize()) {
-                if (windows.isEmpty()) item { Text("No Windows plugin found yet. Install one (Add → Install plugin) or copy its .vst3 into ${vm.pluginDir()?.path ?: "the Plugins folder"}.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp)) }
+                if (windows.isEmpty()) item { Text("No Windows plugin found yet. Install one (Add → Install plugin) or copy its .vst3 or VST2 .dll into ${vm.pluginDir()?.path ?: "the Plugins folder"}.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp)) }
                 items(windows, key = { it.path }) { p -> PluginRow(vm, p); HorizontalDivider(color = Zk.line) }
                 if (builtIn.isNotEmpty()) {
                     item { Text("BUILT-IN (ZEDOK)", color = Zk.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)) }

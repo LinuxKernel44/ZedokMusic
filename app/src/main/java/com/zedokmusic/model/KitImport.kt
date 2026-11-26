@@ -40,6 +40,15 @@ class SafNode(private val ctx: Context, private val doc: DocumentFile) : KitNode
     }
 }
 
+/** A file known only by its name and [ref] (a document URI or a path): what the library index and the favourites hold, without asking the file provider anything until the file is used. */
+class RefNode(private val ctx: Context, override val name: String, override val ref: String) : KitNode {
+    override val isDir get() = false
+    override fun children(): List<KitNode> = emptyList()
+    override fun open(): InputStream? = runCatching { if (ref.startsWith("content:")) ctx.contentResolver.openInputStream(Uri.parse(ref)) else File(ref).inputStream() }.getOrNull()
+    override fun feed(ex: MediaExtractor) { if (ref.startsWith("content:")) ex.setDataSource(ctx, Uri.parse(ref), null) else ex.setDataSource(ref) }
+    override fun feed(p: MediaPlayer) { if (ref.startsWith("content:")) p.setDataSource(ctx, Uri.parse(ref)) else p.setDataSource(ref) }
+}
+
 class FileNode(private val f: File) : KitNode {
     override val name get() = f.name
     override val isDir get() = f.isDirectory

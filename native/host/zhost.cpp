@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 #include "bridge.h"
@@ -175,6 +177,55 @@ int fail(ZkBridge* b, uint32_t code, const char* msg) {
 }
 }
 
+// The block loop shared by every plugin format: waits for the engine's request, calls [block] (which copies the input in, renders and copies
+// the output out) and acknowledges. The engine submits one block per audio callback and only needs the result one callback later, so the host
+// sleeps through most of the interval and spins only around the predicted arrival (a pure spin kept a core at 100%).
+static void serve(ZkBridge* B, int frames, double rate, int nIn, const std::function<void(int, int, int)>& block) {
+    // The engine submits one block per audio callback (every `frames/rate` seconds) and only needs the result one callback later,
+    // so the host sleeps through most of the interval and spins only around the predicted arrival (a pure spin kept a core at 100%).
+    typedef LONG (NTAPI* NtDelayFn)(BOOLEAN, PLARGE_INTEGER);
+    NtDelayFn ntDelay = (NtDelayFn)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtDelayExecution");
+    auto sleepTicks = [&](LONGLONG ticks, LONGLONG freq) {  // sub-millisecond sleep (Sleep(1) would be too coarse)
+        LARGE_INTEGER li; li.QuadPart = -(ticks * 10000000LL / freq); if (li.QuadPart > -100) li.QuadPart = -100;
+        if (ntDelay) ntDelay(FALSE, &li); else Sleep(1);
+    };
+    uint32_t last = B->req_seq;
+    LARGE_INTEGER qf, lastWork, nowT; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&lastWork);
+    const LONGLONG idleTicks = qf.QuadPart / 20;                         // no block for 50 ms: engine paused/stopped -> plain sleeping
+    const LONGLONG nominal = (LONGLONG)(qf.QuadPart * (double)frames / rate);
+    bool regular = false;                                                // true while requests arrive at the audio callback cadence
+    LONGLONG period = nominal, lastReq = lastWork.QuadPart;              // observed request interval, time of the last request
+    LONGLONG margin = qf.QuadPart * 35 / 100000;                         // wake this long before the predicted arrival (adapts)
+    const LONGLONG marginMin = qf.QuadPart * 2 / 10000, marginMax = qf.QuadPart * 15 / 10000;
+    while (!B->quit) {
+        uint32_t r = B->req_seq;
+        if (r == last) {
+            QueryPerformanceCounter(&nowT);
+            if (nowT.QuadPart - lastWork.QuadPart > idleTicks) { Sleep(1); continue; }
+            const LONGLONG untilNext = period - (nowT.QuadPart - lastReq);
+            if (regular && untilNext > margin + qf.QuadPart / 20000) sleepTicks(untilNext - margin, qf.QuadPart);
+            else for (int i = 0; i < 256 && B->req_seq == last; i++) _mm_pause();
+            continue;
+        }
+        QueryPerformanceCounter(&nowT);
+        const LONGLONG iv = nowT.QuadPart - lastReq;
+        if (iv > nominal / 2 && iv < nominal * 3) {                      // regular cadence: learn it and check how late we woke up
+            period = (period * 15 + iv) / 16;
+            if (iv - period > qf.QuadPart * 3 / 10000) margin = std::min(marginMax, margin + qf.QuadPart / 10000);
+            else margin = std::max(marginMin, margin - qf.QuadPart / 200000);
+            regular = true;
+        } else { period = nominal; regular = false; }  // bursts (offline render) or a restart: stay on the spin path
+        lastReq = nowT.QuadPart; lastWork = nowT;
+        const int n = (int)std::min<uint32_t>(B->frames, (uint32_t)frames);
+        const int nev = (int)std::min<uint32_t>(B->n_events, ZK_MAX_EVENTS);
+        const int nch = (int)std::min<uint32_t>(B->n_changes, ZK_MAX_PARAM_CHANGES);
+        block(n, nev, nch);
+        last = r; InterlockedExchange((volatile LONG*)&B->ack_seq, (LONG)r);
+    }
+}
+
+#include "vst2.h"
+
 // 1 = instrument, 2 = effect, 0 = unknown, from the class's VST3 sub-categories ("Instrument|Synth", "Fx|Reverb"...).
 static int kindOf(const char* sub) {
     if (!sub || !*sub) return 0;
@@ -187,9 +238,11 @@ static int kindOf(const char* sub) {
 // "<kind>\t<name>" (see kindOf) so the app can tell instruments from effects without starting the plugin.
 static int probe(const char* path, const char* outFile) {
     HMODULE m = LoadLibraryA(path); int kind = 0; char name[64] = "";
+    if (!m) { FILE* f0 = fopen(outFile, "w"); if (f0) { fprintf(f0, "-1\t\n"); fclose(f0); } return 0; }
     if (m) {
         typedef bool (*InitFn)(); if (auto init = (InitFn)GetProcAddress(m, "InitDll")) init();
         typedef IPluginFactory* (*FactoryFn)(); auto gf = (FactoryFn)GetProcAddress(m, "GetPluginFactory");
+        if (!gf) return vst2::probe(m, outFile);
         if (gf) if (IPluginFactory* fac = gf()) {
             IPluginFactory2* f2 = nullptr; fac->queryInterface(IPluginFactory2::iid, (void**)&f2);
             for (int i = 0; i < fac->countClasses(); i++) {
@@ -221,8 +274,9 @@ static int editPlugin(const char* path) {
     if (!m) { MessageBoxA(nullptr, "The plugin could not be loaded.", "ZedokMusic", MB_OK); return 20; }
     typedef bool (*InitFn)(); if (auto init = (InitFn)GetProcAddress(m, "InitDll")) init();
     typedef IPluginFactory* (*FactoryFn)(); auto gf = (FactoryFn)GetProcAddress(m, "GetPluginFactory");
-    IPluginFactory* fac = gf ? gf() : nullptr;
-    if (!fac) { MessageBoxA(nullptr, "This is not a VST3 plugin.", "ZedokMusic", MB_OK); return 21; }
+    if (!gf) return vst2::edit(m);
+    IPluginFactory* fac = gf();
+    if (!fac) { MessageBoxA(nullptr, "This is not a VST plugin.", "ZedokMusic", MB_OK); return 21; }
     TUID cid = {}; char name[64] = "Plugin"; bool found = false;
     for (int i = 0; i < fac->countClasses() && !found; i++) { PClassInfo ci; fac->getClassInfo(i, &ci); if (!strcmp(ci.category, kVstAudioEffectClass)) { memcpy(cid, ci.cid, 16); snprintf(name, sizeof name, "%s", ci.name); found = true; } }
     if (!found) { MessageBoxA(nullptr, "No audio plugin found in this file.", "ZedokMusic", MB_OK); return 22; }
@@ -271,7 +325,7 @@ int main(int argc, char** argv) {
     if (!m) return fail(B, 20, "LoadLibrary failed");
     typedef bool (*InitFn)(); if (auto init = (InitFn)GetProcAddress(m, "InitDll")) init();
     typedef IPluginFactory* (*FactoryFn)(); auto gf = (FactoryFn)GetProcAddress(m, "GetPluginFactory");
-    if (!gf) return fail(B, 21, "no GetPluginFactory (not a VST3?)");
+    if (!gf) return vst2::run(B, m, frames, rate);
     IPluginFactory* fac = gf();
     TUID cid = {}; bool found = false; char name[64] = "";
     for (int i = 0; i < fac->countClasses(); i++) {
@@ -370,50 +424,11 @@ int main(int argc, char** argv) {
     InterlockedExchange((volatile LONG*)&B->host_state, ZK_HOST_READY);
     if (ctrl) CreateThread(nullptr, 0, guiThread, nullptr, 0, nullptr);
 
-    // --- main loop ---
-    // The engine submits one block per audio callback (every `frames/rate` seconds) and only needs the result one callback later,
-    // so the host sleeps through most of the interval and spins only around the predicted arrival (a pure spin kept a core at 100%).
-    typedef LONG (NTAPI* NtDelayFn)(BOOLEAN, PLARGE_INTEGER);
-    NtDelayFn ntDelay = (NtDelayFn)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtDelayExecution");
-    auto sleepTicks = [&](LONGLONG ticks, LONGLONG freq) {  // sub-millisecond sleep (Sleep(1) would be too coarse)
-        LARGE_INTEGER li; li.QuadPart = -(ticks * 10000000LL / freq); if (li.QuadPart > -100) li.QuadPart = -100;
-        if (ntDelay) ntDelay(FALSE, &li); else Sleep(1);
-    };
-    uint32_t last = B->req_seq;
-    LARGE_INTEGER qf, lastWork, nowT; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&lastWork);
-    const LONGLONG idleTicks = qf.QuadPart / 20;                         // no block for 50 ms: engine paused/stopped -> plain sleeping
-    const LONGLONG nominal = (LONGLONG)(qf.QuadPart * (double)frames / rate);
-    bool regular = false;                                                // true while requests arrive at the audio callback cadence
-    LONGLONG period = nominal, lastReq = lastWork.QuadPart;              // observed request interval, time of the last request
-    LONGLONG margin = qf.QuadPart * 35 / 100000;                         // wake this long before the predicted arrival (adapts)
-    const LONGLONG marginMin = qf.QuadPart * 2 / 10000, marginMax = qf.QuadPart * 15 / 10000;
-    while (!B->quit) {
-        uint32_t r = B->req_seq;
-        if (r == last) {
-            QueryPerformanceCounter(&nowT);
-            if (nowT.QuadPart - lastWork.QuadPart > idleTicks) { Sleep(1); continue; }
-            const LONGLONG untilNext = period - (nowT.QuadPart - lastReq);
-            if (regular && untilNext > margin + qf.QuadPart / 20000) sleepTicks(untilNext - margin, qf.QuadPart);
-            else for (int i = 0; i < 256 && B->req_seq == last; i++) _mm_pause();
-            continue;
-        }
-        QueryPerformanceCounter(&nowT);
-        const LONGLONG iv = nowT.QuadPart - lastReq;
-        if (iv > nominal / 2 && iv < nominal * 3) {                      // regular cadence: learn it and check how late we woke up
-            period = (period * 15 + iv) / 16;
-            if (iv - period > qf.QuadPart * 3 / 10000) margin = std::min(marginMax, margin + qf.QuadPart / 10000);
-            else margin = std::max(marginMin, margin - qf.QuadPart / 200000);
-            regular = true;
-        } else { period = nominal; regular = false; }  // bursts (offline render) or a restart: stay on the spin path
-        lastReq = nowT.QuadPart; lastWork = nowT;
-        const int n = (int)std::min<uint32_t>(B->frames, (uint32_t)frames);
-        const int nev = (int)std::min<uint32_t>(B->n_events, ZK_MAX_EVENTS);
+    serve(B, frames, rate, nIn, [&](int n, int nev, int nch) {
         if (nIn) { memcpy(inL.data(), B->in[0], n * 4); memcpy(inR.data(), B->in[1], n * 4); }
-        const int nch = (int)std::min<uint32_t>(B->n_changes, ZK_MAX_PARAM_CHANGES);
         render(n, B->events, nev, B->changes, nch);
         memcpy(B->out[0], oL.data(), n * 4); memcpy(B->out[1], oR.data(), n * 4);
-        last = r; InterlockedExchange((volatile LONG*)&B->ack_seq, (LONG)r);
-    }
+    });
     proc->setProcessing(false); comp->setActive(false); comp->terminate();
     return 0;
 }

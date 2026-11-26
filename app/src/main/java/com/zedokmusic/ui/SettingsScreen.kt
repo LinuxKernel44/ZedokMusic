@@ -254,6 +254,19 @@ private fun fmt(b: Long) = if (b >= 1L shl 30) "%.1f GB".format(b / 1073741824.0
                 .map { (label, dir) -> label to dirSize(File(ws, dir)) }
         }
     }
+    val kits = vm.kits
+    val pickKits = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) kits.setLibrary(uri) }
+    Row2("Drum kit folder", "The one folder that holds all your drum kits and samples. It is scanned once and remembered; the drum sound browser always shows it. Choosing another folder here scans it again.") {
+        androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.End) {
+            OutlinedButton({ pickKits.launch(kits.libraryUri()) }) { Text(if (kits.libraryName.isEmpty()) "Choose…" else "Change…", fontSize = 13.sp) }
+        }
+    }
+    if (kits.libraryName.isNotEmpty()) {
+        InfoRow("Current folder", kits.libraryName)
+        InfoRow("Scan", if (kits.libraryScanning) "Scanning…" else kits.libraryStatus)
+        ActionRow("Rescan the drum kit folder", "Only needed after you added or removed sounds in that folder.", "Rescan", enabled = !kits.libraryScanning) { kits.rescanLibrary() }
+        ActionRow("Forget the drum kit folder", "Stops using it (no file is deleted).", "Forget", danger = true) { kits.forgetLibrary() }
+    }
     InfoRow("Workspace folder", ws?.path ?: "not set")
     sizes?.forEach { (l, b) -> InfoRow(l, fmt(b)) } ?: Text("Measuring…", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
     ActionRow("Delete exported files", "Empties the Exports folder.", "Delete…", danger = true) { confirm = "Exports" }

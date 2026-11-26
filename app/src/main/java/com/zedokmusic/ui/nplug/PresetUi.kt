@@ -82,6 +82,7 @@ fun PresetBrowser(vm: DawViewModel, t: TrackM, id: String, color: Color, revisio
                 when (filter) { "All" -> true; "★" -> favs.contains(p.key); "User" -> !p.factory; else -> p.category == filter }
         }
     }
+    var confirmInit by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<Preset?>(null) }
     var renaming by remember { mutableStateOf<Preset?>(null) }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -115,6 +116,15 @@ fun PresetBrowser(vm: DawViewModel, t: TrackM, id: String, color: Color, revisio
             Column(m) {
                 Text("${shown.size} presets", color = Zk.dim, fontSize = 11.sp)
                 LazyColumn(Modifier.fillMaxSize(), state) {
+                    item(key = "init") {
+                        Row(Modifier.fillMaxWidth().clickable { requestInit(vm, t) { confirmInit = true } }.padding(vertical = if (short) 5.dp else 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Init preset", color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("Every control back to its default, nothing loaded", color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        HorizontalDivider(color = Zk.line)
+                    }
                     items(shown, key = { it.key }) { p ->
                         val cur = p.key == t.presetKey
                         Row(Modifier.fillMaxWidth().background(if (cur) color.copy(alpha = .14f) else Color.Transparent).clickable { vm.applyPreset(t, p) }.padding(vertical = if (short) 5.dp else 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -145,6 +155,7 @@ fun PresetBrowser(vm: DawViewModel, t: TrackM, id: String, color: Color, revisio
             Spacer(Modifier.height(6.dp))
             presetList(Modifier.fillMaxSize())
         }
+        if (confirmInit) InitConfirmDialog(vm, t, { confirmInit = false })
         menu?.let { p ->
             AlertDialog(onDismissRequest = { menu = null }, containerColor = Zk.panel, title = { Text(p.name) }, text = {
                 Column {
@@ -189,4 +200,15 @@ fun SavePresetDialog(vm: DawViewModel, t: TrackM, id: String, onSaved: () -> Uni
             if (p == null) vm.message = "Give the preset a name." else { t.presetName = p.name; t.presetKey = p.key; vm.message = "Saved \"${p.name}\"."; onSaved() }
         }, enabled = name.isNotBlank()) { Text("Save") }
     }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+}
+
+/** "Init preset": resets at once when the sound was not touched, otherwise [ask] is called to show the confirmation. */
+fun requestInit(vm: DawViewModel, t: TrackM, ask: () -> Unit) { if (vm.isTouched(t)) ask() else vm.initPlugin(t) }
+
+/** The clear message shown before Init throws away what the user did to the current sound. */
+@Composable
+fun InitConfirmDialog(vm: DawViewModel, t: TrackM, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Reset to Init?") }, text = {
+        Text("You changed this sound (a knob turned, a sound or sample added…).\n\nInit puts every control back to its default and removes everything loaded in ${t.pluginName.ifBlank { t.name }}, such as the samples on the drum pads. The audio files stay in your project folder.\n\nThis cannot be undone. Save the sound as a preset first if you want to keep it.", color = Zk.dim, fontSize = 13.sp)
+    }, confirmButton = { TextButton({ vm.initPlugin(t); onDismiss() }) { Text("Reset to Init", color = Zk.danger) } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }

@@ -19,7 +19,8 @@ A native plugin is a `PluginBridge` whose "host" is a `zdsp::Processor`: the bri
 
 Besides its synthesized sounds, each pad of Zedok Drums can play samples (sound type **Sample**).
 
-* **Sound browser.** Load kit… (Android folder picker, Storage Access Framework) and Load to pad N… open a browser on the folder: every audio file in it (subfolders included) with a ▶ preview button, a ★ favourite star and a search box. Tap rows to select, then **Load to pad N** (replaces the pad) or **Add to pad N** (adds round robins / layers); the pad number steps forward after each load. The **Favourites** tab lists the starred sounds of every folder (kept in `<workspace>/Presets/sample_favorites.json`, shared by all projects); the folder last used is remembered. Chosen files are copied into the project like a kit.
+* **Drum kit folder.** Chosen once in Settings → Storage → Drum kit folder (Android folder picker, Storage Access Framework); the app keeps read access and scans it one time (the index is stored in the app and loaded at start). It is scanned again only when you choose another folder there or tap Rescan. Nothing else ever asks for a folder.
+* **Sound browser.** Load kit… and Load to pad N… open a browser on that folder (a Folders menu narrows it to a sub-folder; Import as kit then imports that sub-folder as a whole kit): every audio file in it (subfolders included) with a ▶ preview button, a ★ favourite star and a search box. Tap rows to select, then **Load to pad N** (replaces the pad) or **Add to pad N** (adds round robins / layers); the pad number steps forward after each load. The **Favourites** tab lists the starred sounds (kept in `<workspace>/Presets/sample_favorites.json`, shared by all projects). Chosen files are copied into the project like a kit.
 * **Import as kit** (in the browser) detects what the folder is. The folder can be a flat pack of one-shots (also when sorted into Kicks/Snares/... folders), a **multikit** (a folder of kit folders: you choose which one), or hold **SFZ** instruments (key and velocity ranges, round robins).
 * Files are laid out on the 16 pads from their names (kick, snare, clap, rim, closed/open hat, toms, cymbals, percussion). Velocity layers (`_v1`, `_soft`, `_hard`...) split the velocity range; files sharing a range (round robins, `_rr2`, trailing numbers) play in turn. Mapping logic: `model/KitMapper.kt` (unit tested).
 * **Every file the kit uses is copied into the project**: `Projects/<name>/Kits/<kit>/...` plus `kit.zkit` (the pad layout). WAVs the engine reads (PCM 16/24/32, float32, mono/stereo) are copied as they are; mp3, flac, ogg, aiff, m4a and other formats are decoded to WAV with Android's MediaCodec. The project therefore does not depend on the original folder; Save as and Rename carry the kits along, and the pad states hold project-relative paths.
@@ -39,3 +40,11 @@ Besides its synthesized sounds, each pad of Zedok Drums can play samples (sound 
 Measured on a Galaxy S10 (one core, 5 s renders): Hybrid with 6 notes, unison 8 on both oscillators, ladder filter and all effects 10 %; Grain with 6 notes at 200 grains/s 19 %; Drums 4 %; Space, EQ + Comp and Color 3 % each.
 
 Not covered by tests: how the presets sound. They were designed from sound-design knowledge and verified by measurement only.
+
+## Init preset
+
+Every preset browser starts with **Init preset**: all controls return to their defaults and everything loaded in the plugin is removed (samples and kits on the drum pads, the grain source...). If the sound was changed since it was selected (a control moved, something loaded), a confirmation explains what will be lost. For Windows plugins it is the first entry of the Presets list (controls only).
+
+## VST2 hosting
+
+`native/host/vst2.h` holds the VST2 side of `zhost.exe` (plugin binary interface structures written for this project, host callbacks, editor window, MIDI events). `native/testfx/build-vst2test.sh` builds two tiny VST2 test plugins (synth, effect).
