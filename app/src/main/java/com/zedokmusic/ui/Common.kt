@@ -92,7 +92,20 @@ fun beatLabel(beat: Float): String {
 @Composable
 fun screenInsets(): androidx.compose.foundation.layout.WindowInsets {
     val bars = androidx.compose.foundation.layout.WindowInsets.systemBars
-    return if (com.zedokmusic.settings.AppSettings.ignoreCutout.on) bars else bars.union(androidx.compose.foundation.layout.WindowInsets.displayCutout)
+    val base = if (com.zedokmusic.settings.AppSettings.ignoreCutout.on) bars else bars.union(androidx.compose.foundation.layout.WindowInsets.displayCutout)
+    // Rounded screen corners cut the edges of the top bar and the sides: keep a margin there (automatic from the phone's corner radius, or chosen in Settings -> Display).
+    val view = androidx.compose.ui.platform.LocalView.current; val density = androidx.compose.ui.platform.LocalDensity.current
+    val setting = com.zedokmusic.settings.AppSettings.cornerMargin.value
+    val margin = when (setting) {
+        1 -> 0.dp; 2 -> 12.dp; 3 -> 24.dp; 4 -> 36.dp
+        else -> if (android.os.Build.VERSION.SDK_INT >= 31) {
+            val ins = view.rootWindowInsets
+            val r = listOf(android.view.RoundedCorner.POSITION_TOP_LEFT, android.view.RoundedCorner.POSITION_TOP_RIGHT, android.view.RoundedCorner.POSITION_BOTTOM_LEFT, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT)
+                .maxOf { ins?.getRoundedCorner(it)?.radius ?: 0 }
+            with(density) { (r * 0.6f).toDp() }
+        } else 0.dp
+    }
+    return if (margin > 0.dp) base.union(androidx.compose.foundation.layout.WindowInsets(left = margin, right = margin)) else base
 }
 
 /** True in landscape on a phone: little vertical room, so every panel uses denser rows. */

@@ -236,6 +236,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
     ChoiceRow("Keep the screen on", "Stops the screen from turning off.", listOf("Never", "While playing", "Always"), AppSettings.keepOn.value) { AppSettings.keepOn.set(it) }
     ChoiceRow("Orientation", "Landscape (locked, the default) gives the arrangement and the plugin windows the most room. Choose Auto-rotate to follow the phone.", listOf("Auto-rotate", "Portrait", "Landscape"), AppSettings.orientation.value) { AppSettings.orientation.set(it) }
     SwitchRow("Full screen", "Hides the status and navigation bars (swipe from the edge to bring them back).", AppSettings.immersive)
+    ChoiceRow("Rounded screen corners", "Keeps buttons away from the rounded corners of the screen. Automatic uses the phone's own corner size.", listOf("Automatic", "None", "Small", "Medium", "Large"), AppSettings.cornerMargin.value.coerceIn(0, 4)) { AppSettings.cornerMargin.set(it) }
     SwitchRow("Use the whole screen (ignore the notch)", "Draws under the camera cutout instead of leaving a black bar beside it. Something may be hidden behind the notch.", AppSettings.ignoreCutout)
 }
 

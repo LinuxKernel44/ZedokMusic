@@ -56,6 +56,7 @@ object AppSettings {
     val orientation = s("display.orientation", 2)  // 0 automatic (rotates with the phone), 1 portrait, 2 landscape; landscape without rotation by default
     // Defaults since 0.20: landscape, full screen, drawing under the notch. People who already chose something keep their choice.
     val immersive = b("display.immersive", true)
+    val cornerMargin = s("display.corners", 0)   // side margin for rounded screen corners: 0 automatic (from the phone), 1 none, 2 small, 3 medium, 4 large
     val ignoreCutout = b("display.cutout", true)  // draw under the notch / camera cutout
 
     val SNAP_BEATS = floatArrayOf(0.125f, 0.25f, 0.5f, 1f)
