@@ -139,6 +139,7 @@ fun DawScreen(vm: DawViewModel) {
     DesktopScreen(vm)
     if (showSettings) SettingsScreen(vm, { showUpdate = true }) { showSettings = false }
     UpdateDialog(vm, showUpdate) { showUpdate = false; Updater.dismiss() }
+    com.zedokmusic.ui.nplug.KitJobDialog(vm.kits, Zk.accent)   // the kit import progress shows wherever you are in the app
     DisplaySettingsEffect(vm.playing)
 }
 

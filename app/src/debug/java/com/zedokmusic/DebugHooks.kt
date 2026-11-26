@@ -3,6 +3,7 @@ package com.zedokmusic
 import android.content.Intent
 import android.util.Log
 import com.zedokmusic.engine.EngineSelfTest
+import com.zedokmusic.model.DawViewModel
 import com.zedokmusic.engine.PluginSelfTest
 import com.zedokmusic.engine.RecordSelfTest
 import java.io.File
@@ -26,6 +27,17 @@ object DebugHooks {
         intent?.getStringExtra("pinch")?.let { spec ->
             val v = spec.split(",").map { it.trim().toFloat() }
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ injectPinch(activity, v) }, 6000)
+        }
+        // `--es kit /sdcard/Download/TestKits/808 Pack`: after 7 s, imports that folder as a drum kit into the first Zedok Drums track (same path as the Load kit button, without the picker).
+        intent?.getStringExtra("kit")?.let { dir ->
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val vm = DawViewModel.current; val t = vm?.tracks?.firstOrNull { vm.nativeId(it) == "drums" }
+                if (t == null) Log.w("ZedokDebug", "kit: no Drums track") else { vm.kits.scanFolder(t, File(dir)); Log.i("ZedokDebug", "kit import started: $dir") }
+                // a few seconds later: how many sample zones does the engine report per pad, and what did the engine keep as state?
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (t != null) Log.i("ZedokDebug", "kit zones per pad: " + com.zedokmusic.engine.NativeEngine.pluginTelemetry(t.id, 1).joinToString(",") + " | pad4 state lines: " + com.zedokmusic.engine.NativeEngine.getPluginState(t.id, "pad4").lines().size)
+                }, 8000)
+            }, 7000)
         }
         intent?.getStringExtra("cmd")?.let { cmd ->  // `--es cmd "<shell command>"`: run inside the app's SELinux domain
             Thread {

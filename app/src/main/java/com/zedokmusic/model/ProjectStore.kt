@@ -12,6 +12,7 @@ import java.util.Locale
  *                    Samples/          imported samples and recordings (Samples/Recordings)
  *                    Exports/          rendered audio
  *                    Presets/<plugin>/ plugin presets (*.zpreset)
+ *                    Kits/<kit>/       the audio files of the drum kits the project uses (+ kit.zkit, the pad layout)
  *                    Backup/           automatic copies of earlier saves
  */
 class ProjectStore(val workspace: File) {
@@ -23,6 +24,8 @@ class ProjectStore(val workspace: File) {
     fun samples(name: String) = File(dir(name), "Samples")
     fun exports(name: String) = File(dir(name), "Exports")
     fun presets(name: String) = File(dir(name), "Presets")
+    /** Drum kits used by the project: every file of a kit that was imported (with the Storage Access Framework) is copied here. */
+    fun kits(name: String) = File(dir(name), "Kits")
     fun backups(name: String) = File(dir(name), "Backup")
 
     /** Makes a file-system-safe project name (letters, digits, spaces and . _ - ( ) +). */
@@ -67,7 +70,7 @@ class ProjectStore(val workspace: File) {
     }
 
     /** Creates the folders of a project. */
-    fun create(name: String) { listOf(samples(name), exports(name), presets(name), backups(name)).forEach { it.mkdirs() } }
+    fun create(name: String) { listOf(samples(name), exports(name), presets(name), kits(name), backups(name)).forEach { it.mkdirs() } }
 
     /**
      * Keeps a timestamped copy of the current project file in Backup/ (at most one per [minGapMs], newest [keep] kept).

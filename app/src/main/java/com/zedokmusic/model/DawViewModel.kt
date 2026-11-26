@@ -395,7 +395,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     /** Re-applies saved values once the plugin is up (matching by name, so a plugin update that shifts indices stays safe). */
     private fun applyPending(t: TrackM) {
-        pendingStates.remove(t.id)?.let { (preset, st) -> t.presetName = preset; st.forEach { (k, x) -> t.states[k] = x; e.setPluginState(t.id, k, x) } }
+        pendingStates.remove(t.id)?.let { (preset, st) -> t.presetName = preset; st.forEach { (k, x) -> t.states[k] = x; sendPluginState(t, k, x) } }
         val lanes = pendingLanes.remove(t.id)
         val pending = pendingParams.remove(t.id)
         if (lanes == null && pending == null) return
@@ -703,7 +703,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val old = projectName; val n = s.uniqueName(name)
         save()
         s.create(n)
-        runCatching { s.samples(old).copyRecursively(s.samples(n), overwrite = false); s.presets(old).copyRecursively(s.presets(n), overwrite = false) }
+        runCatching { s.samples(old).copyRecursively(s.samples(n), overwrite = false); s.presets(old).copyRecursively(s.presets(n), overwrite = false); s.kits(old).copyRecursively(s.kits(n), overwrite = false) }
         val oldSamples = s.samples(old).absolutePath + "/"
         write(s.file(n)) { p -> if (p.startsWith(oldSamples)) File(s.samples(n), p.removePrefix(oldSamples)).absolutePath else p }
         repoint(s.samples(old), s.samples(n))
@@ -770,7 +770,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             e.setParam(t.id, pm.index, target)
             if (Math.abs(target - pm.default) > 1e-4f) t.paramOverrides[pm.index] = target else t.paramOverrides.remove(pm.index)
         }
-        p.state.forEach { (k, x) -> e.setPluginState(t.id, k, x); t.states[k] = x }
+        p.state.forEach { (k, x) -> sendPluginState(t, k, x); t.states[k] = x }
         t.presetName = p.name; t.presetKey = p.key
         paramsRevision++; dirty = true
     }
@@ -785,6 +785,17 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         for (pm in params) { val v = snap[pm.index] ?: pm.default; e.setParam(t.id, pm.index, v); if (Math.abs(v - pm.default) > 1e-4f) t.paramOverrides[pm.index] = v else t.paramOverrides.remove(pm.index) }
         t.abSlot = next; paramsRevision++; dirty = true
     }
+    /** Drum kits: the pad states hold project-relative paths ("Kits/Name/kick.wav"); the engine gets absolute ones. Loading audio takes a moment, so it runs on the kit worker. */
+    internal fun sendPluginState(t: TrackM, key: String, value: String) {
+        if (key.length > 3 && key.startsWith("pad") && key[3].isDigit()) {
+            val dir = projectDir()?.absolutePath ?: return
+            val abs = value.lines().joinToString("\n") { l -> val p = l.split(',', limit = 4); if (p.size == 4 && !p[3].startsWith("/")) "${p[0]},${p[1]},${p[2]},$dir/${p[3]}" else l }
+            kits.run { e.setPluginState(t.id, key, abs) }
+        } else e.setPluginState(t.id, key, value)
+    }
+    val kits = KitManager(this, app)
+    internal fun markDirty() { dirty = true }
+    internal fun bumpParams() { paramsRevision++ }
     fun pluginState(t: TrackM, key: String) = e.getPluginState(t.id, key)
     fun setPluginState(t: TrackM, key: String, value: String) { e.setPluginState(t.id, key, value); t.states[key] = value; dirty = true }
 

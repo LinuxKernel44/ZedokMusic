@@ -2,8 +2,14 @@
 // Every pad picks a model and shapes it with tune, decay, tone, punch and drive; the kit passes through a glue compressor,
 // a master saturator and a small room. Pad n answers to MIDI note 36 + n (C1 ... D#2, the General MIDI drum layout).
 #pragma once
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <map>
+#include <memory>
 #include "fx.h"
 #include "processor.h"
+#include "../../app/src/main/cpp/wav.h"
 
 namespace zdsp {
 
@@ -11,10 +17,10 @@ class Drums : public Processor {
 public:
     static constexpr int kPads = 16;
     static constexpr int kFirstNote = 36;
-    enum Model { Kick808, KickPunch, KickSub, Snare909, Snare808, Clap, Rim, HatClosed, HatOpen, HatNoise, Tom, Cowbell, Shaker, Cymbal, PercFM, Click, kNumModels };
+    enum Model { Kick808, KickPunch, KickSub, Snare909, Snare808, Clap, Rim, HatClosed, HatOpen, HatNoise, Tom, Cowbell, Shaker, Cymbal, PercFM, Click, SampleModel, kNumModels };
 
     Drums() {
-        std::vector<std::string> models = {"808 Kick", "Punch Kick", "Sub Kick", "909 Snare", "808 Snare", "Clap", "Rim", "Closed Hat", "Open Hat", "Noise Hat", "Tom", "Cowbell", "Shaker", "Cymbal", "FM Perc", "Click"};
+        std::vector<std::string> models = {"808 Kick", "Punch Kick", "Sub Kick", "909 Snare", "808 Snare", "Clap", "Rim", "Closed Hat", "Open Hat", "Noise Hat", "Tom", "Cowbell", "Shaker", "Cymbal", "FM Perc", "Click", "Sample"};
         const int defModel[kPads] = {Kick808, KickPunch, Rim, Snare909, Clap, Tom, HatClosed, Tom, HatClosed, Tom, HatOpen, Cowbell, Cymbal, Shaker, PercFM, Click};
         const float defTune[kPads] = {0, 0, 0, 0, 0, -5, 0, -2, 0, 3, 0, 0, 0, 0, 0, 0};
         const int defChoke[kPads] = {0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0};
@@ -30,6 +36,9 @@ public:
             P_[p].level = add(lin(g.c_str(), (n + "Level").c_str(), 0.f, 1.f, 0.8f));
             P_[p].pan = add(lin(g.c_str(), (n + "Pan").c_str(), -1.f, 1.f, 0.f));
             P_[p].choke = add(choice(g.c_str(), (n + "Choke").c_str(), {"-", "1", "2", "3", "4"}, defChoke[p]));
+            P_[p].mode = add(choice(g.c_str(), (n + "Mode").c_str(), {"One-shot", "Gate"}, 0));        // sample pads: play to the end, or stop when the note ends
+            P_[p].start = add(lin(g.c_str(), (n + "Start").c_str(), 0.f, 1.f, 0.f));                    // sample pads: where in the sample playback begins
+            P_[p].reverse = add(toggle(g.c_str(), (n + "Reverse").c_str(), false));
         }
         ix_.volume = add(lin("Master", "Volume", -24.f, 6.f, 0.f, "dB", 1));
         ix_.glue = add(lin("Master", "Glue", 0.f, 1.f, 0.f));
@@ -50,6 +59,7 @@ public:
         float tune[kPads], decay[kPads], tone[kPads], punch[kPads], drive[kPads], level[kPads], pan[kPads]; int model[kPads], choke[kPads];
         for (int p = 0; p < kPads; p++) {
             model[p] = (int)(real(vals, P_[p].model) + 0.5f); tune[p] = real(vals, P_[p].tune); decay[p] = real(vals, P_[p].decay); tone[p] = real(vals, P_[p].tone);
+            mode_[p] = (int)(real(vals, P_[p].mode) + 0.5f); start_[p] = real(vals, P_[p].start); rev_[p] = real(vals, P_[p].reverse) > 0.5f;
             punch[p] = real(vals, P_[p].punch); drive[p] = real(vals, P_[p].drive); level[p] = real(vals, P_[p].level); pan[p] = real(vals, P_[p].pan); choke[p] = (int)(real(vals, P_[p].choke) + 0.5f);
         }
         const float velSens = real(vals, ix_.velSens);
@@ -58,12 +68,19 @@ public:
             while (ei < c.nEvents && (int)c.events[ei].offset <= i) {
                 const ZkEvent& e = c.events[ei++];
                 if (e.type == ZK_ALL_NOTES_OFF) { for (auto& v : voices_) if (v.active) v.fadeOut = 1; continue; }
-                if (e.type != ZK_NOTE_ON || e.velocity == 0) continue;
+                if (e.type == ZK_NOTE_OFF || (e.type == ZK_NOTE_ON && e.velocity == 0)) {   // gate-mode sample pads stop with their note
+                    const int p = (int)e.pitch - kFirstNote; if (p >= 0 && p < kPads) for (auto& v : voices_) if (v.active && v.pad == p && v.gate) v.fadeOut = 1.f;
+                    continue;
+                }
+                if (e.type != ZK_NOTE_ON) continue;
                 const int p = (int)e.pitch - kFirstNote; if (p < 0 || p >= kPads) continue;
                 trigger(p, e.velocity / 127.f, model[p], tune[p], decay[p], tone[p], punch[p], drive[p], level[p], pan[p], choke[p], velSens);
             }
             float l = 0.f, r = 0.f;
-            for (auto& v : voices_) if (v.active) { const float s = tickVoice(v); l += s * v.gl; r += s * v.gr; }
+            for (auto& v : voices_) if (v.active) {
+                if (v.model == SampleModel) { tickSample(v); l += v.outL * v.gl; r += v.outR * v.gr; }
+                else { const float s = tickVoice(v); l += s * v.gl; r += s * v.gr; }
+            }
             mixL_[i] = l; mixR_[i] = r;
         }
         // ---- master section
@@ -83,18 +100,28 @@ public:
         for (auto& a : activity_) a *= 0.9f;
     }
     // 0: how much each pad is sounding (16 values 0..1), for the pad lights
-    int telemetry(int what, float* out, int cap) override { if (what == 0 && cap >= kPads) { for (int p = 0; p < kPads; p++) out[p] = activity_[p]; return kPads; } return 0; }
+    // 0: how much each pad is sounding (16 values 0..1), for the pad lights    1: number of sample zones on each pad
+    int telemetry(int what, float* out, int cap) override {
+        if (what == 0 && cap >= kPads) { for (int p = 0; p < kPads; p++) out[p] = activity_[p]; return kPads; }
+        if (what == 1 && cap >= kPads) { for (int p = 0; p < kPads; p++) { auto ps = std::atomic_load(&pads_[p]); out[p] = ps ? (float)ps->zones.size() : 0.f; } return kPads; }
+        return 0;
+    }
 
 private:
     static inline float softOut(float x) { const float a = std::fabs(x); if (a <= 0.9f) return x; const float y = 0.9f + 0.1f * fastTanh((a - 0.9f) * 10.f); return x < 0 ? -y : y; }
     float real(const float* v, int i) const { return specs_[i].toReal(v[i]); }
-    struct PadIx { int model, tune, decay, tone, punch, drive, level, pan, choke; } P_[kPads];
+    struct PadIx { int model, tune, decay, tone, punch, drive, level, pan, choke, mode, start, reverse; } P_[kPads];
     struct Ix { int volume, glue, sat, room, roomSize, tone, velSens; } ix_;
 
+    struct Sample { std::vector<float> L, R; int n = 0; };
+    struct Zone { std::shared_ptr<const Sample> s; int vlo = 1, vhi = 127; };
+    struct PadSamples { std::vector<Zone> zones; };
     struct Voice {
         bool active = false; int pad = 0, model = 0, choke = 0; float vel = 1.f, ratio = 1.f, decay = 1.f, tone = .5f, punch = .5f, drive = 0.f, gl = .7f, gr = .7f, level = .8f;
         float t = 0.f; float fadeOut = 0.f, fadeGain = 1.f, fadeIn = 0.f; uint64_t age = 0;
         float ph[8] = {}; SVF f1, f2; Rng rng{1234u}; float lp = 0.f, st[4] = {};
+        // sample playback
+        const Sample* sm = nullptr; double sp = 0.0, send = 0.0, sinc = 1.0; int sdir = 1; bool gate = false; float outL = 0.f, outR = 0.f, tlp[2] = {0.f, 0.f};
     };
     void trigger(int pad, float vel, int model, float tuneSt, float decay, float tone, float punch, float drive, float level, float pan, int choke, float velSens) {
         if (choke > 0) for (auto& v : voices_) if (v.active && v.choke == choke && v.pad != pad) v.fadeOut = 1.f;
@@ -107,6 +134,20 @@ private:
         v.vel = 1.f - velSens + velSens * vel; v.ratio = semiToRatio(tuneSt); v.decay = decay; v.tone = clampf(tone, 0.f, 1.f); v.punch = punch; v.drive = drive; v.level = level;
         v.gl = std::cos((pan * 0.5f + 0.5f) * 1.5707963f) * 1.4142f; v.gr = std::sin((pan * 0.5f + 0.5f) * 1.5707963f) * 1.4142f;
         v.rng = Rng(0x9E3779B9u + (uint32_t)(age_ * 7919u)); v.fadeIn = 0.f;
+        if (model == SampleModel) {
+            auto ps = std::atomic_load(&pads_[pad]);
+            const Zone* zones[32]; int nz = 0; const int vi = std::max(1, std::min(127, (int)(vel * 127.f + 0.5f)));
+            if (ps) for (auto& z : ps->zones) if (z.s && vi >= z.vlo && vi <= z.vhi && nz < 32) zones[nz++] = &z;
+            if (nz == 0) { v.active = false; return; }
+            const Zone* z = zones[rrCtr_[pad]++ % nz];
+            v.sm = z->s.get(); v.gate = mode_[pad] == 1; v.sinc = v.ratio; v.sdir = rev_[pad] ? -1 : 1;
+            const double n = (double)v.sm->n; const double st = std::min(0.98, (double)start_[pad]) * (n - 1.0);
+            const double keep = std::min(1.0, (double)decay);                       // Decay below 1 shortens the sound
+            if (!rev_[pad]) { v.sp = st; v.send = st + (n - 1.0 - st) * keep; }       // forward: from Start to the end
+            else { v.sp = n - 1.0; v.send = std::max(st, (n - 1.0) - (n - 1.0 - st) * keep); }   // reverse: from the end back to Start
+            activity_[pad] = std::max(activity_[pad], vel);
+            return;
+        }
         // fixed scale so that every model peaks at a comparable level before the pad level
         activity_[pad] = std::max(activity_[pad], vel);
         const float vb = clampf(vel, 0.f, 1.f); v.tone = clampf(v.tone + (vb - 0.7f) * 0.15f * velSens, 0.f, 1.f);
@@ -115,6 +156,27 @@ private:
         if (model == HatClosed || model == HatOpen || model == Cymbal) for (int k = 0; k < 6; k++) v.ph[k] = 0.1f * k;
         v.t = 0.f;
         // per-model filter setup is done in tickVoice on the first sample
+    }
+    // One sample voice: Hermite-interpolated read (pitch = tune), fade in/out, tone tilt and drive. Stereo output in outL/outR.
+    void tickSample(Voice& v) {
+        const float dt = 1.f / (float)sr_; v.outL = v.outR = 0.f;
+        const Sample* s = v.sm; if (!s || s->n < 4) { v.active = false; return; }
+        const bool done = v.sdir > 0 ? v.sp >= v.send || v.sp >= s->n - 2 : v.sp <= v.send || v.sp <= 1.0;
+        if (done && v.fadeOut <= 0.f) v.fadeOut = 1.f;
+        double p = std::min(std::max(v.sp, 1.0), (double)(s->n - 3)); const int i = (int)p; const float f = (float)(p - i);
+        auto herm = [&](const std::vector<float>& d) { const float ym1 = d[i - 1], y0 = d[i], y1 = d[i + 1], y2 = d[i + 2];
+            const float c1 = 0.5f * (y1 - ym1), c2 = ym1 - 2.5f * y0 + 2.f * y1 - 0.5f * y2, c3 = 0.5f * (y2 - ym1) + 1.5f * (y0 - y1); return ((c3 * f + c2) * f + c1) * f + y0; };
+        float l = herm(s->L), r = herm(s->R);
+        v.sp += v.sinc * v.sdir;
+        // tone: below 0.5 darkens (low-pass sweeping down), above 0.5 brightens (adds the high band)
+        const float tn = v.tone;
+        if (tn < 0.48f) { const float fc = 400.f * std::pow(50.f, tn * 2.f); const float a = 1.f - std::exp(-kTwoPi * fc * dt); v.tlp[0] += a * (l - v.tlp[0]); v.tlp[1] += a * (r - v.tlp[1]); l = v.tlp[0]; r = v.tlp[1]; }
+        else if (tn > 0.52f) { const float a = 1.f - std::exp(-kTwoPi * 1500.f * dt); v.tlp[0] += a * (l - v.tlp[0]); v.tlp[1] += a * (r - v.tlp[1]); const float k = (tn - 0.5f) * 2.f * 1.5f; l += k * (l - v.tlp[0]); r += k * (r - v.tlp[1]); }
+        if (v.drive > 0.01f) { const float d = 1.f + v.drive * 7.f, nd = 1.f / std::sqrt(d); l = fastTanh(l * d) * nd; r = fastTanh(r * d) * nd; }
+        float g = v.vel * v.level * 1.1f;
+        if (v.fadeOut > 0.f) { v.fadeGain -= dt / (v.gate ? 0.02f : 0.004f); if (v.fadeGain <= 0.f) { v.active = false; return; } g *= v.fadeGain; }
+        if (v.fadeIn < 1.f) { v.fadeIn = std::min(1.f, v.fadeIn + dt / 0.0004f); g *= v.fadeIn; }
+        v.outL = l * g; v.outR = r * g;
     }
     static inline float expEnv(float t, float tau) { return std::exp(-t / std::max(tau, 1e-4f)); }
     float tickVoice(Voice& v) {
@@ -213,6 +275,48 @@ private:
         return y * g;
     }
 
+    // ---- sample pads: each pad has a list of zones (velocity range + round-robin) with the audio loaded as float stereo at the engine rate
+    std::shared_ptr<const PadSamples> pads_[kPads]; unsigned rrCtr_[kPads] = {}; int mode_[kPads] = {}; float start_[kPads] = {}; bool rev_[kPads] = {};
+    std::map<std::string, std::weak_ptr<const Sample>> sampleCache_;
+    std::vector<std::pair<std::chrono::steady_clock::time_point, std::shared_ptr<const PadSamples>>> graveyard_;   // replaced pads stay alive a while: a voice may still be reading them
+    std::string kitName_; std::string padText_[kPads]; size_t sampleBytes_ = 0;
+    std::shared_ptr<const Sample> loadSample(const std::string& path) {
+        auto it = sampleCache_.find(path); if (it != sampleCache_.end()) if (auto sp = it->second.lock()) return sp;
+        std::vector<float> st; int rate = 0; if (!zedok::readWav(path, st, rate) || st.size() < 8 || rate <= 0) return nullptr;
+        if (rate != (int)sr_) st = zedok::resampleStereo(st, rate, (int)sr_);
+        size_t frames = std::min<size_t>(st.size() / 2, (size_t)(12.0 * sr_));            // one-shots: 12 s at most
+        auto b = std::make_shared<Sample>(); b->L.resize(frames + 4, 0.f); b->R.resize(frames + 4, 0.f); b->n = (int)frames;
+        for (size_t i = 0; i < frames; i++) { b->L[i] = st[i * 2]; b->R[i] = st[i * 2 + 1]; }
+        sampleCache_[path] = b; return b;
+    }
+public:
+    // State: "pad1".."pad16" = one zone per line "velLow,velHigh,rr,path" (empty = no sample); "kit" = the kit's name.
+    bool setState(const std::string& key, const std::string& value) override {
+        const auto now = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < graveyard_.size();) { if (now - graveyard_[i].first > std::chrono::seconds(20)) graveyard_.erase(graveyard_.begin() + i); else i++; }
+        if (key == "kit") { kitName_ = value; return true; }
+        if (key.size() < 4 || key.compare(0, 3, "pad") != 0) return false;
+        const int p = std::atoi(key.c_str() + 3) - 1; if (p < 0 || p >= kPads) return false;
+        auto ps = std::make_shared<PadSamples>(); size_t pos = 0;
+        while (pos < value.size() && ps->zones.size() < 32) {
+            size_t e = value.find('\n', pos); if (e == std::string::npos) e = value.size();
+            std::string line = value.substr(pos, e - pos); pos = e + 1; if (line.empty()) continue;
+            int vlo = 1, vhi = 127, rr = 0, used = 0; if (std::sscanf(line.c_str(), "%d,%d,%d,%n", &vlo, &vhi, &rr, &used) < 3 || used <= 0) continue;
+            auto smp = loadSample(line.substr(used)); if (!smp) continue;
+            Zone z; z.s = smp; z.vlo = std::max(1, std::min(127, vlo)); z.vhi = std::max(z.vlo, std::min(127, vhi)); ps->zones.push_back(z);
+        }
+        padText_[p] = value;
+        auto old = std::atomic_load(&pads_[p]); if (old) graveyard_.push_back({now, old});
+        std::atomic_store(&pads_[p], std::shared_ptr<const PadSamples>(ps));
+        return true;
+    }
+    std::string getState(const std::string& key) const override {
+        if (key == "kit") return kitName_;
+        if (key.size() >= 4 && key.compare(0, 3, "pad") == 0) { const int p = std::atoi(key.c_str() + 3) - 1; if (p >= 0 && p < kPads) return padText_[p]; }
+        return "";
+    }
+    std::vector<std::string> stateKeys() const override { std::vector<std::string> k = {"kit"}; for (int i = 1; i <= kPads; i++) k.push_back("pad" + std::to_string(i)); return k; }
+private:
     Voice voices_[24]; uint64_t age_ = 0; std::vector<float> mixL_, mixR_; Reverb room_; Compressor glue_; float activity_[kPads] = {}; float toneL_ = 0.f, toneR_ = 0.f, satState_[2] = {};
 };
 

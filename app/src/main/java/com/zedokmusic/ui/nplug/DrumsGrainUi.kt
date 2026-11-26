@@ -50,10 +50,10 @@ fun DrumsScreen(ps: PluginState) {
         val grid: @Composable (Modifier) -> Unit = { m -> PadGrid(ps, pad, light, m) { pad = it } }
         if (wide) Row(Modifier.fillMaxSize()) {
             grid(Modifier.weight(0.9f).fillMaxHeight().padding(6.dp))
-            Column(Modifier.weight(1.2f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) { PadEditor(ps, pad); MasterSection(ps) }
+            Column(Modifier.weight(1.2f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) { KitSection(ps, pad, padColor(ps.choice("P${pad + 1} Type"))); PadEditor(ps, pad); MasterSection(ps) }
         } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             grid(Modifier.fillMaxWidth().padding(8.dp))
-            Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { PadEditor(ps, pad); MasterSection(ps) }
+            Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { KitSection(ps, pad, padColor(ps.choice("P${pad + 1} Type"))); PadEditor(ps, pad); MasterSection(ps) }
         }
     }
 }
@@ -74,7 +74,8 @@ private fun PadGrid(ps: PluginState, selected: Int, light: FloatArray, modifier:
                         .border(if (i == selected) 2.dp else 1.dp, if (i == selected) c else Zk.line, RoundedCornerShape(10.dp))
                         .pointerInput(i) { detectTapGestures(onPress = { onSelect(i); vm.liveNote(t, true, 36 + i); tryAwaitRelease(); vm.liveNote(t, false, 36 + i) }) }, contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            androidx.compose.material3.Text(ps.text("P${i + 1} Type"), color = Zk.text, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            val sampleName = if (model == 16) ps.vm.kits.padLabel(ps.t, i) else null
+                            androidx.compose.material3.Text(sampleName ?: (if (model == 16) "Empty" else ps.text("P${i + 1} Type")), color = if (model == 16 && sampleName == null) Zk.dim else Zk.text, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
                             androidx.compose.material3.Text("${i + 1}", color = Zk.dim, fontSize = 10.sp)
                         }
                     }
@@ -92,7 +93,11 @@ private fun PadEditor(ps: PluginState, pad: Int) {
     Section("Pad ${pad + 1} · note ${36 + pad}", c) {
         Picker(ps, n + "Type", c, "Sound", width = 170.dp)
         Spacer(Modifier.height(8.dp))
-        Knobs { PK(ps, n + "Tune", c, "Tune", bipolar = true); PK(ps, n + "Decay", c, "Decay"); PK(ps, n + "Tone", c, "Tone"); PK(ps, n + "Punch", c, "Punch"); PK(ps, n + "Drive", c, "Drive"); PK(ps, n + "Level", c, "Level"); PK(ps, n + "Pan", c, "Pan", bipolar = true) }
+        if (ps.choice(n + "Type") == 16) {   // a sample pad
+            Knobs { PK(ps, n + "Tune", c, "Tune", bipolar = true); PK(ps, n + "Start", c, "Start"); PK(ps, n + "Decay", c, "Length"); PK(ps, n + "Tone", c, "Tone"); PK(ps, n + "Drive", c, "Drive"); PK(ps, n + "Level", c, "Level"); PK(ps, n + "Pan", c, "Pan", bipolar = true) }
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) { Chips(ps, n + "Mode", c, "Mode (gate stops with the note)"); Toggle(ps, n + "Reverse", c, "Reverse") }
+        } else Knobs { PK(ps, n + "Tune", c, "Tune", bipolar = true); PK(ps, n + "Decay", c, "Decay"); PK(ps, n + "Tone", c, "Tone"); PK(ps, n + "Punch", c, "Punch"); PK(ps, n + "Drive", c, "Drive"); PK(ps, n + "Level", c, "Level"); PK(ps, n + "Pan", c, "Pan", bipolar = true) }
         Spacer(Modifier.height(4.dp)); Chips(ps, n + "Choke", c, "Choke group (hats cut each other)")
     }
 }
