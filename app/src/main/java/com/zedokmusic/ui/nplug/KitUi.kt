@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zedokmusic.model.KitManager
+import com.zedokmusic.model.KitNode
 import com.zedokmusic.ui.LabelButton
 import com.zedokmusic.ui.Zk
 import com.zedokmusic.ui.dialogListMax
@@ -123,32 +124,43 @@ private fun ProjectKitsDialog(kits: KitManager, ps: PluginState, color: Color, o
     }
 }
 
+/** One folder of the library tree: its sub-folders and the sounds directly in it. */
+private class Dir(val name: String, val path: String) { val dirs = java.util.TreeMap<String, Dir>(String.CASE_INSENSITIVE_ORDER); val files = ArrayList<Pair<String, KitNode>>(); var total = 0 }
+private sealed class TreeRow { class D(val dir: Dir, val depth: Int, val open: Boolean) : TreeRow(); class F(val path: String, val node: KitNode, val depth: Int) : TreeRow() }
+
+private fun buildTree(items: List<Pair<String, KitNode>>): Dir {
+    val root = Dir("", "")
+    for (it in items) {
+        val parts = it.first.split('/'); var d = root; d.total++
+        for (k in 0 until parts.size - 1) { val p = parts.subList(0, k + 1).joinToString("/"); d = d.dirs.getOrPut(parts[k]) { Dir(parts[k], p) }; d.total++ }
+        d.files.add(it)
+    }
+    return root
+}
+private fun flatten(d: Dir, depth: Int, open: (String) -> Boolean, out: MutableList<TreeRow>) {
+    for (sub in d.dirs.values) { val o = open(sub.path); out.add(TreeRow.D(sub, depth, o)); if (o) flatten(sub, depth + 1, open, out) }
+    for (f in d.files) out.add(TreeRow.F(f.first, f.second, depth))
+}
+
 /**
- * The sound browser: the audio files of a folder (or the favourites), each with a preview button and a star. Tap rows to select, then Load to a pad
- * (replaces the pad) or Add (round robin / layer). The files are copied into the project.
+ * The sound browser: the drum kit library as a folder tree (tap a folder to fold or unfold it, "Collapse all" folds everything), or the favourites, or search
+ * results. Each sound has a preview button and a star. Tap sounds to select, then Load to a pad (replaces the pad) or Add (round robin / layer); files are copied into the project.
  */
 @Composable
 private fun SampleBrowser(kits: KitManager, startPad: Int, color: Color) {
     val b = kits.browse ?: return
     var pad by remember(b) { mutableIntStateOf(startPad) }
     var favOnly by remember(b) { mutableStateOf(b.favoritesFirst) }
-    var folder by remember(b) { mutableStateOf("") }          // sub-folder filter ("" = the whole library)
-    var picking by remember(b) { mutableStateOf(false) }
-    val folders = remember(kits.libraryItems) { kits.libraryItems.map { it.first.substringBeforeLast('/', "") }.filter { it.isNotEmpty() }.groupingBy { it }.eachCount().toSortedMap(String.CASE_INSENSITIVE_ORDER) }
     var query by remember(b) { mutableStateOf("") }
     val selected = remember(b) { mutableStateListOf<String>() }
-    val rows = remember(b, favOnly, query, kits.favorites, kits.libraryItems, folder) {
-        (if (favOnly) kits.favoriteItems() else kits.libraryItems.let { l -> if (folder.isEmpty()) l else l.filter { it.first.startsWith("$folder/") } })
-            .filter { query.isBlank() || it.first.contains(query.trim(), true) }
+    val tree = remember(kits.libraryItems) { buildTree(kits.libraryItems) }
+    val flat = favOnly || query.isNotBlank()          // favourites and search results are flat lists (the folder is shown under each name)
+    val rows: List<TreeRow> = remember(b, favOnly, query, kits.favorites, kits.libraryItems, kits.expandedDirs.toMap()) {
+        val out = ArrayList<TreeRow>()
+        if (flat) (if (favOnly) kits.favoriteItems() else kits.libraryItems).filter { query.isBlank() || it.first.contains(query.trim(), true) }.forEach { out.add(TreeRow.F(it.first, it.second, 0)) }
+        else flatten(tree, 0, { kits.expandedDirs[it] == true }, out)
+        out
     }
-    if (picking) AlertDialog(onDismissRequest = { picking = false }, containerColor = Zk.panel, title = { Text("Folder") }, text = {
-        LazyColumn(Modifier.heightIn(max = com.zedokmusic.ui.dialogListMax(320.dp))) {
-            item { Text("Whole library · ${kits.libraryItems.size}", color = if (folder.isEmpty()) color else Zk.text, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().clickable { folder = ""; picking = false }.padding(vertical = 10.dp)) }
-            items(folders.entries.toList(), key = { it.key }) { (p, n) ->
-                Text("$p · $n", color = if (folder == p) color else Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().clickable { folder = p; picking = false }.padding(vertical = 10.dp))
-            }
-        }
-    }, confirmButton = { TextButton({ picking = false }) { Text("Close") } })
     androidx.compose.ui.window.Dialog(onDismissRequest = { kits.closeBrowser() }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -167,39 +179,54 @@ private fun SampleBrowser(kits: KitManager, startPad: Int, color: Color) {
                     if (query.isEmpty()) Text("Search", color = Zk.dim, fontSize = 13.sp)
                     BasicTextField(query, { query = it }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(color = Zk.text, fontSize = 13.sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(color), modifier = Modifier.fillMaxWidth())
                 }
-                LabelButton("All", !favOnly, color, w = 44.dp, h = 34.dp) { favOnly = false }
+                LabelButton("Folders", !favOnly, color, w = 66.dp, h = 34.dp) { favOnly = false }
                 LabelButton("★ Favourites", favOnly, color, w = 108.dp, h = 34.dp) { favOnly = true }
-                if (!favOnly) LabelButton(if (folder.isEmpty()) "Folders ▾" else folder.substringAfterLast('/') + " ▾", folder.isNotEmpty(), color, w = 120.dp, h = 34.dp) { picking = true }
-                if (!favOnly) LabelButton(if (folder.isEmpty()) "Import as kit" else "Import folder as kit", false, w = if (folder.isEmpty()) 108.dp else 150.dp, h = 34.dp) { kits.importBrowsed(folder) }
+                if (!favOnly && query.isBlank()) {
+                    LabelButton("Collapse all", false, w = 96.dp, h = 34.dp) { kits.expandedDirs.clear() }
+                    LabelButton("Expand all", false, w = 88.dp, h = 34.dp) { fun all(d: Dir) { d.dirs.values.forEach { kits.expandedDirs[it.path] = true; all(it) } }; all(tree) }
+                    LabelButton("Import as kit", false, w = 108.dp, h = 34.dp) { kits.importBrowsed("") }
+                }
             }
             Spacer(Modifier.height(6.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (!favOnly && kits.libraryScanning && kits.libraryItems.isEmpty()) Text("Scanning your drum kit folder (done once)…", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
                 else if (rows.isEmpty()) Text(if (favOnly) "No favourite yet. Tap the star of a sound in a folder to keep it here." else "No sound found.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
                 else LazyColumn(Modifier.fillMaxSize()) {
-                    items(rows, key = { it.second.ref }) { (path, node) ->
-                        val on = node.ref in selected
-                        val playing = kits.preview.playing == node.ref
-                        val fav = kits.isFavorite(node)
-                        Row(Modifier.fillMaxWidth().background(if (on) color.copy(alpha = 0.16f) else Color.Transparent).clickable { if (on) selected.remove(node.ref) else selected.add(node.ref) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (playing) "■" else "▶", color = if (playing) color else Zk.text, fontSize = 18.sp, textAlign = TextAlign.Center,
-                                modifier = Modifier.width(48.dp).clickable { kits.preview.toggle(node) }.padding(vertical = 12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(node.name, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (path != node.name) Text(path.substringBeforeLast('/'), color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    items(rows, key = { r -> when (r) { is TreeRow.D -> "d:" + r.dir.path; is TreeRow.F -> "f:" + r.node.ref } }) { r ->
+                        when (r) {
+                            is TreeRow.D -> {
+                                Row(Modifier.fillMaxWidth().clickable { kits.expandedDirs[r.dir.path] = !r.open }.padding(start = (r.depth * 18).dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (r.open) "▾" else "▸", color = color, fontSize = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.width(34.dp))
+                                    Text("📁 ", fontSize = 13.sp)
+                                    Text(r.dir.name, color = Zk.text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
+                                    Text("${r.dir.total}", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                                    Text("Import kit", color = color, fontSize = 11.sp, modifier = Modifier.clickable { kits.importBrowsed(r.dir.path) }.padding(horizontal = 10.dp, vertical = 12.dp))
+                                }
+                                HorizontalDivider(color = Zk.line)
                             }
-                            Text(if (on) "✓" else "", color = color, fontSize = 16.sp, modifier = Modifier.width(26.dp), textAlign = TextAlign.Center)
-                            Text(if (fav) "★" else "☆", color = if (fav) Color(0xFFFFC857) else Zk.dim, fontSize = 22.sp, textAlign = TextAlign.Center,
-                                modifier = Modifier.width(48.dp).clickable { kits.toggleFavorite(node, path.substringBeforeLast('/', "")) }.padding(vertical = 8.dp))
+                            is TreeRow.F -> {
+                                val node = r.node; val on = node.ref in selected; val playing = kits.preview.playing == node.ref; val fav = kits.isFavorite(node)
+                                Row(Modifier.fillMaxWidth().background(if (on) color.copy(alpha = 0.16f) else Color.Transparent).clickable { if (on) selected.remove(node.ref) else selected.add(node.ref) }.padding(start = (r.depth * 18).dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (playing) "■" else "▶", color = if (playing) color else Zk.text, fontSize = 18.sp, textAlign = TextAlign.Center,
+                                        modifier = Modifier.width(48.dp).clickable { kits.preview.toggle(node) }.padding(vertical = 12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(node.name, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (flat && r.path != node.name) Text(r.path.substringBeforeLast('/'), color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Text(if (on) "✓" else "", color = color, fontSize = 16.sp, modifier = Modifier.width(26.dp), textAlign = TextAlign.Center)
+                                    Text(if (fav) "★" else "☆", color = if (fav) Color(0xFFFFC857) else Zk.dim, fontSize = 22.sp, textAlign = TextAlign.Center,
+                                        modifier = Modifier.width(48.dp).clickable { kits.toggleFavorite(node, r.path.substringBeforeLast('/', "")) }.padding(vertical = 8.dp))
+                                }
+                                HorizontalDivider(color = Zk.line)
+                            }
                         }
-                        HorizontalDivider(color = Zk.line)
                     }
                 }
             }
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (kits.browseStatus.isNotEmpty()) kits.browseStatus else if (selected.isEmpty()) "Tap sounds to select them." else "${selected.size} selected", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                val picked = { rows.filter { it.second.ref in selected }.map { it.second } }
+                val picked = { rows.filterIsInstance<TreeRow.F>().filter { it.node.ref in selected }.map { it.node } }
                 LabelButton("Load to pad ${pad + 1}", selected.isNotEmpty(), color, w = 130.dp, h = 38.dp) {
                     if (selected.isNotEmpty()) kits.loadToPad(pad, picked(), false) { selected.clear(); pad = (pad + 1) % 16 }
                 }

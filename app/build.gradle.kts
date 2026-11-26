@@ -13,8 +13,8 @@ android {
         minSdk = 28
         // targetSdk 28 is required so Wine/Box64 binaries can be exec'd from app data (W^X, Android 10+).
         targetSdk = 28
-        versionCode = 47
-        versionName = "0.27.0-alpha"
+        versionCode = 48
+        versionName = "0.28.0-alpha"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }

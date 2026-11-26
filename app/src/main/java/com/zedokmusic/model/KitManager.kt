@@ -152,6 +152,8 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
     var libraryItems by mutableStateOf<List<Pair<String, KitNode>>>(emptyList()); private set
     var libraryName by mutableStateOf(prefs.getString("libraryName", "") ?: ""); private set
     var libraryScanning by mutableStateOf(false); private set
+    /** Which folders of the library tree are unfolded in the browser (kept while the app runs; reset when the library changes). */
+    val expandedDirs = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
     var libraryStatus by mutableStateOf(""); private set
     fun libraryUri(): Uri? = prefs.getString("libraryUri", null)?.let { Uri.parse(it) }
     private val indexFile get() = File(ctx.filesDir, "kit_library.json")
@@ -174,7 +176,7 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
         val old = libraryUri(); if (old != null && old != uri) runCatching { ctx.contentResolver.releasePersistableUriPermission(old, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         val name = SafNode.tree(ctx, uri)?.name ?: "Drum kits"
         prefs.edit().putString("libraryUri", uri.toString()).putString("libraryName", name).apply()
-        libraryName = name; libraryItems = emptyList(); rescanLibrary()
+        libraryName = name; libraryItems = emptyList(); expandedDirs.clear(); rescanLibrary()
     }
     fun forgetLibrary() {
         libraryUri()?.let { runCatching { ctx.contentResolver.releasePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
