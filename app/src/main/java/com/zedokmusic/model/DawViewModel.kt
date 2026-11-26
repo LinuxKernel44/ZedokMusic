@@ -129,6 +129,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // ---- view state, saved with the project: zoom (pixels per beat) and where each timeline is scrolled to ----
     /** Height factor of the arrangement's track rows (pinch vertically to change it). */
     var rowScale by mutableFloatStateOf(1f)
+    /** Height factor of the piano roll's note rows (pinch vertically to change it). */
+    var rollRowScale by mutableFloatStateOf(1f)
     private var ppbValue by mutableFloatStateOf(44f)
     var ppb: Float get() = ppbValue; set(v) { if (v != ppbValue) { ppbValue = v; viewDirty = true } }
     var arrangeX = 0; var arrangeY = 0; var rollX = 0; var rollY = -1   // -1: the piano roll's own default (around C5)

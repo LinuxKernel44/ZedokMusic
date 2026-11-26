@@ -53,6 +53,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
     val density = LocalDensity.current
     val ppb = pxPerBeat
+    val RowPx = 18.dp * vm.rollRowScale   // vertical zoom (shadows the base row height above)
     val rows = TOP - BOTTOM + 1
     val beats = maxOf(32f, track.lengthBeats(vm.bpm) + 8f)
     val totalW = (beats * ppb).dp
@@ -97,7 +98,37 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         // The bottom padding is part of the scrolled content: the lowest notes can be scrolled up away from the screen edge, where the system's gesture bar is.
-        Row(Modifier.fillMaxSize().verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
+        // Pinch: apart / together horizontally = time zoom, vertically = taller / shorter note rows. The point under the fingers stays under them.
+        var anchor by remember { mutableStateOf<Triple<Float, Float, Pair<Float, Float>>?>(null) }   // beat, row index, (finger x, finger y)
+        LaunchedEffect(ppb, vm.rollRowScale) {
+            anchor?.let { (beat, row, c) ->
+                hs.scrollTo((beat * ppb * density.density - c.first).toInt().coerceAtLeast(0))
+                vs.scrollTo((row * with(density) { RowPx.toPx() } - c.second).toInt().coerceAtLeast(0)); anchor = null
+            }
+        }
+        val ppbNow = rememberUpdatedState(ppb); val keysPx = with(density) { KeysW.toPx() }
+        Row(Modifier.fillMaxSize().pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                var prevX = 0f; var prevY = 0f; var pinching = false
+                var cur = ppbNow.value; var curRow = vm.rollRowScale; var beat0 = 0f; var row0 = 0f
+                do {
+                    val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    val pts = ev.changes.filter { it.pressed }
+                    if (pts.size >= 2) {
+                        val a = pts[0].position; val b = pts[1].position
+                        val sx = kotlin.math.abs(a.x - b.x); val sy = kotlin.math.abs(a.y - b.y); val cx = (a.x + b.x) / 2f - keysPx; val cy = (a.y + b.y) / 2f
+                        if (!pinching) { beat0 = (hs.value + cx) / (cur * density.density); row0 = (vs.value + cy) / (18.dp.toPx() * curRow) }
+                        if (pinching) {
+                            if (sy > sx * 1.5f && prevY > 40f && sy > 40f) { val nr = (curRow * sy / prevY).coerceIn(0.6f, 2.6f); if (nr != curRow) { curRow = nr; anchor = Triple(beat0, row0, cx to cy); vm.rollRowScale = nr } }
+                            else if (prevX > 40f && sx > 40f) { val nw = (cur * sx / prevX).coerceIn(DawViewModel.ZOOM_MIN, DawViewModel.ZOOM_MAX); if (nw != cur) { cur = nw; anchor = Triple(beat0, row0, cx to cy); vm.ppb = nw } }
+                            ev.changes.forEach { it.consume() }
+                        }
+                        prevX = sx; prevY = sy; pinching = true
+                    } else pinching = false
+                } while (ev.changes.any { it.pressed })
+            }
+        }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
             // keyboard column
             Column(Modifier.width(KeysW)) {
                 for (p in TOP downTo BOTTOM) {
@@ -111,7 +142,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
                 Box(Modifier.width(totalW).height(RowPx * rows)) {
                     Canvas(Modifier.matchParentSize()
-                        .pointerInput(ppb, track) {
+                        .pointerInput(ppb, track, vm.rollRowScale) {
                             val pw = ppb * density.density; val rowPx = RowPx.toPx()
                             val slop = viewConfiguration.touchSlop
                             val handleR = 28.dp.toPx(); val tol = 8.dp.toPx()
