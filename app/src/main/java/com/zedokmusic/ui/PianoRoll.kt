@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import kotlin.math.hypot
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.withTimeoutOrNull
@@ -77,6 +78,33 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     val selSet = selNotes.toHashSet()
     var dragPrev by remember { mutableStateOf<Map<NoteM, NoteM>?>(null) }   // notes being dragged -> where they would land
     var rectSel by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }   // the selection rectangle (pixels of the grid)
+    // Rectangle selection with scrolling: the rectangle is anchored in the grid, the finger is tracked relative to the visible area, so the grid can scroll under a held finger.
+    var rectAnchor by remember { mutableStateOf<Offset?>(null) }
+    var rectFinger by remember { mutableStateOf<Offset?>(null) }
+    var viewH by remember { mutableIntStateOf(0) }
+    fun updateRect() {
+        val a = rectAnchor ?: return; val fgr = rectFinger ?: return
+        val p = Offset(fgr.x + hs.value, fgr.y + vs.value)
+        val rc = androidx.compose.ui.geometry.Rect(minOf(a.x, p.x), minOf(a.y, p.y), maxOf(a.x, p.x), maxOf(a.y, p.y))
+        rectSel = rc
+        val pwR = with(density) { ppb.dp.toPx() }; val rowR = with(density) { RowPx.toPx() }
+        val hits = track.notes.filter { n ->
+            val nx0 = n.start * pwR; val nx1 = (n.start + n.length) * pwR; val ny0 = (TOP - n.pitch) * rowR
+            nx1 >= rc.left && nx0 <= rc.right && ny0 + rowR >= rc.top && ny0 <= rc.bottom
+        }
+        selection.clear(); selection.addAll(hits)
+    }
+    LaunchedEffect(rectAnchor != null) {
+        while (rectAnchor != null) {
+            delay(16)
+            val fgr = rectFinger ?: continue
+            val edge = with(density) { 44.dp.toPx() }; val step = with(density) { 14.dp.toPx() }
+            val dx = if (fgr.x > viewportPx - edge) step else if (fgr.x < edge) -step else 0f
+            val dy = if (fgr.y > viewH - edge) step else if (fgr.y < edge) -step else 0f
+            if (dx != 0f) hs.scrollBy(dx); if (dy != 0f) vs.scrollBy(dy)
+            if (dx != 0f || dy != 0f) updateRect()
+        }
+    }
     // The floating bar is only a shortcut: it shows for 2.5 s after a rectangle / Select tap / Clone / Paste and goes away at the next touch of the grid, so it never sits on the cells you want to write in. The same actions are in the row at the bottom.
     var barRequest by remember { mutableIntStateOf(0) }
     var barVisible by remember { mutableStateOf(false) }
@@ -125,7 +153,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         val ppbNow = rememberUpdatedState(ppb); val keysPx = with(density) { KeysW.toPx() }
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().onSizeChanged { viewH = it.height }) {
         Row(Modifier.fillMaxSize().pointerInput(Unit) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
@@ -223,18 +251,16 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                         if (selectMode) { c.consume(); rect = true; break }
                                     }
                                 }
-                                if (rect) {   // rectangle selection: every note it touches (replaces the selection)
-                                    var rc = androidx.compose.ui.geometry.Rect(x0, y0, x0, y0)
+                                if (rect) {   // rectangle selection: every note it touches (replaces the selection); near an edge the grid scrolls
+                                    rectAnchor = Offset(x0, y0); rectFinger = Offset(x0 - hs.value, y0 - vs.value); updateRect()
                                     while (true) {
                                         val ev = awaitPointerEvent()
                                         val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                                         if (!c.pressed) break
                                         c.consume()
-                                        rc = androidx.compose.ui.geometry.Rect(minOf(x0, c.position.x), minOf(y0, c.position.y), maxOf(x0, c.position.x), maxOf(y0, c.position.y))
-                                        rectSel = rc
-                                        val hits = hitRect(rc); selection.clear(); selection.addAll(hits)
+                                        rectFinger = Offset(c.position.x - hs.value, c.position.y - vs.value); updateRect()
                                     }
-                                    rectSel = null
+                                    rectAnchor = null; rectFinger = null; rectSel = null
                                     if (selection.isNotEmpty()) barRequest++
                                     return@awaitEachGesture
                                 }
