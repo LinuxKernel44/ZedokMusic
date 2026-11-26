@@ -902,6 +902,18 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         p.state.forEach { (k, x) -> sendPluginState(t, k, x); t.states[k] = x }
         t.presetName = p.name; t.presetKey = p.key
         paramsRevision++; dirty = true
+        if (nativeId(t) == "hybrid") previewPresetNote(t)
+    }
+    private var presetPreview: kotlinx.coroutines.Job? = null
+    /** Plays C4 or C5 (Settings -> Plugins) for a moment so the chosen preset can be heard right away. A new preset cuts the previous preview. */
+    private fun previewPresetNote(t: TrackM) {
+        val pitch = when (com.zedokmusic.settings.AppSettings.presetPreviewNote.value) { 0 -> 60; 1 -> 72; else -> return }
+        presetPreview?.cancel()
+        presetPreview = viewModelScope.launch {
+            kotlinx.coroutines.delay(60)   // let the new values reach the synth first
+            liveNote(t, true, pitch)
+            try { kotlinx.coroutines.delay(900) } finally { liveNote(t, false, pitch) }
+        }
     }
     /** True when the user changed the current sound: a control differs from what the selected preset (or the defaults) gives, or something was loaded into the plugin (samples, a kit, ...). */
     fun isTouched(t: TrackM): Boolean {
