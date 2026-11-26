@@ -32,18 +32,23 @@ fun InsertsDialog(vm: DawViewModel, owner: TrackM?, onEdit: (TrackM) -> Unit, on
             else LazyColumn(Modifier.heightIn(max = dialogListMax(330.dp))) {
                 items(list.toList(), key = { it.id }) { fx ->
                     val i = list.indexOf(fx)
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(9.dp).clip(CircleShape).background(when { fx.pluginState == 3 -> Zk.danger; fx.pluginState != 2 -> Zk.warn; fx.bypass -> Zk.dim; else -> Zk.accent }))
-                        Column(Modifier.weight(1f).padding(horizontal = 8.dp).clickable { onEdit(fx) }) {
-                            Text(fx.pluginName.ifBlank { fx.name }, color = if (fx.bypass) Zk.dim else Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(when { fx.pluginState == 3 -> "failed to start"; fx.pluginState != 2 -> "starting…"; fx.bypass -> "bypassed"; else -> "slot ${i + 1}" }, color = Zk.dim, fontSize = 11.sp)
+                    // The name gets the whole width of the dialog (a row with the buttons beside it left room for "…" only); the controls sit under it.
+                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Row(Modifier.fillMaxWidth().clickable { onEdit(fx) }, verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(9.dp).clip(CircleShape).background(when { fx.pluginState == 3 -> Zk.danger; fx.pluginState != 2 -> Zk.warn; fx.bypass -> Zk.dim; else -> Zk.accent }))
+                            Spacer(Modifier.width(8.dp))
+                            Text(fx.pluginName.ifBlank { fx.name }, color = if (fx.bypass) Zk.dim else Zk.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Spacer(Modifier.width(8.dp))
+                            Text(when { fx.pluginState == 3 -> "failed to start"; fx.pluginState != 2 -> "starting…"; fx.bypass -> "bypassed"; else -> "slot ${i + 1}" }, color = Zk.dim, fontSize = 11.sp, maxLines = 1)
                         }
-                        LabelButton(if (fx.bypass) "Off" else "On", !fx.bypass, w = 40.dp, h = 30.dp) { vm.setBypass(fx, !fx.bypass) }
-                        Spacer(Modifier.width(4.dp))
-                        LabelButton("Edit", false, w = 44.dp, h = 30.dp) { onEdit(fx) }
-                        TextButton({ vm.moveEffect(owner, fx, -1) }, enabled = i > 0, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↑") }
-                        TextButton({ vm.moveEffect(owner, fx, 1) }, enabled = i < list.size - 1, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↓") }
-                        TextButton({ vm.removeEffect(owner, fx) }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("✕", color = Zk.danger) }
+                        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LabelButton(if (fx.bypass) "Off" else "On", !fx.bypass, w = 44.dp, h = 30.dp) { vm.setBypass(fx, !fx.bypass) }
+                            LabelButton("Edit", false, w = 48.dp, h = 30.dp) { onEdit(fx) }
+                            Spacer(Modifier.weight(1f))
+                            TextButton({ vm.moveEffect(owner, fx, -1) }, enabled = i > 0, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↑") }
+                            TextButton({ vm.moveEffect(owner, fx, 1) }, enabled = i < list.size - 1, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↓") }
+                            TextButton({ vm.removeEffect(owner, fx) }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("✕", color = Zk.danger) }
+                        }
                     }
                     HorizontalDivider(color = Zk.line)
                 }

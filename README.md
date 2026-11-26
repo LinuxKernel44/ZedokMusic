@@ -12,7 +12,7 @@ A digital audio workstation for Android that runs **real Windows VST3 plugins**.
 - **Init preset**: the first entry of every preset browser (built-in plugins and the Windows plugins' presets list): every control back to its default and everything loaded removed (samples, kit). If you changed the current sound, a clear message asks first.
 - **Project scale**: the button in the piano roll header (e.g. "C major") sets the project's root and scale (major, minor, modes, pentatonics, blues...); rows in the scale are lighter, the others darker, the root is tinted; saved with the project.
 - **Note names everywhere**: every key of the on-screen keyboard and of the piano roll shows its name with the octave (C, C#, D ... B), and so does every note in the piano roll.
-- **Block three-finger screenshots** (Settings → Display): the phone's screenshot gestures cannot act in the app (uses the secure-window flag, which also blocks other screenshots and recordings; debug builds ignore it).
+- **Block screenshots** (Settings → Display, off by default): the phone's screenshot gestures cannot act in the app (uses the secure-window flag, which also blocks other screenshots and recordings; debug builds ignore it).
 - **Lit keys**: on the on-screen keyboard and the piano roll's keys, a key takes the track's colour while it sounds: touched with a finger, played from a MIDI keyboard, previewed, or played by the notes of the track at the playhead.
 - **Rounded screen corners**: the app keeps a side margin so buttons are not cut by the rounded corners of the screen; automatic from the phone's corner radius, or None / Small / Medium / Large in Settings → Display.
 - **On-screen keyboard size**: drag the handle in the middle of the Keys bar up or down; the height is remembered.
