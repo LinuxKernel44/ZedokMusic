@@ -142,7 +142,9 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(40.dp).background(Zk.panel), verticalAlignment = Alignment.CenterVertically) {
             Text(track.name, color = track.color, fontSize = 13.sp, modifier = Modifier.width(KeysW).padding(start = 4.dp), maxLines = 1)
-            Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) {
+            // One box for the ruler and the buttons: the ruler spans the same width as the grid below, so the two scroll over exactly the same range and never drift apart.
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+            Box(Modifier.fillMaxSize().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) {
                 Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekBeat(it) }) {
                     val pw = ppb * density.density; var b = 0
                     while (b <= beats) {
@@ -153,7 +155,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     drawPlayhead(vm.playhead * pw, Zk.accent, head = true)
                 }
             }
-            Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.align(Alignment.CenterEnd).background(Zk.panel).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 val canUndo = vm.canUndoNotes(track); val canRedo = vm.canRedoNotes(track)
                 LabelButton("↶", false, w = 32.dp, h = 32.dp, enabled = canUndo) { vm.undoNotes(track) }
                 LabelButton("↷", false, w = 32.dp, h = 32.dp, enabled = canRedo) { vm.redoNotes(track) }
@@ -163,6 +165,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     Text("Len", color = Zk.dim, fontSize = 11.sp)
                     for ((label, v) in listOf("¼" to 0.25f, "½" to 0.5f, "1" to 1f, "2" to 2f)) LabelButton(label, defaultLen == v) { defaultLen = v }
                 }
+            }
             }
         }
         // The bottom padding is part of the scrolled content: the lowest notes can be scrolled up away from the screen edge, where the system's gesture bar is.
