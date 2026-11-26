@@ -9,7 +9,7 @@ import java.io.File
 
 /**
  * Launches and supervises the Wine process that hosts one VST3 plugin for one track.
- * Drives: C: = <workspace>/C, D: = <workspace>, E: = app files dir (bridge files, zhost.exe).
+ * Drives: C: = <workspace>/C, D: = <workspace>, E: = app files dir (bridge files, zhost.exe), F: = phone storage (/storage/emulated/0).
  */
 class PluginHost(private val ctx: Context) {
     private val env = WineEnv(ctx)
@@ -61,7 +61,9 @@ class PluginHost(private val ctx: Context) {
         if (ws != null && (unix == ws.path || unix.startsWith(ws.path + "/"))) return "D:" + unix.removePrefix(ws.path).replace('/', '\\')
         val fl = files.canonicalPath
         if (unix.startsWith("$fl/")) return "E:" + unix.removePrefix(fl).replace('/', '\\')
-        throw IllegalArgumentException("Path not reachable from Wine (must be inside the workspace folder): $unixPath")
+        val sd = runCatching { File("/storage/emulated/0").canonicalPath }.getOrDefault("/storage/emulated/0")
+        if (unix.startsWith("$sd/")) return "F:" + unix.removePrefix(sd).replace('/', '\\')
+        throw IllegalArgumentException("Path not reachable from Wine (must be inside the phone storage): $unixPath")
     }
 
     /** Copies zhost.exe out of the APK whenever its content differs (a size check alone misses same-size rebuilds). */
@@ -83,7 +85,7 @@ class PluginHost(private val ctx: Context) {
             return ok
         }
         ensureHostExe()
-        ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
+        ctx.let { c -> PrefixManager.linkDrives(env, c, StorageFolder.saved(c)) }
         return startHost(track, pluginPath, 0)
     }
 
@@ -173,7 +175,7 @@ class PluginHost(private val ctx: Context) {
 
     /** Starts the desktop (Wine explorer + the taskbar) on an X screen of [w] x [h]. Every plugin host must be stopped first. Blocking. */
     fun startDesktop(w: Int, h: Int, pluginPath: String? = null): Boolean {
-        ctx.let { c -> StorageFolder.saved(c)?.let { PrefixManager.linkDrive(env, "d:", it) }; PrefixManager.linkDrive(env, "e:", c.filesDir) }
+        ctx.let { c -> PrefixManager.linkDrives(env, c, StorageFolder.saved(c)) }
         gui.reset()
         applyDxvk()
         if (!gui.ensureRunning(w, h)) return false

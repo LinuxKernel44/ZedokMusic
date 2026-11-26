@@ -144,6 +144,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** The plugin the Plugin and Auto panels show: an effect picked in the mixer, otherwise the selected instrument. */
     var pluginTarget by mutableStateOf<TrackM?>(null)
     init {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { scanStorage() }  // after construction: the scan's fields are initialised below this block
         current = this
         store?.create(projectName)
         e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
@@ -412,6 +413,32 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun installedPluginDir(): File? = workspace?.let { File(it, "C/Program Files/Common Files/VST3") }
     /** The built-in Zedok plugins (path "zedok:id"). */
     fun nativePlugins(): List<PluginInfo> = e.nativePlugins().mapNotNull { s -> s.split('|').takeIf { it.size >= 4 }?.let { PluginInfo(it[1], PluginHost.NATIVE_PREFIX + it[0], it[2].toInt(), it[3]) } }
+    // ---------- plugins found anywhere on the phone storage (F: in Wine) ----------
+    @Volatile private var storagePlugins: List<File> = emptyList()
+    private var storageScanning = false
+    /** Looks for .vst3 files in the phone storage (a few levels deep, skipping Android/, hidden folders and the ZedokMusic folder that is scanned anyway). Runs in the background; the pickers refresh when done. */
+    fun scanStorage() {
+        if (storageScanning) return
+        storageScanning = true
+        Thread {
+            val found = ArrayList<File>()
+            val root = File("/storage/emulated/0"); val skip = workspace?.let { runCatching { it.canonicalFile }.getOrNull() }
+            fun walk(d: File, depth: Int) {
+                val kids = d.listFiles() ?: return
+                for (f in kids) {
+                    if (f.name.startsWith(".")) continue
+                    if (f.name.endsWith(".vst3", true)) {
+                        val dll = if (f.isFile) f else f.walkTopDown().maxDepth(4).firstOrNull { it.isFile && it.name.endsWith(".vst3", true) && it.path.contains("x86_64-win") }
+                        if (dll != null) found.add(dll)
+                    } else if (f.isDirectory && depth < 4 && !(depth == 0 && f.name == "Android") && (skip == null || runCatching { f.canonicalFile }.getOrNull() != skip)) walk(f, depth + 1)
+                }
+            }
+            runCatching { walk(root, 0) }
+            storagePlugins = found; storageScanning = false
+            android.os.Handler(android.os.Looper.getMainLooper()).post { pluginsVersion++ }
+        }.start()
+    }
+
     /** The plugins offered in the pickers: built-in ones and the Windows plugins found, with the type the user chose in the plugin manager (if any) and without the hidden ones. */
     fun scanPlugins(includeHidden: Boolean = false): List<PluginInfo> {
         val out = ArrayList<PluginInfo>(nativePlugins())
@@ -425,6 +452,13 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                     out.add(PluginInfo(f.nameWithoutExtension.replace(Regex("\\s*\\((x64|64-?bit)\\)$", RegexOption.IGNORE_CASE), ""), dll.path, ov ?: detected, "", detected, ov != null, hidden))  // u-he installers name the 64-bit file "Name(x64).vst3"
                 }
             }
+        }
+        for (dll in storagePlugins) {
+            if (out.any { it.path == dll.path }) continue
+            val name = (if (dll.path.contains("x86_64-win")) dll.parentFile?.parentFile?.parentFile?.name ?: dll.name else dll.name).removeSuffix(".vst3").replace(Regex("\\s*\\((x64|64-?bit)\\)$", RegexOption.IGNORE_CASE), "")
+            val detected = kindOfPath(dll.path); val ov = pluginOverride(dll.path); val hidden = isPluginHidden(dll.path)
+            if (hidden && !includeHidden) continue
+            out.add(PluginInfo(name, dll.path, ov ?: detected, "", detected, ov != null, hidden))
         }
         return out
     }
@@ -463,7 +497,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun setKind(path: String, kind: Int) { kinds().put(path, JSONArray().put(stamp(File(path))).put(kind)); runCatching { kindFile.writeText(kinds().toString()) } }
     /** Bumped when plugin kinds become known, so open pickers re-list. */
     var pluginsVersion by mutableIntStateOf(0); private set
-    fun refreshPlugins() { pluginsVersion++ }
+    fun refreshPlugins() { pluginsVersion++; scanStorage() }
     private fun rememberKind(t: TrackM) {
         val p = t.pluginPath ?: return
         if (PluginHost.isNative(p)) return

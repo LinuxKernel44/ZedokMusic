@@ -56,10 +56,17 @@ object PrefixManager {
         // 3) repoint drive_c
         internalC.deleteTree()
         Files.createSymbolicLink(File(env.prefix, "drive_c").toPath(), target.toPath())
-        linkDrive(env, "d:", workspace); linkDrive(env, "e:", ctx.filesDir)
+        linkDrives(env, ctx, workspace)
         marker(ctx).writeText("1")
         progress(1f, "Ready")
         return null
+    }
+
+    /** d: = the ZedokMusic folder, e: = the app's private files, f: = the whole phone storage (/storage/emulated/0). */
+    fun linkDrives(env: WineEnv, ctx: Context, workspace: File?) {
+        if (workspace != null) linkDrive(env, "d:", workspace)
+        linkDrive(env, "e:", ctx.filesDir)
+        linkDrive(env, "f:", File("/storage/emulated/0"))
     }
 
     fun linkDrive(env: WineEnv, letter: String, target: File) {

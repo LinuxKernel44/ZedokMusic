@@ -271,7 +271,7 @@ private fun fmt(b: Long) = if (b >= 1L shl 30) "%.1f GB".format(b / 1073741824.0
     Text("A complete Windows desktop for installing and setting up plugins the way you would on a PC: taskbar, Start menu, file manager, registry editor, task manager, command prompt, control panel.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 8.dp))
     ActionRow("Open the Windows desktop", "Your project is saved and its plugins stop while the desktop is open; they come back when you close it.", "Open", onClick = onOpen)
     ActionRow("Open a plugin in the desktop", "For a plugin that asks for a licence, an activation or a one-time setup: its editor opens in a normal window, with the desktop's tools next to it. What you set there is kept.", "Choose…", onClick = onOpenPlugin)
-    Text("Your files: D: is the ZedokMusic folder you chose (Installers, Plugins, Projects), C: is the Windows drive. Plugins installed to C:\\Program Files\\Common Files\\VST3 are found automatically; the .vst3 files in D:\\Plugins\\VST3 too.", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+    Text("Your files: D: is the ZedokMusic folder you chose (Installers, Plugins, Projects), F: is all of the phone storage (Downloads, Documents, Music…), C: is the Windows drive. Plugins installed to C:\\Program Files\\Common Files\\VST3 are found automatically; the .vst3 files in D:\\Plugins\\VST3 too.", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
 }
 
 @Composable private fun UpdatesSection(onShowUpdate: () -> Unit) {
