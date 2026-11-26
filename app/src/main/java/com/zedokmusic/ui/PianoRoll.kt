@@ -154,8 +154,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
             Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 val canUndo = vm.canUndoNotes(track); val canRedo = vm.canRedoNotes(track)
-                LabelButton("↶", false, w = 32.dp, h = 32.dp) { if (canUndo) vm.undoNotes(track) }
-                LabelButton("↷", false, w = 32.dp, h = 32.dp) { if (canRedo) vm.redoNotes(track) }
+                LabelButton("↶", false, w = 32.dp, h = 32.dp, enabled = canUndo) { vm.undoNotes(track) }
+                LabelButton("↷", false, w = 32.dp, h = 32.dp, enabled = canRedo) { vm.redoNotes(track) }
                 LabelButton(Theory.label(scaleRoot, scaleType), scaleType > 0, Zk.accent, w = 84.dp, h = 32.dp) { scaleDialog = true }
                 LabelButton("Select", selectMode, w = 56.dp, h = 32.dp) { selectMode = !selectMode }
                 if (selNotes.isEmpty()) {
@@ -393,7 +393,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeNotes(track, selNotes); selection.clear() }
                 Spacer(Modifier.width(4.dp))
                 fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { NoteM(it.pitch + d, it.start, it.length, it.velocity) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
-                for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp) { transpose(d) }
+                for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp, enabled = selNotes.all { it.pitch + d in BOTTOM..TOP }) { transpose(d) }   // greyed when a selected note would leave the keyboard range
                 Spacer(Modifier.width(4.dp))
                 val avgVel = selNotes.map { it.velocity }.average().toInt()
                 var velDrag by remember(selNotes.size, avgVel) { mutableFloatStateOf(avgVel.toFloat()) }
@@ -402,7 +402,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = track.color, activeTrackColor = track.color))
                 Spacer(Modifier.width(4.dp))
                 LabelButton("Quant", false, w = 52.dp, h = 30.dp) { mapSel { NoteM(it.pitch, ((it.start / SNAP).roundToInt() * SNAP).coerceAtLeast(0f), it.length, it.velocity) } }
-                LabelButton("−", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, (it.length - SNAP).coerceAtLeast(SNAP), it.velocity) } }
+                LabelButton("−", false, w = 32.dp, h = 30.dp, enabled = selNotes.any { it.length > SNAP + 1e-4f }) { mapSel { NoteM(it.pitch, it.start, (it.length - SNAP).coerceAtLeast(SNAP), it.velocity) } }
                 Text(if (selNotes.size == 1) beatsLabel(selNotes[0].length) else "len", color = Zk.text, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 34.dp))
                 LabelButton("+", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, it.length + SNAP, it.velocity) } }
                 Spacer(Modifier.width(4.dp))

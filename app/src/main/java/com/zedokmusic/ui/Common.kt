@@ -77,9 +77,9 @@ fun SquareButton(g: Glyph, active: Boolean = false, tint: Color = Zk.text, activ
 }
 
 @Composable
-fun LabelButton(text: String, active: Boolean = false, activeColor: Color = Zk.accent, w: Dp = 30.dp, h: Dp = 26.dp, onClick: () -> Unit) {
-    Box(Modifier.size(w, h).clip(RoundedCornerShape(6.dp)).background(if (active) activeColor else Zk.panel2).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Text(text, color = if (active) Color(0xFF00201B) else Zk.dim, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+fun LabelButton(text: String, active: Boolean = false, activeColor: Color = Zk.accent, w: Dp = 30.dp, h: Dp = 26.dp, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.size(w, h).clip(RoundedCornerShape(6.dp)).background(if (active && enabled) activeColor else Zk.panel2).then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier), contentAlignment = Alignment.Center) {
+        Text(text, color = if (!enabled) Zk.dim.copy(alpha = .35f) else if (active) Color(0xFF00201B) else Zk.dim, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 
