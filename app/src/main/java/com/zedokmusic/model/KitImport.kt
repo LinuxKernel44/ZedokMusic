@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaPlayer
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
@@ -15,29 +16,38 @@ import java.nio.ByteOrder
 interface KitNode {
     val name: String
     val isDir: Boolean
+    /** A string that finds this file again later (a document URI or a path): used for favourites. */
+    val ref: String
     fun children(): List<KitNode>
     fun open(): InputStream?
     fun feed(ex: MediaExtractor)
+    fun feed(p: MediaPlayer)
 }
 
 class SafNode(private val ctx: Context, private val doc: DocumentFile) : KitNode {
     override val name get() = doc.name ?: ""
     override val isDir get() = doc.isDirectory
+    override val ref get() = doc.uri.toString()
     override fun children(): List<KitNode> = runCatching { doc.listFiles().map { SafNode(ctx, it) } }.getOrDefault(emptyList())
     override fun open(): InputStream? = runCatching { ctx.contentResolver.openInputStream(doc.uri) }.getOrNull()
     override fun feed(ex: MediaExtractor) { ex.setDataSource(ctx, doc.uri, null) }
+    override fun feed(p: MediaPlayer) { p.setDataSource(ctx, doc.uri) }
     companion object {
         fun tree(ctx: Context, uri: Uri): SafNode? = DocumentFile.fromTreeUri(ctx, uri)?.let { SafNode(ctx, it) }
         fun file(ctx: Context, uri: Uri): SafNode? = DocumentFile.fromSingleUri(ctx, uri)?.let { SafNode(ctx, it) }
+        /** Finds a file again from [KitNode.ref]. */
+        fun fromRef(ctx: Context, ref: String): KitNode? = if (ref.startsWith("content:")) file(ctx, Uri.parse(ref)) else File(ref).takeIf { it.isFile }?.let { FileNode(it) }
     }
 }
 
 class FileNode(private val f: File) : KitNode {
     override val name get() = f.name
     override val isDir get() = f.isDirectory
+    override val ref get() = f.absolutePath
     override fun children(): List<KitNode> = f.listFiles()?.sortedBy { it.name.lowercase() }?.map { FileNode(it) } ?: emptyList()
     override fun open(): InputStream? = runCatching { f.inputStream() }.getOrNull()
     override fun feed(ex: MediaExtractor) { ex.setDataSource(f.absolutePath) }
+    override fun feed(p: MediaPlayer) { p.setDataSource(f.absolutePath) }
 }
 
 /** What can be imported from a folder: the files of one kit (path relative to the kit's folder -> file), or an SFZ instrument. */
@@ -61,7 +71,9 @@ object KitScanner {
             else if (KitFormats.isAudio(c.name) && !c.name.startsWith(".")) out.add(prefix + c.name to c)
         }
     }
-    private fun audioOf(dir: KitNode): List<Pair<String, KitNode>> = ArrayList<Pair<String, KitNode>>().also { collect(dir, "", 0, it) }.sortedBy { it.first.lowercase() }
+    private fun audioOf(dir: KitNode): List<Pair<String, KitNode>> = listAudio(dir)
+    /** Every audio file under [dir] (path relative to it -> file), sorted by path. */
+    fun listAudio(dir: KitNode): List<Pair<String, KitNode>> = ArrayList<Pair<String, KitNode>>().also { collect(dir, "", 0, it) }.sortedBy { it.first.lowercase() }
     private fun directAudio(dir: KitNode) = dir.children().filter { !it.isDir && KitFormats.isAudio(it.name) && !it.name.startsWith(".") }.map { it.name to it }
 
     /** Walks down a relative path ("Samples/kick.wav") from [base]; folder and file names are matched ignoring case. */

@@ -2,7 +2,13 @@ package com.zedokmusic.ui.nplug
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,16 +30,16 @@ import com.zedokmusic.ui.dialogListMax
 fun KitSection(ps: PluginState, pad: Int, color: Color) {
     val vm = ps.vm; val t = ps.t; val kits = vm.kits
     var projectKits by remember { mutableStateOf(false) }
-    val tree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) kits.scanTree(t, uri) }
-    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) kits.assignFiles(t, pad, uris) }
+    val tree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) kits.browseTree(t, uri) }
     val name = kits.kitName(t); val padsUsed = (0 until 16).count { kits.zones(t, it).isNotEmpty() }
     Section("Sample kit", color) {
         Text(if (name.isNotBlank() || padsUsed > 0) "${name.ifBlank { "Kit" }} · $padsUsed pad${if (padsUsed == 1) "" else "s"} with samples" else "No sample kit. Load a folder of drum samples, or add samples to a pad.", color = Zk.dim, fontSize = 11.sp)
         Spacer(Modifier.height(6.dp))
         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            LabelButton("Load kit…", true, color, w = 92.dp, h = 34.dp) { tree.launch(null) }
+            LabelButton("Load kit…", true, color, w = 92.dp, h = 34.dp) { tree.launch(kits.lastTree()) }
             LabelButton("Project kits", false, w = 100.dp, h = 34.dp) { projectKits = true }
-            LabelButton("Add to pad ${pad + 1}…", false, w = 128.dp, h = 34.dp) { files.launch(arrayOf("audio/*", "application/octet-stream")) }
+            LabelButton("Load to pad ${pad + 1}…", false, w = 136.dp, h = 34.dp) { if (!kits.browseLast(t)) { if (kits.favorites.isNotEmpty()) kits.browseFavorites(t) else tree.launch(null) } }
+            LabelButton("Favourites", false, w = 92.dp, h = 34.dp) { kits.browseFavorites(t) }
             LabelButton("Clear pad", false, w = 84.dp, h = 34.dp) { kits.clearPad(t, pad) }
             LabelButton("Clear kit", false, w = 84.dp, h = 34.dp) { kits.clearKit(t) }
         }
@@ -52,6 +58,7 @@ fun KitSection(ps: PluginState, pad: Int, color: Color) {
         }
     }
     if (projectKits) ProjectKitsDialog(kits, ps, color) { projectKits = false }
+    if (kits.browse != null) SampleBrowser(kits, pad, color, onPickFolder = { tree.launch(kits.lastTree()) })
 }
 
 @Composable
@@ -112,5 +119,81 @@ private fun ProjectKitsDialog(kits: KitManager, ps: PluginState, color: Color, o
         AlertDialog(onDismissRequest = { confirmDelete = null }, containerColor = Zk.panel, title = { Text("Delete this kit?") },
             text = { Text("Its audio files are removed from the project folder. A track that still uses them goes silent on those pads.", color = Zk.dim, fontSize = 13.sp) },
             confirmButton = { TextButton({ kits.deleteProjectKit(d); confirmDelete = null }) { Text("Delete", color = Zk.danger) } }, dismissButton = { TextButton({ confirmDelete = null }) { Text("Cancel") } })
+    }
+}
+
+/**
+ * The sound browser: the audio files of a folder (or the favourites), each with a preview button and a star. Tap rows to select, then Load to a pad
+ * (replaces the pad) or Add (round robin / layer). The files are copied into the project.
+ */
+@Composable
+private fun SampleBrowser(kits: KitManager, startPad: Int, color: Color, onPickFolder: () -> Unit) {
+    val b = kits.browse ?: return
+    var pad by remember(b) { mutableIntStateOf(startPad) }
+    var favOnly by remember(b) { mutableStateOf(b.root == null) }
+    var query by remember(b) { mutableStateOf("") }
+    val selected = remember(b) { mutableStateListOf<String>() }
+    val rows = remember(b, favOnly, query, kits.favorites) {
+        (if (favOnly) kits.favoriteItems() else b.items).filter { query.isBlank() || it.first.contains(query.trim(), true) }
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = { kits.closeBrowser() }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxSize().background(Zk.bg).statusBarsPadding().navigationBarsPadding().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (favOnly) "Favourite sounds" else b.title, color = Zk.text, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (b.root != null && !favOnly) "${b.items.size} sound${if (b.items.size == 1) "" else "s"}" else "${kits.favorites.size} favourite${if (kits.favorites.size == 1) "" else "s"}", color = Zk.dim, fontSize = 11.sp)
+                }
+                LabelButton("‹", false, w = 30.dp, h = 32.dp) { pad = (pad + 15) % 16 }
+                Text("Pad ${pad + 1}", color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                LabelButton("›", false, w = 30.dp, h = 32.dp) { pad = (pad + 1) % 16 }
+                LabelButton("Close", true, color, w = 62.dp, h = 32.dp) { kits.closeBrowser() }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.weight(1f).height(36.dp).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).padding(horizontal = 10.dp), contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) Text("Search", color = Zk.dim, fontSize = 13.sp)
+                    BasicTextField(query, { query = it }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(color = Zk.text, fontSize = 13.sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(color), modifier = Modifier.fillMaxWidth())
+                }
+                if (b.root != null) LabelButton("All", !favOnly, color, w = 44.dp, h = 34.dp) { favOnly = false }
+                LabelButton("★ Favourites", favOnly, color, w = 108.dp, h = 34.dp) { favOnly = true }
+                LabelButton("Folder…", false, w = 78.dp, h = 34.dp) { onPickFolder() }
+                if (b.root != null) LabelButton("Import as kit", false, w = 108.dp, h = 34.dp) { kits.importBrowsed() }
+            }
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (kits.browseLoading) Text("Reading the folder…", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+                else if (rows.isEmpty()) Text(if (favOnly) "No favourite yet. Tap the star of a sound in a folder to keep it here." else "No sound found.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+                else LazyColumn(Modifier.fillMaxSize()) {
+                    items(rows, key = { it.second.ref }) { (path, node) ->
+                        val on = node.ref in selected
+                        val playing = kits.preview.playing == node.ref
+                        val fav = kits.isFavorite(node)
+                        Row(Modifier.fillMaxWidth().background(if (on) color.copy(alpha = 0.16f) else Color.Transparent).clickable { if (on) selected.remove(node.ref) else selected.add(node.ref) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (playing) "■" else "▶", color = if (playing) color else Zk.text, fontSize = 18.sp, textAlign = TextAlign.Center,
+                                modifier = Modifier.width(48.dp).clickable { kits.preview.toggle(node) }.padding(vertical = 12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(node.name, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (path != node.name) Text(path.substringBeforeLast('/'), color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Text(if (on) "✓" else "", color = color, fontSize = 16.sp, modifier = Modifier.width(26.dp), textAlign = TextAlign.Center)
+                            Text(if (fav) "★" else "☆", color = if (fav) Color(0xFFFFC857) else Zk.dim, fontSize = 22.sp, textAlign = TextAlign.Center,
+                                modifier = Modifier.width(48.dp).clickable { kits.toggleFavorite(node, path.substringBeforeLast('/', "")) }.padding(vertical = 8.dp))
+                        }
+                        HorizontalDivider(color = Zk.line)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (kits.browseStatus.isNotEmpty()) kits.browseStatus else if (selected.isEmpty()) "Tap sounds to select them." else "${selected.size} selected", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                val picked = { rows.filter { it.second.ref in selected }.map { it.second } }
+                LabelButton("Load to pad ${pad + 1}", selected.isNotEmpty(), color, w = 130.dp, h = 38.dp) {
+                    if (selected.isNotEmpty()) kits.loadToPad(pad, picked(), false) { selected.clear(); pad = (pad + 1) % 16 }
+                }
+                LabelButton("Add to pad ${pad + 1}", false, w = 120.dp, h = 38.dp) {
+                    if (selected.isNotEmpty()) kits.loadToPad(pad, picked(), true) { selected.clear() }
+                }
+            }
+        }
     }
 }

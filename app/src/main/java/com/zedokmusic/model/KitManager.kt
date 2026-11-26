@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.zedokmusic.engine.NativeEngine
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
@@ -109,28 +110,88 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
     }
 
     // ------------------------------------------------------------------ single files on one pad
-    /** Puts the picked files on [pad] (0-based): velocity layers and round robins are recognised from the names. Files are copied into the project. */
-    fun assignFiles(t: TrackM, pad: Int, uris: List<Uri>) {
+    fun assignFiles(t: TrackM, pad: Int, uris: List<Uri>) = assignNodes(t, pad, uris.mapNotNull { SafNode.file(ctx, it) }, append = false)
+
+    /** Puts the files on [pad] (0-based), replacing what is there or ([append]) adding to it: velocity layers and round robins are recognised from the names. Files are copied into the project. */
+    fun assignNodes(t: TrackM, pad: Int, files: List<KitNode>, append: Boolean, done: (Boolean) -> Unit = {}) {
         val kitsRoot = kitsDir() ?: return
         worker.execute {
             try {
                 val kitName = t.states["kit"]?.takeIf { it.isNotBlank() } ?: "Custom kit"
                 val folderName = KitImporter.safeName(kitName)
                 val dest = File(kitsRoot, folderName + "/Pad ${pad + 1}").apply { mkdirs() }
-                val nodes = uris.mapNotNull { u -> SafNode.file(ctx, u) }.filter { KitFormats.isAudio(it.name) }
+                val nodes = files.filter { KitFormats.isAudio(it.name) }
                 val written = ArrayList<Pair<KitNode, File>>()
-                for (n in nodes) { val out = File(dest, KitImporter.safeName(n.name)); KitImporter.copyOrConvert(n, out)?.let { written.add(n to it) } }
-                if (written.isEmpty()) { ui { vm.message = "None of those files could be read." }; return@execute }
-                val zones = KitMapper.padPlan(written.map { KitMapper.Entry(it.second.name) }).map { z ->
+                for (n in nodes) {
+                    var out = File(dest, KitImporter.safeName(n.name)); var i = 2
+                    while (out.exists() && append) { out = File(dest, KitImporter.safeName(n.name.substringBeforeLast('.')) + " ($i)." + n.name.substringAfterLast('.', "wav")); i++ }
+                    KitImporter.copyOrConvert(n, out)?.let { written.add(n to it) }
+                }
+                if (written.isEmpty()) { ui { vm.message = "None of those files could be read."; done(false) }; return@execute }
+                val fresh = KitMapper.padPlan(written.map { KitMapper.Entry(it.second.name) }).map { z ->
                     KitMapper.Zone(KitMapper.Entry("Kits/$folderName/Pad ${pad + 1}/${z.entry.path}"), z.vlo, z.vhi)
                 }
+                val zones = if (append) zones(t, pad) + fresh else fresh
                 setPad(t, pad, zones); ensureSampleType(t, pad)
-                ui { t.states["kit"] = kitName; vm.message = "${zones.size} sample${if (zones.size > 1) "s" else ""} on pad ${pad + 1}, copied into the project."; revision++ }
+                ui { t.states["kit"] = kitName; vm.message = "${fresh.size} sample${if (fresh.size > 1) "s" else ""} ${if (append) "added to" else "on"} pad ${pad + 1}, copied into the project."; revision++; done(true) }
                 run { NativeEngine.setPluginState(t.id, "kit", kitName) }
                 saveKitFile(t)
-            } catch (e: Exception) { ui { vm.message = "Could not add the samples: ${e.message}" } }
+            } catch (e: Exception) { ui { vm.message = "Could not add the samples: ${e.message}"; done(false) } }
         }
     }
+
+    // ------------------------------------------------------------------ sound browser: preview, favourites, load to a pad
+    /** What the sound browser shows: the audio files of a folder (or only the favourites when [root] is null). */
+    class BrowseState(val t: TrackM, val title: String, val root: KitNode?, val items: List<Pair<String, KitNode>>)
+    var browse by mutableStateOf<BrowseState?>(null); private set
+    var browseLoading by mutableStateOf(false); private set
+    var browseStatus by mutableStateOf(""); private set
+    val preview = SamplePreview(ctx)
+    private val prefs = ctx.getSharedPreferences("kits", Context.MODE_PRIVATE)
+
+    /** Opens the browser on a folder picked with the folder picker (read access is kept so the folder and its favourites are still there next time). */
+    fun browseTree(t: TrackM, uri: Uri) {
+        runCatching { ctx.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        prefs.edit().putString("lastTree", uri.toString()).apply()
+        val root = SafNode.tree(ctx, uri)
+        if (root == null) { vm.message = "That folder cannot be read." } else openBrowser(t, root)
+    }
+    /** The folder used last time, if it can still be read. */
+    fun lastTree(): Uri? = prefs.getString("lastTree", null)?.let { Uri.parse(it) }?.takeIf { u -> ctx.contentResolver.persistedUriPermissions.any { it.uri == u && it.isReadPermission } }
+    fun browseLast(t: TrackM): Boolean { val u = lastTree() ?: return false; browseTree(t, u); return true }
+    fun browseFavorites(t: TrackM) { browse = BrowseState(t, "Favourites", null, emptyList()) }
+    fun openBrowser(t: TrackM, root: KitNode) {
+        browseLoading = true; browseStatus = ""
+        browse = BrowseState(t, root.name.ifEmpty { "Sounds" }, root, emptyList())
+        worker.execute {
+            val items = try { KitScanner.listAudio(root) } catch (e: Exception) { emptyList() }
+            ui { browseLoading = false; browse = BrowseState(t, root.name.ifEmpty { "Sounds" }, root, items); if (items.isEmpty()) browseStatus = "No audio files in this folder." }
+        }
+    }
+    fun closeBrowser() { preview.stop(); browse = null; browseStatus = "" }
+    /** Imports the whole browsed folder as a kit (the one-shot / multikit / SFZ detection of Load kit). */
+    fun importBrowsed() { val b = browse ?: return; val r = b.root ?: return; closeBrowser(); scan(b.t, r) }
+    fun loadToPad(pad: Int, nodes: List<KitNode>, append: Boolean, done: () -> Unit) {
+        val b = browse ?: return
+        browseStatus = "Copying ${nodes.size} sound${if (nodes.size > 1) "s" else ""} into the project…"
+        assignNodes(b.t, pad, nodes, append) { ok -> browseStatus = if (ok) "${if (append) "Added to" else "Loaded on"} pad ${pad + 1}." else "Could not read those files."; if (ok) done() }
+    }
+
+    // favourites: <workspace>/Presets/sample_favorites.json  [{ref, name, folder}]
+    class Fav(val ref: String, val name: String, val folder: String)
+    private val favFile get() = vm.workspace?.let { File(it, "Presets/sample_favorites.json") }
+    var favorites by mutableStateOf(loadFavs()); private set
+    private fun loadFavs(): List<Fav> = runCatching {
+        val a = JSONArray(favFile?.takeIf { it.isFile }?.readText() ?: "[]")
+        (0 until a.length()).map { a.getJSONObject(it).let { o -> Fav(o.getString("ref"), o.optString("name"), o.optString("folder")) } }
+    }.getOrDefault(emptyList())
+    fun isFavorite(node: KitNode) = favorites.any { it.ref == node.ref }
+    fun toggleFavorite(node: KitNode, folder: String) {
+        favorites = if (isFavorite(node)) favorites.filter { it.ref != node.ref } else favorites + Fav(node.ref, node.name, folder)
+        runCatching { favFile?.let { f -> f.parentFile?.mkdirs(); f.writeText(JSONArray().also { a -> favorites.forEach { a.put(JSONObject().put("ref", it.ref).put("name", it.name).put("folder", it.folder)) } }.toString()) } }
+    }
+    /** The favourites as browser rows (files that moved or lost their access are left out). */
+    fun favoriteItems(): List<Pair<String, KitNode>> = favorites.mapNotNull { f -> SafNode.fromRef(ctx, f.ref)?.let { n -> (if (f.folder.isNotEmpty()) f.folder + "/" else "") + f.name to n } }
 
     // ------------------------------------------------------------------ pad state helpers
     fun zones(t: TrackM, pad: Int): List<KitMapper.Zone> = KitMapper.parseZoneText(t.states["pad${pad + 1}"] ?: "")
@@ -183,4 +244,25 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
         }
     }
     fun deleteProjectKit(dir: File) { runCatching { dir.deleteRecursively() }; revision++ }
+}
+
+/** Plays a sound for the browser's preview (Android's own player: it works with any file the folder picker gives access to). */
+class SamplePreview(private val ctx: Context) {
+    private var mp: android.media.MediaPlayer? = null
+    var playing by mutableStateOf<String?>(null); private set
+    fun toggle(node: KitNode) {
+        val ref = node.ref
+        if (playing == ref) { stop(); return }
+        stop()
+        try {
+            val p = android.media.MediaPlayer()
+            p.setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            node.feed(p)
+            p.setOnPreparedListener { it.start() }
+            p.setOnCompletionListener { if (playing == ref) stop() }
+            p.setOnErrorListener { _, _, _ -> if (playing == ref) stop(); true }
+            mp = p; playing = ref; p.prepareAsync()
+        } catch (e: Exception) { stop() }
+    }
+    fun stop() { runCatching { mp?.release() }; mp = null; playing = null }
 }
