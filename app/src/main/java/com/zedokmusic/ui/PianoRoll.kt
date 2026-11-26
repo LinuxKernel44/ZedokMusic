@@ -262,8 +262,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                         } else if (!handleGrab && lastTapNote === target && now - lastTapAt < 320) {
                                             vm.removeNote(track, target); selection.remove(target); lastTapNote = null
                                         } else {
-                                            if (selectMode) { if (!selection.remove(target)) selection.add(target); preview = target.pitch; barRequest++ }
-                                            else { selection.clear(); selection.add(target); preview = target.pitch }
+                                            if (selectMode) { if (!selection.remove(target)) selection.add(target); barRequest++ }   // selecting never plays the note
+                                            else { selection.clear(); selection.add(target) }
                                             lastTapNote = target; lastTapAt = now
                                         }
                                         return@awaitEachGesture
