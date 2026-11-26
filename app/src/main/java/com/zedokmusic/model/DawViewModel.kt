@@ -894,6 +894,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun nativeId(t: TrackM): String? = t.pluginPath?.takeIf { PluginHost.isNative(it) }?.removePrefix(PluginHost.NATIVE_PREFIX)
     /** Applies a preset: every parameter takes the preset's value, or returns to its default when the preset does not list it. */
     fun applyPreset(t: TrackM, p: Preset) {
+        // a preview started in the last few seconds may still be ringing out: cut it (the sequencer's own notes are never cut)
+        val previewing = System.currentTimeMillis() - lastPreviewAt < 8000
+        if (previewing && nativeId(t) == "hybrid") { presetPreview?.cancel(); e.silence(t.id); lastPreviewAt = 0 }   // the previous preview must not ring on under the new sound
         for (pm in loadParams(t)) {
             val target = p.values[pm.name] ?: pm.default
             e.setParam(t.id, pm.index, target)
@@ -905,12 +908,13 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (nativeId(t) == "hybrid") previewPresetNote(t)
     }
     private var presetPreview: kotlinx.coroutines.Job? = null
+    private var lastPreviewAt = 0L
     /** Plays C4 or C5 (Settings -> Plugins) for a moment so the chosen preset can be heard right away. A new preset cuts the previous preview. */
     private fun previewPresetNote(t: TrackM) {
         val pitch = when (com.zedokmusic.settings.AppSettings.presetPreviewNote.value) { 0 -> 60; 1 -> 72; else -> return }
-        presetPreview?.cancel()
+        presetPreview?.cancel(); lastPreviewAt = System.currentTimeMillis()
         presetPreview = viewModelScope.launch {
-            kotlinx.coroutines.delay(60)   // let the new values reach the synth first
+            kotlinx.coroutines.delay(130)   // let the new values reach the synth (and the old sound fade out) first
             liveNote(t, true, pitch)
             try { kotlinx.coroutines.delay(900) } finally { liveNote(t, false, pitch) }
         }

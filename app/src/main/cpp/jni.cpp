@@ -17,6 +17,7 @@ J(jboolean, setFxBypass, jint id, jboolean bypass) { return eng().setFxBypass(id
 J(jint, pluginKind, jint id) { return eng().pluginKind(id); }
 J(void, releaseRetired) { eng().releaseRetired(); }
 J(void, panic, jint track) { eng().panic(track); }
+J(void, silence, jint track) { eng().silence(track); }
 J(jint, trackIdsUsed) { return eng().trackIdsUsed(); }
 J(jboolean, resetTrackIds) { return eng().resetTrackIds(); }
 J(void, configure, jint outDevice, jint bufferMult, jboolean exclusive) { eng().configure(outDevice, bufferMult, exclusive); }

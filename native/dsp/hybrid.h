@@ -147,6 +147,7 @@ public:
     void process(const ProcessCtx& c, const float* vals) override {
         readParams(vals);
         const int n = c.frames; if (n > maxFrames_) return;
+        for (int i = 0; i < c.nEvents; i++) if (c.events[i].type == ZK_ALL_NOTES_OFF && c.events[i].pitch == 1) kill_ = true;   // "silence": the host asks for a hard stop (a new preset is about to be heard)
         std::fill(mixL_.begin(), mixL_.begin() + n, 0.f); std::fill(mixR_.begin(), mixR_.begin() + n, 0.f);
         tempo_ = c.tempo > 20.0 ? c.tempo : 120.0;
         if (P_.arpOn != arpWasOn_) { if (!P_.arpOn) { releaseArp(); } arpWasOn_ = P_.arpOn; }
@@ -175,6 +176,10 @@ public:
         // output stage: volume with a transparent soft ceiling
         const float g = dbToLin(P_.volume);
         for (int i = 0; i < n; i++) { c.outL[i] = ceil(L[i] * g); c.outR[i] = ceil(R[i] * g); }
+        if (kill_) {   // fade this block out, then forget every voice and effect tail so the next sound starts clean
+            for (int i = 0; i < n; i++) { const float f = 1.f - (float)(i + 1) / n; c.outL[i] *= f; c.outR[i] *= f; }
+            reset(); kill_ = false;
+        }
     }
 
     int telemetry(int what, float* out, int cap) override {
@@ -188,6 +193,7 @@ public:
     }
 
 private:
+    bool kill_ = false;
     // ---------------------------------------------------------------- parameters
     struct OscIx { int type, wave, table, pos, pw, ratio, index, fb, level, oct, semi, fine, pan, uni, det, spread, phase; };
     struct EnvIx { int a, d, s, r; };

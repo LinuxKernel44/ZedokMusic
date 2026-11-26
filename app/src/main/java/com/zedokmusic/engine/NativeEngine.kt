@@ -18,6 +18,8 @@ object NativeEngine {
     external fun trackIdsUsed(): Int
     /** Releases every sounding note of an instrument track (once). */
     external fun panic(track: Int)
+    /** Hard stop of the track's plugin: voices and effect tails are dropped. */
+    external fun silence(track: Int)
     /** Lets removed plugins' Wine hosts end now (see the C++ side). */
     external fun releaseRetired()
     /** Insert effects: [track] 0 = the master. Effect ids (>= 1000) work with every plugin call (bridge, parameters, editor, automation). Returns 0 when full. */

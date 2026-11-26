@@ -20,6 +20,7 @@ Engine::Engine() {
     published_.store(p.get());
     for (auto& m : meters_) m.store(0.f);
     for (auto& c : panicTrack_) c.store(0);
+    for (auto& c : hardTrack_) c.store(0);
     for (auto& row : fxAutoLast_) for (auto& v : row) v = NAN;
     for (auto& row : fxAutoLastOff_) for (auto& v : row) v = NAN;
 }
@@ -638,7 +639,8 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
         if (!playing || jumped) for (int k = 0; k < kMaxLanes; k++) autoLast_[t.pluginSlot][k] = NAN;  // re-send values when playback (re)starts
         if (playing) appendAutomation(t.lanes, windowPos, autoLast_[t.pluginSlot], ch, nc);
         const int pt = t.id < kMaxTracks ? panicTrack_[t.id].load(std::memory_order_relaxed) : 0;
-        if (jumped || pt > 0 || (!playing && panicAll > 0)) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, 0, 0};
+        const bool hard = t.id < kMaxTracks && hardTrack_[t.id].exchange(0, std::memory_order_relaxed) != 0;
+        if (jumped || pt > 0 || (!playing && panicAll > 0)) ev[n++] = ZkEvent{0, ZK_ALL_NOTES_OFF, 0, (uint8_t)(hard ? 1 : 0), 0};
         if (pt > 0) panicTrack_[t.id].store(pt - 1, std::memory_order_relaxed);
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)

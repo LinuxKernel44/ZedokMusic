@@ -175,6 +175,8 @@ public:
     void pause() { playing_.store(false); panicAll_.store(12); }
     /** Releases the notes of one instrument track once (e.g. a sounding note was deleted or moved while playing). */
     void panic(int track) { if (track > 0 && track < kMaxTracks) panicTrack_[track].store(2); }
+    /** Hard stop: every voice and effect tail of the track's plugin is dropped (after a short fade). */
+    void silence(int track) { if (track > 0 && track < kMaxTracks) { hardTrack_[track].store(1); panicTrack_[track].store(2); } }
     void seek(int64_t f) { pos_.store(f < 0 ? 0 : f); }
     bool playing() const { return playing_.load(); }
     int64_t position() const { return pos_.load(); }
@@ -246,7 +248,7 @@ private:
     std::shared_ptr<oboe::AudioStream> stream_;
     std::atomic<int64_t> callbacks_{0};
     int outDevice_ = 0, bufferMult_ = 2; bool exclusive_ = true;  // see configure()
-    std::atomic<int> panicAll_{0}, panicTrack_[kMaxTracks];  // blocks of ALL_NOTES_OFF still to send (see pause() / panic())
+    std::atomic<int> panicAll_{0}, panicTrack_[kMaxTracks], hardTrack_[kMaxTracks];  // blocks of ALL_NOTES_OFF still to send (see pause() / panic())
     std::atomic<int> releasePending_{0};
     std::atomic<bool> exporting_{false};  // offline render owns the plugin bridges: the audio callback stays away from them
     std::atomic<int64_t> cbNsTotal_{0};
