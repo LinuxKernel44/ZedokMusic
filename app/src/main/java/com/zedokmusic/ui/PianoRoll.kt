@@ -14,6 +14,7 @@ import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zedokmusic.model.*
+import com.zedokmusic.model.Theory
 import kotlinx.coroutines.delay
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -74,6 +76,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     // selection and drag state
     val selection = remember(track.id) { mutableStateListOf<NoteM>() }
     var selectMode by remember(track.id) { mutableStateOf(false) }
+    val scaleRoot = vm.scaleRoot; val scaleType = vm.scaleType
+    var scaleDialog by remember { mutableStateOf(false) }
     val selNotes = selection.filter { track.notes.contains(it) }
     val selSet = selNotes.toHashSet()
     var dragPrev by remember { mutableStateOf<Map<NoteM, NoteM>?>(null) }   // notes being dragged -> where they would land
@@ -118,6 +122,22 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
         val ch = sel.associateWith(f); vm.replaceNotes(track, ch); selection.clear(); selection.addAll(sel.map { ch[it]!! })
     }
 
+    if (scaleDialog) androidx.compose.material3.AlertDialog(onDismissRequest = { scaleDialog = false }, containerColor = Zk.panel, title = { Text("Project scale") }, text = {
+        Column {
+            Text("Rows of the piano roll that belong to the scale are lighter, the others darker, and the root is tinted. The scale is saved with the project.", color = Zk.dim, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                for (r in 0 until 12) LabelButton(Theory.NAMES[r], r == scaleRoot, Zk.accent, w = 40.dp, h = 32.dp) { vm.setScale(r, scaleType) }
+            }
+            Spacer(Modifier.height(8.dp))
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = dialogListMax(240.dp))) {
+                itemsIndexed(Theory.SCALES) { i, s ->
+                    Text(s.label, color = if (i == scaleType) Zk.accent else Zk.text, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().clickable { vm.setScale(scaleRoot, i) }.padding(vertical = 9.dp))
+                }
+            }
+        }
+    }, confirmButton = { androidx.compose.material3.TextButton({ scaleDialog = false }) { Text("Close") } })
+
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(40.dp).background(Zk.panel), verticalAlignment = Alignment.CenterVertically) {
             Text(track.name, color = track.color, fontSize = 13.sp, modifier = Modifier.width(KeysW).padding(start = 4.dp), maxLines = 1)
@@ -136,6 +156,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 val canUndo = vm.canUndoNotes(track); val canRedo = vm.canRedoNotes(track)
                 LabelButton("↶", false, w = 32.dp, h = 32.dp) { if (canUndo) vm.undoNotes(track) }
                 LabelButton("↷", false, w = 32.dp, h = 32.dp) { if (canRedo) vm.redoNotes(track) }
+                LabelButton(Theory.label(scaleRoot, scaleType), scaleType > 0, Zk.accent, w = 84.dp, h = 32.dp) { scaleDialog = true }
                 LabelButton("Select", selectMode, w = 56.dp, h = 32.dp) { selectMode = !selectMode }
                 if (selNotes.isEmpty()) {
                     Text("Len", color = Zk.dim, fontSize = 11.sp)
@@ -183,7 +204,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     Box(Modifier.fillMaxWidth().height(RowPx).background(if (p in lit) (if (isBlack(p)) track.color else track.color.copy(alpha = .75f)) else if (isBlack(p)) Color(0xFF15171C) else Color(0xFFD9DCE2)).border(0.5.dp, Zk.line)
                         .pointerInput(p) { detectTapGestures(onPress = { vm.liveNote(track, true, p); tryAwaitRelease(); vm.liveNote(track, false, p) }) },
                         contentAlignment = Alignment.CenterEnd) {
-                        if (p % 12 == 0) Text("C${p / 12 - 1}", fontSize = 9.sp, color = Color(0xFF333843), modifier = Modifier.padding(end = 4.dp))
+                        Text(Theory.name(p), fontSize = 9.sp, color = if (p in lit) Color.Black else if (isBlack(p)) Color(0xFFC9CDD6) else Color(0xFF333843), maxLines = 1, softWrap = false, modifier = Modifier.padding(end = 4.dp))
                     }
                 }
             }
@@ -306,7 +327,9 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                         val rowPx = RowPx.toPx(); val pw = ppb * density.density
                         for (p in TOP downTo BOTTOM) {
                             val y = (TOP - p) * rowPx
-                            drawRect(if (isBlack(p)) Color(0xFF121418) else Color(0xFF181B20), Offset(0f, y), Size(size.width, rowPx))
+                            val rowCol = if (scaleType > 0) (if (Theory.isRoot(p, scaleRoot)) Color(0xFF26342F) else if (Theory.inScale(p, scaleRoot, scaleType)) Color(0xFF20252C) else Color(0xFF0E1013))
+                                         else if (isBlack(p)) Color(0xFF121418) else Color(0xFF181B20)
+                            drawRect(rowCol, Offset(0f, y), Size(size.width, rowPx))
                             drawLine(if (p % 12 == 0) Zk.dim.copy(alpha = .5f) else Zk.line.copy(alpha = .5f), Offset(0f, y), Offset(size.width, y), 1f)
                         }
                         // Grid lines follow the snap setting (as fine as is still readable), so the lines you see are the positions notes snap to.
@@ -320,6 +343,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             val y = (TOP - shown.pitch) * rowPx
                             val nx = gridPx(shown.start * pw); val w = maxOf(4f, gridPx((shown.start + shown.length) * pw) - nx - 1)
                             drawRoundRect(track.color, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f))
+                            if (rowPx >= 14.dp.toPx() && w >= 26.dp.toPx()) drawText(tm.measure(Theory.name(shown.pitch), TextStyle(color = Color(0xFF0B0D10), fontSize = 10.sp)), topLeft = Offset(nx + 4.dp.toPx(), y + (rowPx - 12.dp.toPx()) / 2))
                             if (n in selSet) {
                                 drawRoundRect(Color.White, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
                                 if (selSet.size == 1) {

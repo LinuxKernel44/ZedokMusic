@@ -19,11 +19,11 @@ import androidx.compose.ui.unit.sp
 private val WhiteSteps = intArrayOf(0, 2, 4, 5, 7, 9, 11)
 private val BlackAfter = mapOf(0 to 1, 1 to 3, 3 to 6, 4 to 8, 5 to 10)  // white index -> black semitone
 
-private fun Modifier.press(onDown: () -> Unit, onUp: () -> Unit) = pointerInput(Unit) {
+/** [key] restarts the gesture when the key's note changes (octave buttons), and a note held at that moment is released with the pitch it started with. */
+private fun Modifier.press(key: Any, onDown: () -> Unit, onUp: () -> Unit) = pointerInput(key) {
     awaitEachGesture {
         awaitFirstDown(); onDown()
-        do { val e = awaitPointerEvent() } while (e.changes.any { it.pressed })
-        onUp()
+        try { do { val e = awaitPointerEvent() } while (e.changes.any { it.pressed }) } finally { onUp() }
     }
 }
 
@@ -52,15 +52,17 @@ fun PianoKeyboard(baseOctave: Int, onOctave: (Int) -> Unit, color: Color, onNote
             Row(Modifier.fillMaxSize()) {
                 for (i in 0 until 14) {
                     val pitch = base + (i / 7) * 12 + WhiteSteps[i % 7]
-                    Box(Modifier.width(whiteW).fillMaxHeight().border(0.5.dp, Color(0xFF9AA0AC)).background(if ((pitch in active)) color.copy(alpha = .75f) else Color(0xFFF1F2F5)).press({ onNote(true, pitch) }, { onNote(false, pitch) }), contentAlignment = Alignment.BottomCenter) {
-                        if (i % 7 == 0) Text("C${baseOctave + i / 7}", fontSize = 9.sp, color = Color(0xFF555B68), modifier = Modifier.padding(bottom = 4.dp))
+                    Box(Modifier.width(whiteW).fillMaxHeight().border(0.5.dp, Color(0xFF9AA0AC)).background(if ((pitch in active)) color.copy(alpha = .75f) else Color(0xFFF1F2F5)).press(pitch, { onNote(true, pitch) }, { onNote(false, pitch) }), contentAlignment = Alignment.BottomCenter) {
+                        Text(com.zedokmusic.model.Theory.name(pitch), fontSize = 9.sp, color = if (pitch in active) Color.Black else Color(0xFF555B68), modifier = Modifier.padding(bottom = 4.dp))
                     }
                 }
             }
             for (i in 0 until 14) {
                 val semis = BlackAfter[i % 7] ?: continue
                 val pitch = base + (i / 7) * 12 + semis
-                Box(Modifier.offset(x = whiteW * (i + 1) - blackW / 2).width(blackW).fillMaxHeight(0.6f).background(if (pitch in active) color else Color(0xFF14161A)).border(0.5.dp, Color.Black).press({ onNote(true, pitch) }, { onNote(false, pitch) }))
+                Box(Modifier.offset(x = whiteW * (i + 1) - blackW / 2).width(blackW).fillMaxHeight(0.6f).background(if (pitch in active) color else Color(0xFF14161A)).border(0.5.dp, Color.Black).press(pitch, { onNote(true, pitch) }, { onNote(false, pitch) }), contentAlignment = Alignment.BottomCenter) {
+                    Text(com.zedokmusic.model.Theory.pc(pitch) + (pitch / 12 - 1), fontSize = 8.sp, color = if (pitch in active) Color.Black else Color(0xFFC9CDD6), maxLines = 1, softWrap = false, modifier = Modifier.padding(bottom = 4.dp))
+                }
             }
         }
     }

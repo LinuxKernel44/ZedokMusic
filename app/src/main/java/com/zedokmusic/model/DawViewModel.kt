@@ -44,6 +44,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     val tracks = mutableStateListOf<TrackM>()
     var bpm by mutableFloatStateOf(120f); private set
     var playing by mutableStateOf(false); private set
+    /** The project's scale: root (0 = C ... 11 = B) and type (index in Theory.SCALES, 0 = none). Shown in the piano roll grid and saved with the project. */
+    var scaleRoot by mutableIntStateOf(0); private set
+    var scaleType by mutableIntStateOf(0); private set
+    fun setScale(root: Int, type: Int) { scaleRoot = root.coerceIn(0, 11); scaleType = type.coerceIn(0, Theory.SCALES.size - 1); dirty = true }
     var loop by mutableStateOf(false); private set
     /** The timelines scroll along with the play cursor. */
     var followPlayhead: Boolean get() = AppSettings.follow.on; set(v) { AppSettings.follow.set(v) }
@@ -754,7 +758,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
     private fun write(f: File, mapPath: (String) -> String = { it }) {
-        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("loopBars", loopBars).put("loop", loop)
+        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("loopBars", loopBars).put("loop", loop).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
             .put("view", JSONObject().put("ppb", ppb.toDouble()).put("ax", arrangeX).put("ay", arrangeY).put("rx", rollX).put("ry", rollY))
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble())
@@ -1024,6 +1028,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             val root = JSONObject(f.readText())
             bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain)
             loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
+            root.optJSONObject("scale").let { sc -> scaleRoot = sc?.optInt("root", 0)?.coerceIn(0, 11) ?: 0; scaleType = sc?.optInt("type", 0)?.coerceIn(0, Theory.SCALES.size - 1) ?: 0 }
             root.optJSONObject("view")?.let { v ->
                 ppbValue = v.optDouble("ppb", 44.0).toFloat().coerceIn(ZOOM_MIN, ZOOM_MAX)
                 arrangeX = v.optInt("ax"); arrangeY = v.optInt("ay"); rollX = v.optInt("rx"); rollY = v.optInt("ry", -1)

@@ -236,6 +236,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
     ChoiceRow("Keep the screen on", "Stops the screen from turning off.", listOf("Never", "While playing", "Always"), AppSettings.keepOn.value) { AppSettings.keepOn.set(it) }
     ChoiceRow("Orientation", "Landscape (locked, the default) gives the arrangement and the plugin windows the most room. Choose Auto-rotate to follow the phone.", listOf("Auto-rotate", "Portrait", "Landscape"), AppSettings.orientation.value) { AppSettings.orientation.set(it) }
     SwitchRow("Full screen", "Hides the status and navigation bars (swipe from the edge to bring them back).", AppSettings.immersive)
+    SwitchRow("Block three-finger screenshots", "Stops the phone's screenshot gestures (OnePlus three-finger swipe and long press included) from acting in this app, so playing with several fingers never triggers them. It also blocks every other screenshot and screen recording of the app. Debug builds ignore it.", AppSettings.blockCapture)
     ChoiceRow("Side bands (rounded corners)", "The empty bands on the left and right keep buttons out of the rounded corners of the screen. Automatic uses the phone's own corner size; None removes the bands.", listOf("Automatic", "None", "Small", "Medium", "Large"), AppSettings.cornerMargin.value.coerceIn(0, 4)) { AppSettings.cornerMargin.set(it) }
     SwitchRow("Use the whole screen (ignore the notch)", "Draws under the camera cutout instead of leaving a black bar beside it. Something may be hidden behind the notch.", AppSettings.ignoreCutout)
 }
@@ -363,6 +364,11 @@ fun DisplaySettingsEffect(playing: Boolean) {
         val on = keep == 2 || (keep == 1 && playing)
         if (on) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose { activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+    val block = AppSettings.blockCapture.on
+    LaunchedEffect(block) {
+        val debuggable = (activity.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (block && !debuggable) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) else activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
     }
     LaunchedEffect(cut) {
         // Let the window extend into the cutout: short edges (API 28+), or always, also on a long edge, from API 30.
