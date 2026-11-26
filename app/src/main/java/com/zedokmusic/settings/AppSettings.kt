@@ -47,9 +47,10 @@ object AppSettings {
     val updPre = b("update.pre", true)             // every release so far is an alpha, so pre-releases count
     // Display
     val keepOn = s("display.keepon", 0)            // 0 never, 1 while playing, 2 always
-    val orientation = s("display.orientation", 0)  // 0 automatic, 1 portrait, 2 landscape
-    val immersive = b("display.immersive", false)
-    val ignoreCutout = b("display.cutout", false)  // draw under the notch / camera cutout
+    val orientation = s("display.orientation", 2)  // 0 automatic (rotates with the phone), 1 portrait, 2 landscape; landscape without rotation by default
+    // Defaults since 0.20: landscape, full screen, drawing under the notch. People who already chose something keep their choice.
+    val immersive = b("display.immersive", true)
+    val ignoreCutout = b("display.cutout", true)  // draw under the notch / camera cutout
 
     val SNAP_BEATS = floatArrayOf(0.125f, 0.25f, 0.5f, 1f)
     val SNAP_LABELS = listOf("1/32", "1/16", "1/8", "1/4")
@@ -66,6 +67,9 @@ object AppSettings {
         if (sp != null) return
         val p = ctx.applicationContext.getSharedPreferences("zedok_settings", Context.MODE_PRIVATE)
         sp = p
+        // One-time migration (0.20): the display defaults changed to landscape / full screen / under the notch. Values saved before this version
+        // (often just a test) are dropped once so that everybody starts from the new defaults; changes made afterwards are kept.
+        if (p.getInt("display.defaults", 0) < 1) p.edit().remove("display.orientation").remove("display.immersive").remove("display.cutout").putInt("display.defaults", 1).apply()
         all.forEach { it.load(p) }
     }
     internal fun save(key: String, v: Int) { sp?.edit()?.putInt(key, v)?.apply() }

@@ -230,7 +230,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
 
 @Composable private fun DisplaySection() {
     ChoiceRow("Keep the screen on", "Stops the screen from turning off.", listOf("Never", "While playing", "Always"), AppSettings.keepOn.value) { AppSettings.keepOn.set(it) }
-    ChoiceRow("Orientation", "Landscape gives the arrangement and the plugin windows more room.", listOf("Automatic", "Portrait", "Landscape"), AppSettings.orientation.value) { AppSettings.orientation.set(it) }
+    ChoiceRow("Orientation", "Landscape (locked, the default) gives the arrangement and the plugin windows the most room. Choose Auto-rotate to follow the phone.", listOf("Auto-rotate", "Portrait", "Landscape"), AppSettings.orientation.value) { AppSettings.orientation.set(it) }
     SwitchRow("Full screen", "Hides the status and navigation bars (swipe from the edge to bring them back).", AppSettings.immersive)
     SwitchRow("Use the whole screen (ignore the notch)", "Draws under the camera cutout instead of leaving a black bar beside it. Something may be hidden behind the notch.", AppSettings.ignoreCutout)
 }
