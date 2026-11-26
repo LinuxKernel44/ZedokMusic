@@ -77,6 +77,10 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     val selSet = selNotes.toHashSet()
     var dragPrev by remember { mutableStateOf<Map<NoteM, NoteM>?>(null) }   // notes being dragged -> where they would land
     var rectSel by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }   // the selection rectangle (pixels of the grid)
+    // The floating bar is only a shortcut: it shows for 2.5 s after a rectangle / Select tap / Clone / Paste and goes away at the next touch of the grid, so it never sits on the cells you want to write in. The same actions are in the row at the bottom.
+    var barRequest by remember { mutableIntStateOf(0) }
+    var barVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(barRequest) { if (barRequest > 0) { barVisible = true; delay(2500); barVisible = false } }
 
     // The note-off must always follow the note-on, even when another tap restarts this effect or the view is left during the 280 ms.
     LaunchedEffect(preview) { preview?.let { p -> vm.liveNote(track, true, p); try { delay(280) } finally { vm.liveNote(track, false, p) }; preview = null } }
@@ -169,6 +173,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             }
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
+                                barVisible = false
                                 val x0 = down.position.x; val y0 = down.position.y
                                 val pitch0 = (TOP - floor(y0 / rowPx).toInt()).coerceIn(BOTTOM, TOP)
                                 var mode = 0  // 0 empty, 1 move, 2 resize the end, 3 resize the start (one note)
@@ -207,7 +212,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                         } else if (!handleGrab && lastTapNote === target && now - lastTapAt < 320) {
                                             vm.removeNote(track, target); selection.remove(target); lastTapNote = null
                                         } else {
-                                            if (selectMode) { if (!selection.remove(target)) selection.add(target); preview = target.pitch }
+                                            if (selectMode) { if (!selection.remove(target)) selection.add(target); preview = target.pitch; barRequest++ }
                                             else { selection.clear(); selection.add(target); preview = target.pitch }
                                             lastTapNote = target; lastTapAt = now
                                         }
@@ -230,6 +235,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                         val hits = hitRect(rc); selection.clear(); selection.addAll(hits)
                                     }
                                     rectSel = null
+                                    if (selection.isNotEmpty()) barRequest++
                                     return@awaitEachGesture
                                 }
                                 val o = target ?: return@awaitEachGesture
@@ -302,7 +308,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(x, 0) }.width(2.dp).fillMaxHeight().background(Zk.accent))
                     // ---- floating bars: over the selection (Clone, Copy, Cut, Delete) / Paste at the playhead when nothing is selected
                     val barH = 36.dp
-                    if (selNotes.isNotEmpty() && dragPrev == null && rectSel == null) {
+                    if (barVisible && selNotes.isNotEmpty() && dragPrev == null && rectSel == null) {
                         val rowPxF = with(density) { RowPx.toPx() }; val pwF = with(density) { ppb.dp.toPx() }
                         val minS = selNotes.minOf { it.start }; val maxE = selNotes.maxOf { it.start + it.length }; val topP = selNotes.maxOf { it.pitch }; val botP = selNotes.minOf { it.pitch }
                         var barW by remember { mutableIntStateOf(with(density) { 200.dp.roundToPx() }) }
@@ -312,28 +318,29 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             if (y < vs.value + 4.dp.toPx()) y = (TOP - botP + 1) * rowPxF + 8.dp.toPx()   // no room above: below the selection
                             androidx.compose.ui.unit.IntOffset(cx.roundToInt(), y.roundToInt())
                         }.onSizeChanged { barW = it.width }) {
-                            BarButton("Clone") { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies) }
-                            BarButton("Copy") { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
-                            BarButton("Cut") { vm.cutNotes(track, selNotes); selection.clear() }
-                            BarButton("Del", Zk.danger) { vm.removeNotes(track, selNotes); selection.clear() }
-                        }
-                    } else if (selNotes.isEmpty() && vm.noteClip.isNotEmpty() && dragPrev == null && rectSel == null) {
-                        val pwF = with(density) { ppb.dp.toPx() }
-                        var barW by remember { mutableIntStateOf(with(density) { 110.dp.roundToPx() }) }
-                        FloatingBar(Modifier.offset {
-                            val cx = (vm.playhead * pwF + 6.dp.toPx()).coerceIn(hs.value + 6.dp.toPx(), maxOf(hs.value + 6.dp.toPx(), hs.value + viewportPx - barW - 6.dp.toPx()))
-                            androidx.compose.ui.unit.IntOffset(cx.roundToInt(), (vs.value + 8.dp.toPx()).roundToInt())
-                        }.onSizeChanged { barW = it.width }) {
-                            BarButton("Paste ${vm.noteClip.size}") { val at = (vm.playhead / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
+                            BarButton("Clone") { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies); barRequest++ }
+                            BarButton("Copy") { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied."; barVisible = false }
+                            BarButton("Cut") { vm.cutNotes(track, selNotes); selection.clear(); barVisible = false }
+                            BarButton("Del", Zk.danger) { vm.removeNotes(track, selNotes); selection.clear(); barVisible = false }
                         }
                     }
                 }
             }
         }
-        if (selNotes.isNotEmpty()) {
+        if (selNotes.isNotEmpty() || vm.noteClip.isNotEmpty()) {
             // Everything that works on the selection and does not fit in the floating bar. It floats over the bottom of the grid (the grid must not move while a rectangle is drawn).
             Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(40.dp).background(Zk.panel2).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (selNotes.isEmpty()) {
+                    LabelButton("Paste ${vm.noteClip.size}", false, w = 78.dp, h = 30.dp) { val at = (vm.playhead / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
+                    Text("at the playhead", color = Zk.dim, fontSize = 11.sp)
+                    LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
+                } else {
                 Text("${selNotes.size} note${if (selNotes.size > 1) "s" else ""}", color = track.color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
+                LabelButton("Clone", false, w = 54.dp, h = 30.dp) { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies) }
+                LabelButton("Copy", false, w = 48.dp, h = 30.dp) { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
+                LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutNotes(track, selNotes); selection.clear() }
+                LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeNotes(track, selNotes); selection.clear() }
+                Spacer(Modifier.width(4.dp))
                 fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { NoteM(it.pitch + d, it.start, it.length, it.velocity) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
                 for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp) { transpose(d) }
                 Spacer(Modifier.width(4.dp))
@@ -351,6 +358,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
                 LabelButton("Inv", false, w = 38.dp, h = 30.dp) { val keep = track.notes.filter { it !in selSet }; selection.clear(); selection.addAll(keep) }
                 LabelButton("✕", false, w = 32.dp, h = 30.dp) { selection.clear() }
+                }
             }
         }
         }

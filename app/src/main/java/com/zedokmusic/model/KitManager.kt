@@ -187,15 +187,17 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
         val uri = libraryUri() ?: return
         if (libraryScanning) return
         libraryScanning = true; libraryStatus = "Scanning…"
-        worker.execute {
+        // the scan runs on its own thread (and its own pool): the kit worker stays free for imports
+        Thread({
             try {
-                val root = SafNode.tree(ctx, uri) ?: throw IllegalStateException("the folder cannot be read")
-                val found = KitScanner.listAudio(root).map { (p, n) -> p to RefNode(ctx, n.name, n.ref) as KitNode }
+                var last = 0L
+                val found = LibraryScanner.scan(ctx, uri) { n -> val now = System.currentTimeMillis(); if (now - last > 200) { last = now; ui { libraryStatus = "Scanning… $n sounds" } } }
+                    .map { f -> f.path to (RefNode(ctx, f.name, f.ref) as KitNode) }
                 val arr = JSONArray(); found.forEach { (p, n) -> arr.put(JSONArray().put(p).put(n.name).put(n.ref)) }
                 runCatching { indexFile.writeText(JSONObject().put("uri", uri.toString()).put("items", arr).toString()) }
                 ui { libraryItems = found; libraryStatus = "${found.size} sounds"; libraryScanning = false }
             } catch (e: Exception) { ui { libraryStatus = "Could not scan the folder: ${e.message}"; libraryScanning = false } }
-        }
+        }, "zedok-library-scan").also { it.isDaemon = true }.start()
     }
 
     /** True when the library can be browsed; false when no folder was chosen yet (the UI tells the user to choose it in Settings). */
