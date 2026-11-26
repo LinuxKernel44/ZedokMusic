@@ -7,7 +7,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import kotlin.math.hypot
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -42,7 +45,14 @@ private val NoteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#",
 private fun beatsLabel(b: Float) = "%.3f".format(b).trimEnd('0').trimEnd('.')
 private fun isBlack(p: Int) = (p % 12) in intArrayOf(1, 3, 6, 8, 10)
 
-/** Piano roll for an instrument track. Tap = add a note / select one; drag = move; drag a selected note's end handles (or the right part of any note) = stretch or shrink; −/+ in the header change the length by one grid step. */
+/**
+ * Piano roll for an instrument track.
+ * Draw mode: tap an empty cell = add a note; tap a note = select it (tap it twice quickly = delete); long press in empty space, then drag = rectangle selection.
+ * Select mode (the Select button): drag in empty space = rectangle; tap a note = add it to / remove it from the selection; tap empty space = deselect.
+ * Dragging a selected note moves the whole selection; dragging its right end stretches all selected notes; a note that is not selected is selected alone first.
+ * With a selection: a floating bar (Clone, Copy, Cut, Delete) over it and a second row under the header (transpose, velocity, quantize, length, all, invert).
+ * With nothing selected and something copied: a Paste button at the playhead.
+ */
 @Composable
 fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     val hs = rememberScrollState(vm.rollX); val vs = rememberScrollState(if (vm.rollY >= 0) vm.rollY else rememberStartScroll())
@@ -60,14 +70,21 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     val tm = rememberTextMeasurer()
     var defaultLen by remember { mutableFloatStateOf(com.zedokmusic.settings.AppSettings.noteLengthBeats) }
     var preview by remember { mutableStateOf<Int?>(null) }
-    // drag state
-    var dragOld by remember { mutableStateOf<NoteM?>(null) }
-    var dragNew by remember { mutableStateOf<NoteM?>(null) }
-    var sel by remember(track.id) { mutableStateOf<NoteM?>(null) }
-    val selNote = sel?.takeIf { track.notes.contains(it) }
+    // selection and drag state
+    val selection = remember(track.id) { mutableStateListOf<NoteM>() }
+    var selectMode by remember(track.id) { mutableStateOf(false) }
+    val selNotes = selection.filter { track.notes.contains(it) }
+    val selSet = selNotes.toHashSet()
+    var dragPrev by remember { mutableStateOf<Map<NoteM, NoteM>?>(null) }   // notes being dragged -> where they would land
+    var rectSel by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }   // the selection rectangle (pixels of the grid)
 
     // The note-off must always follow the note-on, even when another tap restarts this effect or the view is left during the 280 ms.
     LaunchedEffect(preview) { preview?.let { p -> vm.liveNote(track, true, p); try { delay(280) } finally { vm.liveNote(track, false, p) }; preview = null } }
+
+    fun mapSel(f: (NoteM) -> NoteM) {
+        val sel = selNotes; if (sel.isEmpty()) return
+        val ch = sel.associateWith(f); vm.replaceNotes(track, ch); selection.clear(); selection.addAll(sel.map { ch[it]!! })
+    }
 
     Column(Modifier.fillMaxSize().background(Zk.bg)) {
         Row(Modifier.fillMaxWidth().height(40.dp).background(Zk.panel), verticalAlignment = Alignment.CenterVertically) {
@@ -83,15 +100,12 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     drawPlayhead(vm.playhead * pw, Zk.accent, head = true)
                 }
             }
-            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (selNote != null) {
-                    // The selected note: one-tap length changes (by the grid step) and delete.
-                    fun resized(l: Float) { val n = NoteM(selNote.pitch, selNote.start, l.coerceAtLeast(SNAP), selNote.velocity); vm.replaceNote(track, selNote, n); sel = n }
-                    LabelButton("−", false, w = 36.dp, h = 32.dp) { resized(selNote.length - SNAP) }
-                    Text(beatsLabel(selNote.length), color = Zk.text, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 34.dp))
-                    LabelButton("+", false, w = 36.dp, h = 32.dp) { resized(selNote.length + SNAP) }
-                    LabelButton("Del", false, Zk.danger, w = 42.dp, h = 32.dp) { vm.removeNote(track, selNote); sel = null }
-                } else {
+            Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                val canUndo = vm.canUndoNotes(track); val canRedo = vm.canRedoNotes(track)
+                LabelButton("↶", false, w = 32.dp, h = 32.dp) { if (canUndo) vm.undoNotes(track) }
+                LabelButton("↷", false, w = 32.dp, h = 32.dp) { if (canRedo) vm.redoNotes(track) }
+                LabelButton("Select", selectMode, w = 56.dp, h = 32.dp) { selectMode = !selectMode }
+                if (selNotes.isEmpty()) {
                     Text("Len", color = Zk.dim, fontSize = 11.sp)
                     for ((label, v) in listOf("¼" to 0.25f, "½" to 0.5f, "1" to 1f, "2" to 2f)) LabelButton(label, defaultLen == v) { defaultLen = v }
                 }
@@ -107,6 +121,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         val ppbNow = rememberUpdatedState(ppb); val keysPx = with(density) { KeysW.toPx() }
+        Box(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize().pointerInput(Unit) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
@@ -146,17 +161,21 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             val pw = ppb * density.density; val rowPx = RowPx.toPx()
                             val slop = viewConfiguration.touchSlop
                             val handleR = 28.dp.toPx(); val tol = 8.dp.toPx()
+                            val lpTime = viewConfiguration.longPressTimeoutMillis
                             var lastTapAt = 0L; var lastTapNote: NoteM? = null
-                            // One finger: tap an empty cell = add a note; tap a note = select it (tap it twice quickly = delete);
-                            // drag a note = move; drag its end handles (or its right part) = stretch / shrink; dragging empty space scrolls.
+                            fun hitRect(r: androidx.compose.ui.geometry.Rect) = track.notes.filter { n ->
+                                val nx0 = n.start * pw; val nx1 = (n.start + n.length) * pw; val ny0 = (TOP - n.pitch) * rowPx
+                                nx1 >= r.left && nx0 <= r.right && ny0 + rowPx >= r.top && ny0 <= r.bottom
+                            }
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 val x0 = down.position.x; val y0 = down.position.y
                                 val pitch0 = (TOP - floor(y0 / rowPx).toInt()).coerceIn(BOTTOM, TOP)
-                                var mode = 0  // 0 empty, 1 move, 2 resize the end, 3 resize the start
+                                var mode = 0  // 0 empty, 1 move, 2 resize the end, 3 resize the start (one note)
                                 var target: NoteM? = null
-                                val cur = sel?.takeIf { track.notes.contains(it) }
-                                if (cur != null) {  // the handles of the selected note win: easy to grab, even on tiny notes
+                                val selNow = selection.filter { track.notes.contains(it) }
+                                val cur = selNow.singleOrNull()
+                                if (cur != null) {  // the handles of a single selected note win: easy to grab, even on tiny notes
                                     val cy = (TOP - cur.pitch) * rowPx + rowPx / 2
                                     if (hypot(x0 - (cur.start + cur.length) * pw, y0 - cy) < handleR) { mode = 2; target = cur }
                                     else if (hypot(x0 - cur.start * pw, y0 - cy) < handleR) { mode = 3; target = cur }
@@ -170,41 +189,84 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                     }
                                 }
                                 val handleGrab = cur != null && target === cur && mode != 1
-                                // tap or drag?
+                                // tap, drag, or long press (in empty space)
+                                val t0 = System.currentTimeMillis(); var rect = false; var lastPos = down.position
                                 while (true) {
-                                    val ev = awaitPointerEvent(if (mode == 0) PointerEventPass.Final else PointerEventPass.Main)
+                                    val waitLong = mode == 0 && !selectMode
+                                    val ev = if (waitLong) withTimeoutOrNull(maxOf(1L, lpTime - (System.currentTimeMillis() - t0))) { awaitPointerEvent(PointerEventPass.Final) }
+                                             else awaitPointerEvent(PointerEventPass.Main)
+                                    if (ev == null) { if ((lastPos - down.position).getDistance() > slop) return@awaitEachGesture; rect = true; break }
                                     val c = ev.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
-                                    if (mode == 0 && c.isConsumed) return@awaitEachGesture  // the timeline is being scrolled
+                                    if (waitLong && c.isConsumed) return@awaitEachGesture  // the timeline is being scrolled
+                                    lastPos = c.position
                                     if (!c.pressed) {
                                         val now = System.currentTimeMillis()
                                         if (target == null) {
-                                            val st = floor(x0 / pw / SNAP) * SNAP
-                                            vm.addNote(track, pitch0, st, defaultLen); sel = track.notes.lastOrNull(); preview = pitch0
+                                            if (selectMode) selection.clear()
+                                            else { val st = floor(x0 / pw / SNAP) * SNAP; vm.addNote(track, pitch0, st, defaultLen); selection.clear(); track.notes.lastOrNull()?.let { selection.add(it) }; preview = pitch0 }
                                         } else if (!handleGrab && lastTapNote === target && now - lastTapAt < 320) {
-                                            vm.removeNote(track, target); sel = null; lastTapNote = null
-                                        } else { sel = target; preview = target.pitch; lastTapNote = target; lastTapAt = now }
+                                            vm.removeNote(track, target); selection.remove(target); lastTapNote = null
+                                        } else {
+                                            if (selectMode) { if (!selection.remove(target)) selection.add(target); preview = target.pitch }
+                                            else { selection.clear(); selection.add(target); preview = target.pitch }
+                                            lastTapNote = target; lastTapAt = now
+                                        }
                                         return@awaitEachGesture
                                     }
-                                    if (mode != 0 && (c.position - down.position).getDistance() > slop) { c.consume(); break }
+                                    if ((c.position - down.position).getDistance() > slop) {
+                                        if (mode != 0) { c.consume(); break }
+                                        if (selectMode) { c.consume(); rect = true; break }
+                                    }
+                                }
+                                if (rect) {   // rectangle selection: every note it touches (replaces the selection)
+                                    var rc = androidx.compose.ui.geometry.Rect(x0, y0, x0, y0)
+                                    while (true) {
+                                        val ev = awaitPointerEvent()
+                                        val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                        if (!c.pressed) break
+                                        c.consume()
+                                        rc = androidx.compose.ui.geometry.Rect(minOf(x0, c.position.x), minOf(y0, c.position.y), maxOf(x0, c.position.x), maxOf(y0, c.position.y))
+                                        rectSel = rc
+                                        val hits = hitRect(rc); selection.clear(); selection.addAll(hits)
+                                    }
+                                    rectSel = null
+                                    return@awaitEachGesture
                                 }
                                 val o = target ?: return@awaitEachGesture
+                                val group: List<NoteM> = if (mode == 3) listOf(o) else if (o in selNow) selNow else listOf(o)
+                                if (o !in selNow) { selection.clear(); selection.add(o) }
                                 val grab = x0 / pw - o.start; val endFixed = o.start + o.length
-                                sel = o; dragOld = o; dragNew = o
+                                val minStart = group.minOf { it.start }; val minPitch = group.minOf { it.pitch }; val maxPitch = group.maxOf { it.pitch }
+                                dragPrev = group.associateWith { it }
                                 while (true) {
                                     val ev = awaitPointerEvent()
                                     val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                                     if (!c.pressed) break
                                     c.consume()
                                     val beat = c.position.x / pw
-                                    dragNew = when (mode) {
-                                        2 -> NoteM(o.pitch, o.start, ((beat / SNAP).roundToInt() * SNAP).coerceAtLeast(o.start + SNAP) - o.start, o.velocity)
-                                        3 -> { val st = ((beat / SNAP).roundToInt() * SNAP).coerceIn(0f, endFixed - SNAP); NoteM(o.pitch, st, endFixed - st, o.velocity) }
-                                        else -> NoteM((TOP - floor(c.position.y / rowPx).toInt()).coerceIn(BOTTOM, TOP), (((beat - grab) / SNAP).roundToInt() * SNAP).coerceAtLeast(0f), o.length, o.velocity)
+                                    dragPrev = when (mode) {
+                                        2 -> {
+                                            val newEnd = ((beat / SNAP).roundToInt() * SNAP).coerceAtLeast(o.start + SNAP); val dLen = newEnd - (o.start + o.length)
+                                            group.associateWith { NoteM(it.pitch, it.start, (it.length + dLen).coerceAtLeast(SNAP), it.velocity) }
+                                        }
+                                        3 -> { val st = ((beat / SNAP).roundToInt() * SNAP).coerceIn(0f, endFixed - SNAP); mapOf(o to NoteM(o.pitch, st, endFixed - st, o.velocity)) }
+                                        else -> {
+                                            val newStart = (((beat - grab) / SNAP).roundToInt() * SNAP)
+                                            val dStart = (newStart - o.start).coerceAtLeast(-minStart)
+                                            val pitchNow = (TOP - floor(c.position.y / rowPx).toInt())
+                                            val dPitch = (pitchNow - o.pitch).coerceIn(BOTTOM - minPitch, TOP - maxPitch)
+                                            group.associateWith { NoteM(it.pitch + dPitch, it.start + dStart, it.length, it.velocity) }
+                                        }
                                     }
                                 }
-                                val n = dragNew; dragOld = null; dragNew = null
-                                if (n != null && (n.pitch != o.pitch || n.start != o.start || n.length != o.length)) {
-                                    vm.replaceNote(track, o, n); sel = n; if (n.pitch != o.pitch) preview = n.pitch
+                                val result = dragPrev; dragPrev = null
+                                if (result != null) {
+                                    val changed = result.filter { (a, b) -> a.pitch != b.pitch || a.start != b.start || a.length != b.length }
+                                    if (changed.isNotEmpty()) {
+                                        vm.replaceNotes(track, changed)
+                                        selection.clear(); selection.addAll(group.map { result[it] ?: it })
+                                        val np = result[o]?.pitch; if (np != null && np != o.pitch) preview = np
+                                    }
                                 }
                             }
                         }) {
@@ -219,25 +281,92 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                         if (step >= 1f) step = 1f
                         var k = 0
                         while (k * step <= beats) { val b = k * step; val gx = gridLineX(b * pw); drawLine(if (b % 4f == 0f) Zk.dim.copy(alpha = .5f) else if (b % 1f == 0f) Zk.line else Zk.line.copy(alpha = .35f), Offset(gx, 0f), Offset(gx, size.height), 1f); k++ }
+                        val prev = dragPrev
                         for (n in track.notes) {
-                            val shown = if (n === dragOld) dragNew ?: n else n
+                            val shown = prev?.get(n) ?: n
                             val y = (TOP - shown.pitch) * rowPx
                             val nx = gridPx(shown.start * pw); val w = maxOf(4f, gridPx((shown.start + shown.length) * pw) - nx - 1)
                             drawRoundRect(track.color, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f))
-                            if (n === sel) {
+                            if (n in selSet) {
                                 drawRoundRect(Color.White, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
-                                val cy = y + rowPx / 2
-                                for (hx in floatArrayOf(nx, nx + w)) { drawCircle(Color.White, 8.dp.toPx(), Offset(hx, cy)); drawCircle(track.color, 4.dp.toPx(), Offset(hx, cy)) }
-                                if (n === dragOld) drawText(tm.measure(beatsLabel(shown.length), TextStyle(color = Color.White, fontSize = 12.sp)), topLeft = Offset(nx, maxOf(0f, y - 16.dp.toPx())))
+                                if (selSet.size == 1) {
+                                    val cy = y + rowPx / 2
+                                    for (hx in floatArrayOf(nx, nx + w)) { drawCircle(Color.White, 8.dp.toPx(), Offset(hx, cy)); drawCircle(track.color, 4.dp.toPx(), Offset(hx, cy)) }
+                                    if (prev != null) drawText(tm.measure(beatsLabel(shown.length), TextStyle(color = Color.White, fontSize = 12.sp)), topLeft = Offset(nx, maxOf(0f, y - 16.dp.toPx())))
+                                }
                             }
                         }
+                        rectSel?.let { r -> drawRect(Zk.accent.copy(alpha = .14f), r.topLeft, r.size); drawRect(Zk.accent, r.topLeft, r.size, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx())) }
                     }
                     val x = with(density) { (vm.playhead * ppb).dp.roundToPx() }
                     Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(x, 0) }.width(2.dp).fillMaxHeight().background(Zk.accent))
+                    // ---- floating bars: over the selection (Clone, Copy, Cut, Delete) / Paste at the playhead when nothing is selected
+                    val barH = 36.dp
+                    if (selNotes.isNotEmpty() && dragPrev == null && rectSel == null) {
+                        val rowPxF = with(density) { RowPx.toPx() }; val pwF = with(density) { ppb.dp.toPx() }
+                        val minS = selNotes.minOf { it.start }; val maxE = selNotes.maxOf { it.start + it.length }; val topP = selNotes.maxOf { it.pitch }; val botP = selNotes.minOf { it.pitch }
+                        var barW by remember { mutableIntStateOf(with(density) { 200.dp.roundToPx() }) }
+                        FloatingBar(Modifier.offset {
+                            val cx = ((minS + maxE) / 2f * pwF - barW / 2f).coerceIn(hs.value + 6.dp.toPx(), maxOf(hs.value + 6.dp.toPx(), hs.value + viewportPx - barW - 6.dp.toPx()))
+                            var y = (TOP - topP) * rowPxF - barH.toPx() - 8.dp.toPx()
+                            if (y < vs.value + 4.dp.toPx()) y = (TOP - botP + 1) * rowPxF + 8.dp.toPx()   // no room above: below the selection
+                            androidx.compose.ui.unit.IntOffset(cx.roundToInt(), y.roundToInt())
+                        }.onSizeChanged { barW = it.width }) {
+                            BarButton("Clone") { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies) }
+                            BarButton("Copy") { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
+                            BarButton("Cut") { vm.cutNotes(track, selNotes); selection.clear() }
+                            BarButton("Del", Zk.danger) { vm.removeNotes(track, selNotes); selection.clear() }
+                        }
+                    } else if (selNotes.isEmpty() && vm.noteClip.isNotEmpty() && dragPrev == null && rectSel == null) {
+                        val pwF = with(density) { ppb.dp.toPx() }
+                        var barW by remember { mutableIntStateOf(with(density) { 110.dp.roundToPx() }) }
+                        FloatingBar(Modifier.offset {
+                            val cx = (vm.playhead * pwF + 6.dp.toPx()).coerceIn(hs.value + 6.dp.toPx(), maxOf(hs.value + 6.dp.toPx(), hs.value + viewportPx - barW - 6.dp.toPx()))
+                            androidx.compose.ui.unit.IntOffset(cx.roundToInt(), (vs.value + 8.dp.toPx()).roundToInt())
+                        }.onSizeChanged { barW = it.width }) {
+                            BarButton("Paste ${vm.noteClip.size}") { val at = (vm.playhead / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
+                        }
+                    }
                 }
             }
         }
+        if (selNotes.isNotEmpty()) {
+            // Everything that works on the selection and does not fit in the floating bar. It floats over the bottom of the grid (the grid must not move while a rectangle is drawn).
+            Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(40.dp).background(Zk.panel2).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("${selNotes.size} note${if (selNotes.size > 1) "s" else ""}", color = track.color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
+                fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { NoteM(it.pitch + d, it.start, it.length, it.velocity) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
+                for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp) { transpose(d) }
+                Spacer(Modifier.width(4.dp))
+                val avgVel = selNotes.map { it.velocity }.average().toInt()
+                var velDrag by remember(selNotes.size, avgVel) { mutableFloatStateOf(avgVel.toFloat()) }
+                Text("Vel ${velDrag.toInt()}", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.widthIn(min = 44.dp))
+                androidx.compose.material3.Slider(velDrag, { velDrag = it }, Modifier.width(110.dp), valueRange = 1f..127f, onValueChangeFinished = { val v = velDrag.toInt().coerceIn(1, 127); mapSel { NoteM(it.pitch, it.start, it.length, v) } },
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = track.color, activeTrackColor = track.color))
+                Spacer(Modifier.width(4.dp))
+                LabelButton("Quant", false, w = 52.dp, h = 30.dp) { mapSel { NoteM(it.pitch, ((it.start / SNAP).roundToInt() * SNAP).coerceAtLeast(0f), it.length, it.velocity) } }
+                LabelButton("−", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, (it.length - SNAP).coerceAtLeast(SNAP), it.velocity) } }
+                Text(if (selNotes.size == 1) beatsLabel(selNotes[0].length) else "len", color = Zk.text, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 34.dp))
+                LabelButton("+", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, it.length + SNAP, it.velocity) } }
+                Spacer(Modifier.width(4.dp))
+                LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
+                LabelButton("Inv", false, w = 38.dp, h = 30.dp) { val keep = track.notes.filter { it !in selSet }; selection.clear(); selection.addAll(keep) }
+                LabelButton("✕", false, w = 32.dp, h = 30.dp) { selection.clear() }
+            }
+        }
+        }
     }
+}
+
+/** A small floating row of actions drawn over the notes. */
+@Composable
+private fun FloatingBar(modifier: Modifier, content: @Composable RowScope.() -> Unit) {
+    Row(modifier.height(36.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).background(Zk.panel).border(1.dp, Zk.accent, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(horizontal = 3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp), content = content)
+}
+@Composable
+private fun BarButton(text: String, color: Color = Zk.text, onClick: () -> Unit) {
+    Text(text, color = color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, softWrap = false,
+        modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp))
 }
 
 @Composable private fun rememberStartScroll(): Int = with(LocalDensity.current) { (RowPx.toPx() * (TOP - 84)).toInt() }  // start around C6 -> C4 area

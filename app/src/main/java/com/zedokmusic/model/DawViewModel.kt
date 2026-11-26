@@ -303,11 +303,55 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun setBypass(fx: TrackM, bypass: Boolean) { fx.bypass = bypass; e.setFxBypass(fx.id, bypass); dirty = true }
 
     // ---------- notes ----------
-    fun addNote(t: TrackM, pitch: Int, start: Float, length: Float, velocity: Int = 100) { t.notes.add(NoteM(pitch, start, length, velocity)); syncNotes(t); dirty = true }
+    // Every edit of the notes of a track first stores the notes as they were (undo / redo, 50 steps per track).
+    private val undoS = HashMap<Int, ArrayList<List<NoteM>>>(); private val redoS = HashMap<Int, ArrayList<List<NoteM>>>()
+    private var historyReady = true   // false (the JVM default) while the constructor runs: load() is called from it before the fields above exist
+    /** Bumped whenever an undo history changes, so the buttons can follow. */
+    var noteHistoryRev by mutableIntStateOf(0); private set
+    private fun snapshot(t: TrackM) {
+        val u = undoS.getOrPut(t.id) { ArrayList() }; u.add(t.notes.toList()); if (u.size > 50) u.removeAt(0)
+        redoS[t.id]?.clear(); noteHistoryRev++
+    }
+    fun canUndoNotes(t: TrackM): Boolean { noteHistoryRev; return undoS[t.id]?.isNotEmpty() == true }
+    fun canRedoNotes(t: TrackM): Boolean { noteHistoryRev; return redoS[t.id]?.isNotEmpty() == true }
+    private fun restoreNotes(t: TrackM, notes: List<NoteM>) { if (e.isPlaying()) e.panic(t.id); t.notes.clear(); t.notes.addAll(notes); syncNotes(t); dirty = true; noteHistoryRev++ }
+    fun undoNotes(t: TrackM) { val u = undoS[t.id]?.takeIf { it.isNotEmpty() } ?: return; redoS.getOrPut(t.id) { ArrayList() }.add(t.notes.toList()); restoreNotes(t, u.removeAt(u.size - 1)) }
+    fun redoNotes(t: TrackM) { val r = redoS[t.id]?.takeIf { it.isNotEmpty() } ?: return; undoS.getOrPut(t.id) { ArrayList() }.add(t.notes.toList()); restoreNotes(t, r.removeAt(r.size - 1)) }
+
+    fun addNote(t: TrackM, pitch: Int, start: Float, length: Float, velocity: Int = 100) { snapshot(t); t.notes.add(NoteM(pitch, start, length, velocity)); syncNotes(t); dirty = true }
     /** A note that is sounding right now loses its Note Off when it is deleted or changed: release the track's notes so it cannot hang. */
     private fun releaseIfSounding(t: TrackM, n: NoteM) { if (e.isPlaying() && playhead >= n.start && playhead <= n.start + n.length) e.panic(t.id) }
-    fun removeNote(t: TrackM, n: NoteM) { releaseIfSounding(t, n); t.notes.remove(n); syncNotes(t); dirty = true }
-    fun replaceNote(t: TrackM, old: NoteM, new: NoteM) { val i = t.notes.indexOf(old); if (i >= 0) { releaseIfSounding(t, old); t.notes[i] = new; syncNotes(t); dirty = true } }
+    fun removeNote(t: TrackM, n: NoteM) { snapshot(t); releaseIfSounding(t, n); t.notes.remove(n); syncNotes(t); dirty = true }
+    fun replaceNote(t: TrackM, old: NoteM, new: NoteM) { val i = t.notes.indexOf(old); if (i >= 0) { snapshot(t); releaseIfSounding(t, old); t.notes[i] = new; syncNotes(t); dirty = true } }
+
+    // ---- several notes at once (one undo step each)
+    /** Replaces every note of [changes] (old -> new) at once. */
+    fun replaceNotes(t: TrackM, changes: Map<NoteM, NoteM>) {
+        if (changes.isEmpty()) return
+        snapshot(t); if (e.isPlaying()) e.panic(t.id)
+        for ((o, n) in changes) { val i = t.notes.indexOf(o); if (i >= 0) t.notes[i] = n }
+        syncNotes(t); dirty = true
+    }
+    fun removeNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t); if (e.isPlaying()) e.panic(t.id); t.notes.removeAll(list.toSet()); syncNotes(t); dirty = true }
+    fun addNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t); t.notes.addAll(list); syncNotes(t); dirty = true }
+    /** Clone (Ctrl+B in FL Studio): copies [sel] right after its end, shifted by the length of the whole selection. Returns the copies. */
+    fun cloneNotes(t: TrackM, sel: List<NoteM>): List<NoteM> {
+        if (sel.isEmpty()) return emptyList()
+        val span = sel.maxOf { it.start + it.length } - sel.minOf { it.start }
+        val copies = sel.map { NoteM(it.pitch, it.start + span, it.length, it.velocity) }
+        addNotes(t, copies); return copies
+    }
+    /** The notes last copied or cut (any track); Paste puts them back. */
+    var noteClip by mutableStateOf<List<NoteM>>(emptyList()); private set
+    fun copyNotes(sel: List<NoteM>) { if (sel.isNotEmpty()) noteClip = sel.toList() }
+    fun cutNotes(t: TrackM, sel: List<NoteM>) { copyNotes(sel); removeNotes(t, sel) }
+    /** Pastes the clipboard so that its first note starts at [at] (beats); pitches are kept. Returns the new notes. */
+    fun pasteNotes(t: TrackM, at: Float): List<NoteM> {
+        val clip = noteClip; if (clip.isEmpty()) return emptyList()
+        val lo = clip.minOf { it.start }
+        val copies = clip.map { NoteM(it.pitch, (it.start - lo + at).coerceAtLeast(0f), it.length, it.velocity) }
+        addNotes(t, copies); return copies
+    }
     private fun syncNotes(t: TrackM) {
         val d = LongArray(t.notes.size * 4)
         t.notes.forEachIndexed { i, n ->
@@ -946,6 +990,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun load() {
+        if (historyReady) { undoS.clear(); redoS.clear() }
         val f = projectFile ?: return
         if (!f.exists()) return
         try {
