@@ -115,7 +115,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     LaunchedEffect(barRequest) { if (barRequest > 0) { barVisible = true; delay(2500); barVisible = false } }
 
     // The note-off must always follow the note-on, even when another tap restarts this effect or the view is left during the 280 ms.
-    LaunchedEffect(preview) { preview?.let { p -> vm.liveNote(track, true, p); try { delay(280) } finally { vm.liveNote(track, false, p) }; preview = null } }
+    // While the song plays, editing notes is silent (the preview would be heard on top of the playback).
+    LaunchedEffect(preview) { preview?.let { p -> if (vm.playing) { preview = null; return@let }; vm.liveNote(track, true, p); try { delay(280) } finally { vm.liveNote(track, false, p) }; preview = null } }
 
     fun mapSel(f: (NoteM) -> NoteM) {
         val sel = selNotes; if (sel.isEmpty()) return
