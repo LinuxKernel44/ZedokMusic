@@ -305,7 +305,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                         val now = System.currentTimeMillis()
                                         if (target == null) {
                                             if (selectMode) selection.clear()
-                                            else if (selNow.isNotEmpty()) {   // with notes selected: one tap elsewhere does nothing, a second one deselects them all
+                                            else if (selNow.size > 1) {   // with several notes selected: one tap elsewhere does nothing, a second one deselects them all
                                                 if (now - lastEmptyTapAt < 450) { selection.clear(); lastEmptyTapAt = 0L } else lastEmptyTapAt = now
                                             } else { val st = floor(x0 / pw / SNAP) * SNAP; vm.addNote(track, pitch0, st, defaultLen); selection.clear(); track.notes.lastOrNull()?.let { selection.add(it) }; preview = pitch0 }
                                         } else if (!handleGrab && lastTapNote === target && now - lastTapAt < 320) {
