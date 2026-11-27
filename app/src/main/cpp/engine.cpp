@@ -119,6 +119,70 @@ void Engine::setMasterGain(float g) { edit([&](Project& p) { p.masterGain = std:
 void Engine::setLoop(bool on, int64_t s, int64_t e) {
     edit([&](Project& p) { p.loop = on && e > s; p.loopStart = s; p.loopEnd = e; });
 }
+
+// ---------- routing ----------
+static BusState* findBus(Project& p, int id) { for (auto& b : p.buses) if (b.id == id) return &b; return nullptr; }
+static int busSlot(const Project& p, int id) { if (id <= 0) return -1; for (size_t i = 0; i < p.buses.size() && i < (size_t)kMaxBuses; i++) if (p.buses[i].id == id) return (int)i; return -1; }
+
+void Engine::planRouting(Project& p) {
+    const size_t n = std::min<size_t>(p.buses.size(), kMaxBuses);
+    std::vector<int> feeders(n, 0), order; order.reserve(n);
+    for (size_t i = 0; i < n; i++) { int d = busSlot(p, p.buses[i].output); if (d >= 0) feeders[d]++; }
+    std::vector<int> ready; for (size_t i = 0; i < n; i++) if (feeders[i] == 0) ready.push_back((int)i);
+    while (!ready.empty()) {
+        int b = ready.back(); ready.pop_back(); order.push_back(b);
+        int d = busSlot(p, p.buses[b].output);
+        if (d >= 0 && --feeders[d] == 0) ready.push_back(d);
+    }
+    for (size_t i = 0; i < n; i++) if (std::find(order.begin(), order.end(), (int)i) == order.end()) order.push_back((int)i);   // never happens: setBusOutput refuses loops
+    p.busOrder = std::move(order);
+}
+int Engine::addBus() {
+    int id = 0;
+    edit([&](Project& p) {
+        if ((int)p.buses.size() >= kMaxBuses || nextBusId_ > kMaxBusId) return;
+        BusState b; b.id = id = nextBusId_++; p.buses.push_back(b); planRouting(p);
+    });
+    return id;
+}
+bool Engine::removeBus(int busId) {
+    bool ok = false;
+    edit([&](Project& p) {
+        auto it = std::remove_if(p.buses.begin(), p.buses.end(), [&](auto& b) { return b.id == busId; });
+        ok = it != p.buses.end(); if (!ok) return;
+        p.buses.erase(it, p.buses.end());
+        for (auto& t : p.tracks) if (t.output == busId) t.output = 0;
+        for (auto& b : p.buses) if (b.output == busId) b.output = 0;
+        planRouting(p);
+    });
+    return ok;
+}
+#define BUS_SET(name, expr) \
+    void Engine::name { edit([&](Project& p) { if (auto* b = findBus(p, id)) { expr; } }); }
+BUS_SET(setBusGain(int id, float g), b->gain = std::clamp(g, 0.f, 4.f))
+BUS_SET(setBusPan(int id, float v), b->pan = std::clamp(v, -1.f, 1.f))
+BUS_SET(setBusWidth(int id, float v), b->width = std::clamp(v, 0.f, 2.f))
+BUS_SET(setBusMute(int id, bool m), b->mute = m)
+bool Engine::setTrackOutput(int track, int busId) {
+    bool ok = false;
+    edit([&](Project& p) {
+        if (busId != 0 && !findBus(p, busId)) return;
+        for (auto& t : p.tracks) if (t.id == track) { t.output = busId; ok = true; }
+    });
+    return ok;
+}
+bool Engine::setBusOutput(int busId, int dest) {
+    bool ok = false;
+    edit([&](Project& p) {
+        BusState* b = findBus(p, busId); if (!b) return;
+        if (dest != 0) {   // walking down from the destination must never come back to this bus
+            if (!findBus(p, dest)) return;
+            for (int at = dest, hops = 0; at != 0; hops++) { if (at == busId || hops > kMaxBuses) return; BusState* x = findBus(p, at); at = x ? x->output : 0; }
+        }
+        b->output = dest; planRouting(p); ok = true;
+    });
+    return ok;
+}
 float Engine::peak(int track) const {
     int i = (track >= 0 && track < kMaxTracks) ? track : kMaxTracks;
     return meters_[i].exchange(0.f);
@@ -169,8 +233,11 @@ int64_t Engine::renderBlockDry(const Project& p, int64_t pos, int frames, MixSta
 }
 
 void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
-    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; for (auto& w : ms.smoothWidth) w = 1.f; ms.init = true; }
+    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; for (auto& w : ms.smoothWidth) w = 1.f; for (auto& g : ms.smoothBusGain) g = 1.f; for (auto& w : ms.smoothBusWidth) w = 1.f; ms.init = true; }
     memset(out, 0, sizeof(float) * 2 * frames);
+    const int nBuses = (int)std::min<size_t>(p.buses.size(), kMaxBuses);
+    for (int b = 0; b < nBuses; b++) memset(ms.bus[b], 0, sizeof(float) * 2 * frames);
+    auto destOf = [&](int output) -> float* { const int s = busSlot(p, output); return s >= 0 ? ms.bus[s] : out; };   // 0 or a bus that is gone: the master
     bool anySolo = false;
     for (auto& t : p.tracks) anySolo |= t.solo;
     for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
@@ -183,6 +250,7 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
         float ang = (t.pan * 0.5f + 0.5f) * (float)M_PI_2;
         float pl = cosf(ang) * (float)M_SQRT2, pr = sinf(ang) * (float)M_SQRT2;
         const float* tb = ms.dry[ti];
+        float* dst = destOf(t.output);
         float tpk = 0.f;
         const float w0 = ms.smoothWidth[t.id], w1 = t.width; ms.smoothWidth[t.id] = w1;   // stereo width: mid / side, the side gain moves smoothly
         for (int i = 0; i < frames; i++) {
@@ -190,10 +258,26 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
             float xl = tb[i * 2], xr = tb[i * 2 + 1];
             if (w0 != 1.f || w1 != 1.f) { const float w = w0 + (w1 - w0) * ((float)i / (float)frames); const float m = 0.5f * (xl + xr), s = 0.5f * (xl - xr) * w; xl = m + s; xr = m - s; }
             float l = xl * g * pl, r = xr * g * pr;
-            out[i * 2] += l; out[i * 2 + 1] += r;
+            dst[i * 2] += l; dst[i * 2 + 1] += r;
             tpk = std::max(tpk, std::max(fabsf(l), fabsf(r)));
         }
         if (meters && t.id < kMaxTracks) { float old = meters[t.id].load(std::memory_order_relaxed); if (tpk > old) meters[t.id].store(tpk, std::memory_order_relaxed); }
+    }
+    // Buses, each after everything routed into it: same gain / constant-power pan / width as a track, then on to its destination.
+    for (int oi = 0; oi < (int)p.busOrder.size() && oi < nBuses; oi++) {
+        const int bi = p.busOrder[oi]; if (bi < 0 || bi >= nBuses) continue;
+        const BusState& b = p.buses[bi];
+        const float g0 = ms.smoothBusGain[b.id], g1 = b.mute ? 0.f : b.gain; ms.smoothBusGain[b.id] = g1;
+        const float w0 = ms.smoothBusWidth[b.id], w1 = b.width; ms.smoothBusWidth[b.id] = w1;
+        const float ang = (b.pan * 0.5f + 0.5f) * (float)M_PI_2;
+        const float pl = cosf(ang) * (float)M_SQRT2, pr = sinf(ang) * (float)M_SQRT2;
+        const float* bb = ms.bus[bi]; float* dst = destOf(b.output);
+        for (int i = 0; i < frames; i++) {
+            const float g = g0 + (g1 - g0) * ((float)i / (float)frames);
+            float xl = bb[i * 2], xr = bb[i * 2 + 1];
+            if (w0 != 1.f || w1 != 1.f) { const float w = w0 + (w1 - w0) * ((float)i / (float)frames); const float m = 0.5f * (xl + xr), s = 0.5f * (xl - xr) * w; xl = m + s; xr = m - s; }
+            dst[i * 2] += xl * g * pl; dst[i * 2 + 1] += xr * g * pr;
+        }
     }
 }
 

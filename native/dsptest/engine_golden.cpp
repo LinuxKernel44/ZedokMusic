@@ -76,6 +76,19 @@ static std::vector<Scene> scenes() {
         int f1 = e.addFx(a, 0); e.createNativePlugin(f1, "color"); int f2 = e.addFx(a, 1); e.createNativePlugin(f2, "eqcomp");
         int m = e.addFx(0, 0); e.createNativePlugin(m, "space");
     }});
+    s.push_back({"bus_group", 3.0, [](Engine& e) {
+        int a = e.addTrack(), b = e.addTrack(), c = e.addTrack();
+        e.addClip(a, tone(220, 2.5, 0.4), 0, 0, 2.5 * kProjectRate, 1.f); e.addClip(b, tone(330, 2.5, 0.3, 0.7), 0, 0, 2.5 * kProjectRate, 1.f); e.addClip(c, tone(440, 2.5, 0.3), 0, 0, 2.5 * kProjectRate, 1.f);
+        int b1 = e.addBus(), b2 = e.addBus();
+        e.setBusGain(b1, 0.8f); e.setBusPan(b1, -0.3f); e.setBusWidth(b2, 1.5f);
+        e.setTrackOutput(a, b1); e.setTrackOutput(b, b1); e.setBusOutput(b1, b2);   // a, b -> bus 1 -> bus 2 -> master; c goes straight to the master
+        e.setTrackPan(c, 0.5f); e.setMasterGain(0.9f);
+    }});
+    s.push_back({"bus_mute_solo", 2.0, [](Engine& e) {
+        int a = e.addTrack(), b = e.addTrack();
+        e.addClip(a, tone(250, 1.8, 0.4), 0, 0, 1.8 * kProjectRate, 1.f); e.addClip(b, tone(350, 1.8, 0.4), 0, 0, 1.8 * kProjectRate, 1.f);
+        int m = e.addBus(); e.setTrackOutput(a, m); e.setBusMute(m, true); e.setTrackSolo(b, true);   // the muted bus carries a silent track; solo on b
+    }});
     s.push_back({"full_song", 5.0, [](Engine& e) {
         int k = e.addTrack(); e.createNativePlugin(k, "drums");
         int b = e.addTrack(); e.createNativePlugin(b, "hybrid");
@@ -102,6 +115,44 @@ static Result renderScene(const Scene& sc) {
     return {(int64_t)out.size() / 2, 20 * log10(pk + 1e-12), 10 * log10(sq / std::max<size_t>(1, out.size()) + 1e-12), h};
 }
 
+// ---- routing checks that do not need a golden file ----
+static std::vector<float> renderWith(double secs, const std::function<void(Engine&)>& build) {
+    auto ep = std::make_unique<Engine>(); build(*ep); std::vector<float> out; ep->renderMix(0, (int64_t)(secs * kProjectRate), 0, out); return out;
+}
+static double maxDiff(const std::vector<float>& a, const std::vector<float>& b, size_t skip = 0) {   // skip: leading floats to ignore (a gain that starts away from unity ramps during the first block)
+    if (a.size() != b.size()) return 1e9; double m = 0; for (size_t i = skip; i < a.size(); i++) m = std::max(m, (double)std::fabs(a[i] - b[i])); return m;
+}
+static int routingChecks() {
+    int fails = 0; auto check = [&](const char* what, bool ok, double v) { printf("routing: %-52s %s (%.3g)\n", what, ok ? "ok" : "FAILED", v); if (!ok) fails++; };
+    auto three = [](Engine& e, std::array<int, 3>& t) {
+        t = {e.addTrack(), e.addTrack(), e.addTrack()};
+        e.addClip(t[0], tone(220, 1.5, 0.4), 0, 0, 1.5 * kProjectRate, 1.f); e.addClip(t[1], tone(330, 1.5, 0.3, 0.6), 0, 0, 1.5 * kProjectRate, 1.f); e.addClip(t[2], tone(440, 1.5, 0.3), 0, 0, 1.5 * kProjectRate, 1.f);
+        e.setTrackPan(t[0], -0.4f); e.setTrackWidth(t[1], 1.3f);
+    };
+    const auto direct = renderWith(2.0, [&](Engine& e) { std::array<int, 3> t; three(e, t); });
+    const auto viaUnity = renderWith(2.0, [&](Engine& e) { std::array<int, 3> t; three(e, t); int b = e.addBus(); for (int x : t) e.setTrackOutput(x, b); });
+    check("a unity bus changes nothing (<= 1e-5)", maxDiff(direct, viaUnity) < 1e-5, maxDiff(direct, viaUnity));
+    const auto removed = renderWith(2.0, [&](Engine& e) { std::array<int, 3> t; three(e, t); int b = e.addBus(); for (int x : t) e.setTrackOutput(x, b); e.removeBus(b); });
+    check("removing the bus sends its tracks back to the master, bit for bit", maxDiff(direct, removed) == 0.0, maxDiff(direct, removed));
+    const auto halfBus = renderWith(2.0, [&](Engine& e) { std::array<int, 3> t; three(e, t); int b = e.addBus(); e.setBusGain(b, 0.5f); for (int x : t) e.setTrackOutput(x, b); });
+    std::vector<float> half = direct; for (auto& x : half) x *= 0.5f;
+    check("a bus at gain 0.5 halves the mix after the first block (<= 1e-5)", maxDiff(half, halfBus, 1024) < 1e-5, maxDiff(half, halfBus, 1024));
+    // a chain declared against the flow: tracks -> bus3 -> bus2 -> bus1 -> master, buses created 1, 2, 3
+    const auto chainA = renderWith(2.0, [&](Engine& e) { std::array<int, 3> t; three(e, t); int b1 = e.addBus(), b2 = e.addBus(), b3 = e.addBus(); e.setBusGain(b2, 0.7f); e.setBusPan(b1, 0.3f);
+        for (int x : t) e.setTrackOutput(x, b3); e.setBusOutput(b3, b2); e.setBusOutput(b2, b1); });
+    const auto chainB = renderWith(2.0, [&](Engine& e) { std::array<int, 3> t; three(e, t); int b3 = e.addBus(), b2 = e.addBus(), b1 = e.addBus(); e.setBusGain(b2, 0.7f); e.setBusPan(b1, 0.3f);
+        for (int x : t) e.setTrackOutput(x, b3); e.setBusOutput(b3, b2); e.setBusOutput(b2, b1); });
+    double peakA = 0; for (float x : chainA) peakA = std::max(peakA, (double)std::fabs(x));
+    check("a chain created against the flow sounds the same (<= 1e-6)", maxDiff(chainA, chainB) < 1e-6 && peakA > 0.1, maxDiff(chainA, chainB));
+    { auto ep = std::make_unique<Engine>(); Engine& e = *ep; int b1 = e.addBus(), b2 = e.addBus(), b3 = e.addBus();
+      check("a bus can feed another", e.setBusOutput(b1, b2) && e.setBusOutput(b2, b3), 0);
+      check("a loop is refused (3 -> 1)", !e.setBusOutput(b3, b1), 0);
+      check("a bus cannot feed itself", !e.setBusOutput(b2, b2), 0);
+      check("an unknown bus or track is refused", !e.setBusOutput(b1, 99) && !e.setTrackOutput(1, 99) && !e.setTrackOutput(77, b1), 0);
+      int n = 3; while (e.addBus()) n++; check("the bus limit is enforced", n == kMaxBuses, n); }
+    return fails;
+}
+
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "--print", file = argc > 2 ? argv[2] : ""; bool strict = false;
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--strict")) strict = true;
@@ -126,6 +177,7 @@ int main(int argc, char** argv) {
             else if (strict && sum != r.sum) { printf("  CHECKSUM %016llx != %016llx (levels match: not bit-exact)\n", (unsigned long long)r.sum, sum); fails++; }
         }
     }
+    fails += routingChecks();
     if (mode == "--update") { FILE* f = fopen(file.c_str(), "w"); if (!f) return 2; fputs(table.c_str(), f); fclose(f); printf("wrote %s\n", file.c_str()); }
     printf(fails ? "FAILED (%d)\n" : "ok\n", fails);
     return fails ? 1 : 0;

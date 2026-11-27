@@ -42,6 +42,17 @@ constexpr int kFxIdBase = 1000;   // effect ids start here, so one id space addr
 // Parameter automation: piecewise-linear lane of a plugin parameter, points sorted by frame.
 struct AutoLane { int param = 0; std::vector<int64_t> frames; std::vector<float> values; std::vector<uint8_t> shapes; };  // shape of the segment starting at each point: 0 linear, 1 step, 2 smooth
 constexpr int kMaxLanes = 32;
+constexpr int kMaxBuses = 16;     // buses in one project (a bus sums the tracks routed to it, then goes to the master or to another bus)
+constexpr int kMaxBusId = 64;     // bus ids are never reused while the app runs, so this bounds the buses created in one session
+
+// A mixing bus: tracks (and other buses) are routed into it; it has the same gain / pan / width / mute as a track and its own destination.
+// Effect chains, sends and sidechain come with phase 4 of docs/ROADMAP-FL-PARITY.md; this is the routing graph they will hang on.
+struct BusState {
+    int id = 0;
+    float gain = 1.f, pan = 0.f, width = 1.f;
+    bool mute = false;
+    int output = 0;                                 // 0 = the master, else the id of another bus (never one that leads back here)
+};
 
 // One insert effect: a VST3 plugin in its own Wine host, processing the track's (or the master's) audio.
 struct FxState {
@@ -63,12 +74,15 @@ struct TrackState {
     float gain = 1.f, pan = 0.f;
     float width = 1.f;                              // stereo width: 0 mono, 1 unchanged, 2 twice as wide (side signal gain)
     bool mute = false, solo = false;
+    int output = 0;                                 // 0 = the master, else the id of the bus this track is mixed into
 };
 
 // Immutable snapshot, published by the UI thread and read by the audio thread.
 struct Project {
     std::vector<TrackState> tracks;
     std::vector<FxState> masterFx;                  // insert effects on the summed mix
+    std::vector<BusState> buses;
+    std::vector<int> busOrder;                      // indices into `buses`, every bus after all the buses that feed it (computed by Engine::planRouting)
     float masterGain = 1.f;
     float masterWidth = 1.f;
     bool loop = false;
@@ -95,6 +109,9 @@ struct MixState {
     int latencyBlocks = 0;                          // longest track chain (callbacks), set by Engine::fxRealtime
     float smoothGain[kMaxTracks];
     float smoothWidth[kMaxTracks];
+    float bus[kMaxBuses][ZK_MAX_FRAMES * 2];        // what each bus has received so far (by position in Project::buses)
+    float smoothBusGain[kMaxBusId + 1];
+    float smoothBusWidth[kMaxBusId + 1];
     float smoothMaster = 1.f, smoothMasterWidth = 1.f;
     bool init = false;
     bool playClips = true;  // false while the transport is stopped (plugins still sound for live MIDI)
@@ -133,6 +150,16 @@ public:
     void setTrackSolo(int id, bool s);
     void setMasterGain(float g);
     void setLoop(bool on, int64_t s, int64_t e);
+
+    // --- routing (UI thread): tracks and buses are mixed into buses, buses into the master ---
+    int addBus();                                 // returns the bus id, 0 when the limit is reached
+    bool removeBus(int busId);                    // whatever fed it goes to the master again
+    void setBusGain(int busId, float g);
+    void setBusPan(int busId, float p);
+    void setBusWidth(int busId, float w);
+    void setBusMute(int busId, bool m);
+    bool setTrackOutput(int track, int busId);    // busId 0 = master; false for an unknown track or bus
+    bool setBusOutput(int busId, int destBusId);  // false for an unknown bus, or when it would make a loop
 
     // --- MIDI / plugins ---
     bool addNote(int track, int64_t start, int64_t length, int pitch, int velocity);
@@ -212,6 +239,8 @@ private:
     // Applies gain, pan, mute/solo to each track's dry buffer and sums into out (interleaved stereo); no master gain yet.
     static void mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters);
     // Master gain and meter.
+    /** Orders p.busOrder so that every bus comes after the buses routed into it. */
+    static void planRouting(Project& p);
     static void masterOut(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters);
     // Effect chains, pipelined (audio callback): results arrive one callback later per effect; tracks are delay-compensated.
     void fxRealtime(const Project& p, MixState& ms, int frames, int64_t budgetNs);
@@ -270,6 +299,7 @@ private:
     int64_t fxLastPos_[kMaxPlugins] = {};                                // audio thread: position of the block last sent to each effect slot
     float fxAutoLastOff_[kMaxPlugins][kMaxLanes];                        // offline render: same, separate state
     int nextFxId_ = kFxIdBase;
+    int nextBusId_ = 1;
     std::array<ParamEvt, 512> paramQ_;
     float autoLast_[kMaxPlugins][kMaxLanes];  // audio thread: last automation value sent per (plugin slot, lane); NaN = unsent
     std::atomic<uint32_t> paramHead_{0}, paramTail_{0};
