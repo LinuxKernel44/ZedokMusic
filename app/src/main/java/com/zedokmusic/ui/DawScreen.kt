@@ -26,7 +26,7 @@ import com.zedokmusic.model.*
 import com.zedokmusic.settings.AppSettings
 import com.zedokmusic.update.Updater
 
-private enum class Panel(val label: String) { Arrange("Tracks"), Piano("Piano"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
+private enum class Panel(val label: String) { Arrange("Tracks"), Rack("Rack"), Piano("Piano"), Mixer("Mixer"), Plugin("Plugin"), Auto("Auto") }
 
 @Composable
 fun DawScreen(vm: DawViewModel) {
@@ -94,7 +94,7 @@ fun DawScreen(vm: DawViewModel) {
                     }
                     Column(Modifier.weight(if (expanded) 1f else 0.9f)) {
                         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (p in listOf(Panel.Piano, Panel.Mixer, Panel.Plugin, Panel.Auto)) PanelChip(p.label, bottom == p) { bottom = p }
+                            for (p in listOf(Panel.Rack, Panel.Piano, Panel.Mixer, Panel.Plugin, Panel.Auto)) PanelChip(p.label, bottom == p) { bottom = p }
                         }
                         Box(Modifier.weight(1f)) { PanelContent(vm, bottom, ppb, { ppb = it }, {}, {}, openInserts) }
                     }
@@ -171,6 +171,7 @@ private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Fl
                 Box(Modifier.weight(1f)) { PianoRollView(vm, t, ppb) }
             }
         }
+        Panel.Rack -> RackView(vm)
         Panel.Mixer -> MixerView(vm, onInserts)
         Panel.Plugin -> PluginPanel(vm)
         Panel.Auto -> AutomationView(vm)

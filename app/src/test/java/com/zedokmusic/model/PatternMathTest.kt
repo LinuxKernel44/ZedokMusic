@@ -38,4 +38,13 @@ class PatternMathTest {
         assertTrue(PatternMath.place(listOf(n(60, 0f)), 0f, 0f, 8f).isEmpty())
         assertTrue(PatternMath.place(listOf(n(60, 0f)), 4f, 0f, 0f).isEmpty())
     }
+
+    @Test fun aBigProjectIsComputedQuickly() {
+        // 40 channels x 100 placements of a pattern of 200 notes: what the playlist does every time a note changes
+        val notes = (0 until 200).map { n(36 + it % 40, it * 0.25f, 0.25f) }
+        val t0 = System.nanoTime(); var total = 0
+        for (ch in 0 until 40) for (c in 0 until 100) total += PatternMath.place(notes, 50f, c * 50f, 50f).size
+        val ms = (System.nanoTime() - t0) / 1e6
+        assertEquals(40 * 100 * 200, total); assertTrue("took $ms ms", ms < 2000)
+    }
 }

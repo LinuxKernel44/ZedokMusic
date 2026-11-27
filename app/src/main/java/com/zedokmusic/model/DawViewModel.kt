@@ -53,6 +53,17 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var currentPattern by mutableStateOf<PatternM?>(null); private set
     /** The placement picked in the playlist's pattern lane. */
     var selectedPatternClip by mutableStateOf<PatternClipM?>(null)
+    /** The pitch the step sequencer uses for a melodic track (track id -> MIDI note; default C4). */
+    val stepPitches = androidx.compose.runtime.mutableStateMapOf<Int, Int>()
+    fun stepPitch(t: TrackM): Int = stepPitches[t.id] ?: 60
+    fun setStepPitch(t: TrackM, p: Int) { stepPitches[t.id] = p.coerceIn(0, 127) }
+    /** true = the playlist plays (Song); false = the current pattern alone, looped, and the audio clips are silent (Pattern mode, like FL Studio's). */
+    var songMode by mutableStateOf(true); private set
+    fun switchSongMode(on: Boolean) {
+        if (songMode == on) return
+        songMode = on; applyLoop(); syncAllNotes(); applyClipGains(); dirty = true
+    }
+    private fun applyClipGains() { for (t in tracks) for (c in t.clips) e.setClipGain(c.engineId, if (songMode) Math.pow(10.0, c.gainDb / 20.0).toFloat() else 0f) }
     private var patternCounter = 0
     private var lastPatLen = 0f
     private val projectFile get() = store?.file(projectName)
@@ -272,7 +283,11 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         message = "Loop set to $bars bar${if (bars > 1) "s" else ""}, the length of your content."
         dirty = true
     }
-    private fun applyLoop() = e.setLoop(loop, 0, (loopBars * 4 * fpb).toLong())
+    private fun applyLoop() {
+        val p = currentPattern
+        if (!songMode && p != null) e.setLoop(true, 0, (patternLength(p) * fpb).toLong())   // Pattern mode: the pattern loops on itself
+        else e.setLoop(loop, 0, (loopBars * 4 * fpb).toLong())
+    }
     fun changeBpm(v: Float) {
         val old = bpm; applyBpm(v); val now = bpm
         if (old != now) record("Change tempo", "tempo", undo = { applyBpm(old) }, redo = { applyBpm(now) })
@@ -315,7 +330,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val r = e.loadClip(t.id, wav.absolutePath, (startBeat * fpb).toLong())
         if (r == null) { message = "Could not read ${wav.name} (WAV only)."; return null }
         val c = ClipM(r[0].toInt(), wav.absolutePath, wav.nameWithoutExtension, startBeat, r[1])
-        t.clips.add(c); dirty = true; return c
+        t.clips.add(c); if (!songMode) e.setClipGain(c.engineId, 0f); dirty = true; return c
     }
 
     // ---------- clip selection (like the notes of the piano roll) ----------
@@ -549,7 +564,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun syncNotes(t: TrackM) {
         pushNotes(t)
         val len = currentPattern?.let { patternLength(it) } ?: 0f
-        if (len != lastPatLen) { lastPatLen = len; for (o in tracks) if (o !== t && o.kind == TrackKind.Instrument) pushNotes(o) }
+        if (len != lastPatLen) { lastPatLen = len; for (o in tracks) if (o !== t && o.kind == TrackKind.Instrument) pushNotes(o); if (!songMode) applyLoop() }
     }
     private fun syncAllNotes() { lastPatLen = currentPattern?.let { patternLength(it) } ?: 0f; for (t in tracks) if (t.kind == TrackKind.Instrument) pushNotes(t) }
     private fun pushNotes(t: TrackM) {
@@ -572,6 +587,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun notesOnTimeline(t: TrackM): List<NoteM> = derivedNotes(t)
     private fun derivedNotes(t: TrackM): List<NoteM> {
         if (t.kind != TrackKind.Instrument) return emptyList()
+        if (!songMode) { val p = currentPattern ?: return emptyList(); val pl = patternLength(p); return PatternMath.place(notesOf(p, t), pl, 0f, pl) }   // Pattern mode
         val out = ArrayList<NoteM>()
         for (c in playlist) out += PatternMath.place(notesOf(c.pattern, t), patternLength(c.pattern), c.start, clipLength(c))
         return out
@@ -586,12 +602,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** The position of the playhead inside the current pattern (while a placement of it plays), else -1. */
     fun patternPlayhead(): Float {
         val cur = currentPattern ?: return -1f
+        if (!songMode) return playhead % patternLength(cur)   // Pattern mode: the pattern plays on its own, from 0
         val c = playlist.firstOrNull { it.pattern === cur && playhead >= it.start && playhead < it.start + clipLength(it) } ?: return -1f
         return (playhead - c.start) % patternLength(cur)
     }
     /** Seeks to [beat] of the current pattern, in the placement the playhead is in, or in the first placement. */
     fun seekPatternBeat(beat: Float) {
         val cur = currentPattern
+        if (!songMode) { seekBeat(beat); return }
         val c = playlist.firstOrNull { it.pattern === cur && playhead >= it.start && playhead < it.start + clipLength(it) } ?: playlist.filter { it.pattern === cur }.minByOrNull { it.start }
         seekBeat((c?.start ?: 0f) + beat)
     }
@@ -601,6 +619,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (cur != null) for (t in tracks) if (t.kind == TrackKind.Instrument) cur.stored[t.id] = t.notes.toList()
         for (t in tracks) if (t.kind == TrackKind.Instrument) { t.notes.clear(); t.notes.addAll(p.stored[t.id] ?: emptyList()); p.stored.remove(t.id) }
         currentPattern = p; lastPatLen = patternLength(p)
+        if (!songMode) { syncAllNotes(); applyLoop() }
     }
     private fun ensurePattern(p: PatternM) { if (currentPattern !== p && p in patterns) selectPattern(p) }
     private fun resetPatterns() {
@@ -628,8 +647,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         p.name = n; dirty = true; record("Rename pattern", undo = { p.name = o; dirty = true }, redo = { p.name = n; dirty = true })
     }
     fun setPatternLength(p: PatternM, beats: Float?) {
-        val o = p.fixedLength; p.fixedLength = beats; syncAllNotes(); dirty = true
-        record("Pattern length", undo = { p.fixedLength = o; syncAllNotes(); dirty = true }, redo = { p.fixedLength = beats; syncAllNotes(); dirty = true })
+        val o = p.fixedLength; p.fixedLength = beats; syncAllNotes(); applyLoop(); dirty = true
+        record("Pattern length", undo = { p.fixedLength = o; syncAllNotes(); applyLoop(); dirty = true }, redo = { p.fixedLength = beats; syncAllNotes(); applyLoop(); dirty = true })
     }
     fun deletePattern(p: PatternM): Boolean {
         if (patterns.size <= 1 || p !in patterns) { message = "A project keeps at least one pattern."; return false }

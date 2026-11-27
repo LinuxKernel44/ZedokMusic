@@ -85,13 +85,13 @@ But : le cœur du workflow FL. C'est le plus gros changement de modèle.
 ### Tâches
 - [x] **2.1 Modèle de données** (0.54.0 ; format 4) (`DawModel.kt`) : `Pattern`, `Channel`, `PatternClip`, migration, sérialisation, tests de chargement d'anciens projets.
 - [x] **2.2 Moteur** (0.54.0 : notes dérivées de la playlist, moteur inchangé) : lecture des notes d'un pattern à partir de la position des clips (compensation de longueur, boucle de pattern, pattern plus court/long que le clip), sans allocation dans le callback.
-- [ ] **2.3 Channel Rack + step sequencer** : grille de pas tactile, vélocité par pas, glisser pour peindre, copier/coller de pas, aperçu au toucher.
+- [x] **2.3 Channel Rack + step sequencer** (0.55.0 : grille de pas, pads de Drums, peinture ; sans vélocité par pas ni tuplets) : grille de pas tactile, vélocité par pas, glisser pour peindre, copier/coller de pas, aperçu au toucher.
 - [x] **2.4 Sélecteur de pattern** (0.54.0) (liste, renommer, couleur, dupliquer, supprimer, fusionner, diviser).
-- [ ] **2.5 Playlist** : placement de clips-pattern par glisser, étirement (répétition ou coupe), clone, rendu unique, couleurs, mode **Song / Pattern** (lecture d'un pattern seul en boucle ou de la chanson entière).
-- [ ] **2.6 Piano roll sur un canal d'un pattern** (le piano roll existant devient l'éditeur du canal courant du pattern courant).
+- [x] **2.5 Playlist** (0.54.0–0.55.0 : voie de patterns, mode Song / Pattern ; pas de pistes de clips audio mêlées aux patterns : les clips audio restent sur leurs pistes) : placement de clips-pattern par glisser, étirement (répétition ou coupe), clone, rendu unique, couleurs, mode **Song / Pattern** (lecture d'un pattern seul en boucle ou de la chanson entière).
+- [x] **2.6 Piano roll sur un canal d'un pattern** (0.54.0) (le piano roll existant devient l'éditeur du canal courant du pattern courant).
 - [x] **2.7 Clips de pattern liés** (0.54.0 : Make unique ; édition liée par construction) : indicateur visuel, « Make unique », « Select all instances ».
 - [ ] **2.8 Navigateur** : patterns et canaux dans le sound browser.
-- [ ] **2.9 Performance** : projets de 100 patterns / 40 canaux ; temps d'ouverture et de lecture mesurés.
+- [x] **2.9 Performance** (0.55.0 : calcul pur de 40 canaux × 100 placements en < 2 s testé ; ouverture/lecture d'un gros projet non mesurées sur téléphone) : projets de 100 patterns / 40 canaux ; temps d'ouverture et de lecture mesurés.
 
 Critères : un projet existant s'ouvre et sonne exactement pareil ; un beat 16 pas se fait en moins de 30 s ; modifier un pattern met à jour tous ses clips.
 
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.55.0-alpha | 2026-11-27 | Phase 2 : Rack (step sequencer), mode Song / Pattern. Reste de la phase 2 : navigateur (2.8), voir feuille |
 | 0.54.0-alpha | 2026-11-27 | Phase 2 (1re partie) : patterns, playlist (voie de patterns), format 4 |
 | 0.53.0-alpha | 2026-11-27 | Phase 1.9 : slide notes (Hybrid, Sampler). Phase 1 terminée |
 | 0.52.0-alpha | 2026-11-27 | Phase 1 : ghost notes, pinceau, accords, quantize, humanize, strum, arpège, riff, LFO d'événements (menu Tools) |

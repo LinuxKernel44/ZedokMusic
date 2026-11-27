@@ -50,11 +50,12 @@ fun PatternHeader(vm: DawViewModel) {
                 Spacer(Modifier.width(6.dp))
                 Text((cur?.name ?: "—") + " ▾", color = Zk.text, fontSize = 13.sp, maxLines = 1, fontWeight = FontWeight.SemiBold)
             }
-            Text("Tap the lane to place it", color = Zk.dim, fontSize = 10.sp)
+            Text(if (vm.songMode) "Tap the lane to place it" else "PATTERN MODE: loops this pattern", color = if (vm.songMode) Zk.dim else Zk.warn, fontSize = 10.sp)
         }
         DropdownMenu(menu, { menu = false }) {
             for (p in vm.patterns) DropdownMenuItem(text = { Text(p.name, color = if (p === cur) Zk.accent else Zk.text) }, onClick = { menu = false; vm.selectPattern(p) })
             HorizontalDivider()
+            DropdownMenuItem(text = { Text((if (vm.songMode) "Play only this pattern (Pattern mode)" else "Play the song (Song mode)")) }, onClick = { menu = false; vm.switchSongMode(!vm.songMode) })
             DropdownMenuItem(text = { Text("New pattern") }, onClick = { menu = false; vm.newPattern() })
             if (cur != null) {
                 DropdownMenuItem(text = { Text("Duplicate") }, onClick = { menu = false; vm.duplicatePattern(cur) })
