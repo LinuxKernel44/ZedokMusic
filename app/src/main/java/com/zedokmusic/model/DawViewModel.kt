@@ -55,6 +55,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var playhead by mutableFloatStateOf(0f); private set
     var selected by mutableStateOf<TrackM?>(null)
     var masterGain by mutableFloatStateOf(1f); private set
+    var masterStereo by mutableFloatStateOf(0f); private set   // declared up here: load() runs from the constructor
     var masterMeter by mutableFloatStateOf(0f); private set
     var engineInfo by mutableStateOf("")
     var message by mutableStateOf<String?>(null)
@@ -368,7 +369,6 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** The wheel value (-1 wide .. +1 mono) as the width factor of the engine (2 .. 0). */
     private fun widthOf(s: Float) = 1f - s
     fun setStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
-    var masterStereo by mutableFloatStateOf(0f); private set
     fun applyMasterStereo(s: Float) { masterStereo = s.coerceIn(-1f, 1f); e.setMasterWidth(widthOf(masterStereo)); dirty = true }
     fun setMute(t: TrackM, m: Boolean) { t.mute = m; e.setTrackMute(t.id, m); dirty = true }
     fun setSolo(t: TrackM, s: Boolean) { t.solo = s; e.setTrackSolo(t.id, s); dirty = true }
