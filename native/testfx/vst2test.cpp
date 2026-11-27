@@ -38,7 +38,7 @@ static intptr_t disp(AEffect* e, int32_t op, int32_t idx, intptr_t val, void* p,
     case 8: if (idx >= 0 && idx < 2) strcpy((char*)p, names[idx]); return 0;
     case 7: if (idx >= 0 && idx < 2) snprintf((char*)p, 24, "%.2f", prm[idx]); return 0;
     case 6: strcpy((char*)p, "x"); return 0;
-    case 45: strcpy((char*)p, AS_SYNTH ? "ZTest2 Synth" : "ZTest2 Fx"); return 1;
+    case 45: strcpy((char*)p, AS_SYNTH == 2 ? "ZTest2 Tempo" : AS_SYNTH ? "ZTest2 Synth" : "ZTest2 Fx"); return 1;
     case 48: strcpy((char*)p, "ZTest2"); return 1;
     case 13: *(ERect**)p = &rect; return 1;
     case 14: {
@@ -53,7 +53,22 @@ static intptr_t disp(AEffect* e, int32_t op, int32_t idx, intptr_t val, void* p,
 }
 static void setp(AEffect*, int32_t i, float v) { if (i >= 0 && i < 2) prm[i] = v; if (child) paintText(child); }
 static float getp(AEffect*, int32_t i) { return (i >= 0 && i < 2) ? prm[i] : 0.f; }
-static void procR(AEffect*, float** in, float** out, int32_t n) {
+struct TimeInfo { double samplePos, sampleRate, nanoSeconds, ppqPos, tempo, barStartPos, cycleStartPos, cycleEndPos; int32_t sigNum, sigDen, smpte, smpteRate, clock, flags; };
+static double lastBeat = -1;
+static void procR(AEffect* e, float** in, float** out, int32_t n) {
+#if AS_SYNTH == 2   // tempo probe: a click on every beat (its length in samples = the tempo the host reported) of the host's position (ppq), so the spacing of the clicks in a rendered file shows the tempo the plugin was given
+    for (int i = 0; i < n; i++) out[0][i] = out[1][i] = 0.f;
+    TimeInfo* t = host ? (TimeInfo*)host(e, 7, 0, (1 << 9) | (1 << 10), nullptr, 0.f) : nullptr;
+    if (t && (t->flags & 2) && (t->flags & (1 << 9)) && (t->flags & (1 << 10))) {
+        const double perSample = t->tempo / 60.0 / t->sampleRate;
+        for (int i = 0; i < n; i++) {
+            const double b = t->ppqPos + i * perSample;
+            if (lastBeat >= 0 && std::floor(b) != std::floor(lastBeat)) for (int k = 0; k < (int)t->tempo && i + k < n; k++) out[0][i + k] = out[1][i + k] = 0.8f * (float)std::sin(k * 0.5);
+            lastBeat = b;
+        }
+    } else lastBeat = -1;
+    return;
+#endif
     for (int i = 0; i < n; i++) {
         float s;
         if (AS_SYNTH) { s = 0; if (note >= 0) { s = (float)std::sin(phase) * vel * prm[0]; phase += 6.283185307 * 440.0 * std::pow(2.0, (note - 69) / 12.0) / rate; } }
@@ -64,6 +79,6 @@ static void procR(AEffect*, float** in, float** out, int32_t n) {
 extern "C" __declspec(dllexport) AEffect* VSTPluginMain(HostCb cb) {
     static AEffect e; host = cb; memset(&e, 0, sizeof e);
     e.magic = 0x56737450; e.dispatcher = disp; e.setParameter = setp; e.getParameter = getp; e.processReplacing = procR;
-    e.numParams = 2; e.numInputs = AS_SYNTH ? 0 : 2; e.numOutputs = 2; e.flags = 1 | (1 << 4) | (AS_SYNTH ? (1 << 8) : 0); e.uniqueID = AS_SYNTH ? 'ZT2S' : 'ZT2F'; e.version = 1;
+    e.numParams = 2; e.numInputs = AS_SYNTH ? 0 : 2; e.numOutputs = 2; e.flags = 1 | (1 << 4) | (AS_SYNTH ? (1 << 8) : 0); e.uniqueID = AS_SYNTH == 2 ? 'ZT2T' : AS_SYNTH ? 'ZT2S' : 'ZT2F'; e.version = 1;
     return &e;
 }

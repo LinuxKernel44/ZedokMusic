@@ -107,6 +107,7 @@ public:
             seq_++; __atomic_store_n(&b_->ack_seq, seq_, __ATOMIC_RELEASE); pending_ = true;
             return;
         }
+        b_->tempo = bpm_; b_->ppq = ppq_; b_->playing = playingT_ ? 1u : 0u; b_->sig_num = 4; b_->sig_den = 4;   // the Windows plugin's tempo, position and time signature
         if (n > 0) memcpy(b_->events, ev, n * sizeof(ZkEvent));
         if (nch > 0) memcpy(b_->changes, ch, nch * sizeof(ZkParamChange));
         b_->n_events = n; b_->n_changes = nch; b_->frames = frames;

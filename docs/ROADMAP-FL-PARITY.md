@@ -38,8 +38,8 @@ Ordre recommandé : 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 
 
 But : ne pas construire sur du sable. Tout ce qui suit change le modèle de données ou le moteur.
 
-- [ ] **0.1 Tempo réel passé aux plugins.** Le README dit « fixé à 120 BPM » : tout plugin synchronisé au tempo (delay, LFO, arpégiateur VST) est faux. Passer le BPM du projet (et plus tard la carte de tempo) dans le `ProcessData` VST3/VST2 et aux processeurs natifs (`zdsp::Processor`). *Critère : un delay VST calé sur 1/4 tombe sur le temps à 90 et à 170 BPM (mesure hors ligne, rendu comparé à l'analyse des pics).*
-- [ ] **0.2 Signature et position musicale transmises aux plugins** (numérateur/dénominateur, position en quarts, début de mesure, état lecture/boucle). Prépare la phase 3.
+- [x] **0.1 Tempo réel passé aux plugins** (0.49.6, mesuré sur S10 avec un plugin VST2 sonde, voir `native/testfx/vst2test.cpp` ; chemin VST3 modifié mais non mesuré). Le README dit « fixé à 120 BPM » : tout plugin synchronisé au tempo (delay, LFO, arpégiateur VST) est faux. Passer le BPM du projet (et plus tard la carte de tempo) dans le `ProcessData` VST3/VST2 et aux processeurs natifs (`zdsp::Processor`). *Critère : un delay VST calé sur 1/4 tombe sur le temps à 90 et à 170 BPM (mesure hors ligne, rendu comparé à l'analyse des pics).*
+- [~] **0.2 Signature et position musicale transmises aux plugins** (0.49.6 : position en quarts, début de mesure, lecture/arrêt, signature 4/4 fixe ; la signature variable attend la phase 3) (numérateur/dénominateur, position en quarts, début de mesure, état lecture/boucle). Prépare la phase 3.
 - [ ] **0.3 Versionnage du format de projet.** Champ `format` dans le `.zedok`, migrations ordonnées, tests de chargement de projets d'anciennes versions (garder 3 fichiers témoins dans `app/src/test/resources`). Toute phase qui change le modèle ajoute une migration.
 - [ ] **0.4 Historique d'annulation unifié** (undo/redo global, pas seulement piano roll), avec une pile d'actions nommées. Nécessaire avant patterns/routage, qui multiplient les actions.
 - [ ] **0.5 Moteur : graphe de rendu explicite.** Aujourd'hui `mixTracks` somme les pistes. Introduire une structure « nœuds → connexions » (source, piste, bus, master) en C++ *sans changer le comportement*, avec tests hors ligne comparant le rendu avant/après (bit-exact). Prérequis des phases 4 et 5.
@@ -261,7 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
-| – | – | (à remplir à chaque release du chantier) |
+| 0.49.6-alpha | 2026-11-27 | Phase 0.1/0.2 : tempo, position, début de mesure et état de lecture transmis aux plugins Windows (VST2 mesuré, VST3 non mesuré) |
 
 ## Notes d'architecture de référence (pour reprendre après une coupure)
 

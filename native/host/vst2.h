@@ -3,6 +3,7 @@
 // project and contain no Steinberg code. Included by zhost.cpp after the helpers it uses (gB, fail, serve).
 #pragma once
 #include <string>
+#include <cmath>
 
 namespace vst2 {
 enum : int32_t {
@@ -67,11 +68,17 @@ static intptr_t hostCallback(AEffect* e, int32_t op, int32_t index, intptr_t val
         return 0;
     case mVersion: return 2400;
     case mCurrentId: return 0;
-    case mGetTime:
-        gTime.sampleRate = gRate; gTime.tempo = 120; gTime.ppqPos = gPpq; gTime.samplePos = gPpq * 0.5 * gRate;
-        gTime.timeSigNumerator = 4; gTime.timeSigDenominator = 4;
-        gTime.flags = 2 | (1 << 9) | (1 << 10) | (1 << 13);  // playing, ppq valid, tempo valid, time signature valid
+    case mGetTime: {
+        const double bpm = gB && gB->tempo >= 20.0 && gB->tempo <= 400.0 ? gB->tempo : 120.0;   // the project's tempo, written by the engine before every block
+        const bool playing = gB && gB->playing != 0;
+        const int num = gB && gB->sig_num ? (int)gB->sig_num : 4, den = gB && gB->sig_den ? (int)gB->sig_den : 4;
+        const double bar = num * 4.0 / den;
+        gTime.sampleRate = gRate; gTime.tempo = bpm; gTime.ppqPos = gPpq; gTime.samplePos = gPpq * 60.0 / bpm * gRate;
+        gTime.barStartPos = std::floor(gPpq / bar) * bar;
+        gTime.timeSigNumerator = num; gTime.timeSigDenominator = den;
+        gTime.flags = (playing ? 2 : 0) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13);  // playing, ppq valid, tempo valid, bar start valid, time signature valid
         return (intptr_t)&gTime;
+    }
     case mGetSampleRate: return (intptr_t)gRate;
     case mGetBlockSize: return gFrames;
     case mGetInputLatency: case mGetOutputLatency: return 0;
@@ -217,6 +224,7 @@ static int run(ZkBridge* B, HMODULE m, int frames, double rate) {
     };
     auto render = [&](int n, const ZkEvent* ev, int nev, const ZkParamChange* ch, int nch) {
         for (int i = 0; i < nch && ch; i++) if (ch[i].index < np) { e->setParameter(e, (int32_t)ch[i].index, ch[i].value); B->values[ch[i].index] = ch[i].value; paramText((int)ch[i].index); }
+        if (B->ppq >= 0.0) gPpq = B->ppq;   // position of this block, from the engine
         nPool = 0;
         for (int i = 0; i < nev; i++) {
             const uint8_t c = ev[i].channel & 15;
@@ -227,7 +235,7 @@ static int run(ZkBridge* B, HMODULE m, int frames, double rate) {
         if (nPool) { evs.numEvents = nPool; evs.reserved = 0; disp(eProcessEvents, 0, 0, &evs); }
         for (auto& b : outBuf) std::fill(b.begin(), b.end(), 0.f);
         if (e->flags & fCanReplacing) e->processReplacing(e, inP.data(), outP.data(), n); else if (e->process) e->process(e, inP.data(), outP.data(), n);
-        gPpq += n / rate * 2.0;  // 120 BPM
+        if (B->ppq < 0.0) gPpq += n / rate * (B->tempo >= 20.0 && B->tempo <= 400.0 ? B->tempo : 120.0) / 60.0;   // stopped: keep a running position
     };
     ZkEvent on{0, ZK_NOTE_ON, 0, 60, 100}, off{0, ZK_NOTE_OFF, 0, 60, 0};
     for (int b = 0; b < 300; b++) {   // warm the dynarec up before going realtime (see the VST3 path)

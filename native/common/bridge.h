@@ -28,7 +28,12 @@ struct ZkBridge {
     volatile uint32_t host_error;      // error code when host_state == ZK_HOST_ERROR
     volatile uint32_t plugin_kind;     // written by host: 0 unknown, 1 instrument, 2 effect (from the VST3 sub-categories)
     char plugin_name[96];              // written by host
-    char _pad0[64];
+    // --- transport, written by the engine before every block (read by the Wine host for the plugin's ProcessContext / VstTimeInfo) ---
+    double tempo;                      // beats per minute of the project
+    double ppq;                        // position in quarter notes at the start of the block, < 0 when the transport is stopped
+    uint32_t playing;                  // 1 while the project is playing
+    uint32_t sig_num, sig_den;         // time signature
+    char _pad0[36];
     // --- plugin editor (GUI) ---
     volatile uint32_t gui_cmd;         // ZkGuiCmd, set by the engine side, cleared by the host when handled
     volatile uint32_t gui_state;       // ZkGuiState, written by the host

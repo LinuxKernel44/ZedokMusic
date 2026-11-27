@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
     float* inCh[2] = {inL.data(), inR.data()}; float* outCh[2] = {oL.data(), oR.data()};
     AudioBusBuffers inB{}; inB.numChannels = 2; inB.channelBuffers32 = inCh;
     AudioBusBuffers outB{}; outB.numChannels = 2; outB.channelBuffers32 = outCh;
-    EvList evl; ProcessContext pc{}; pc.state = ProcessContext::kPlaying | ProcessContext::kTempoValid; pc.tempo = 120; pc.sampleRate = rate;
+    EvList evl; ProcessContext pc{}; pc.state = ProcessContext::kPlaying | ProcessContext::kTempoValid; pc.tempo = 120; pc.sampleRate = rate; pc.timeSigNumerator = 4; pc.timeSigDenominator = 4;
 
     auto render = [&](int n, const ZkEvent* ev, int nev, const ZkParamChange* ch = nullptr, int nch = 0) {
         evl.ev.clear(); pcIn.clear(); pcOut.clear();
@@ -400,6 +400,17 @@ int main(int argc, char** argv) {
                 continue;
             } else continue;
             evl.ev.push_back(e);
+        }
+        {   // the project's tempo, position and time signature (the engine writes them before every block; 120 BPM until it does)
+            const double bpm = B->tempo >= 20.0 && B->tempo <= 400.0 ? B->tempo : 120.0;
+            const bool playing = B->playing != 0, havePpq = B->ppq >= 0.0;
+            pc.tempo = bpm; pc.timeSigNumerator = B->sig_num ? (int32)B->sig_num : 4; pc.timeSigDenominator = B->sig_den ? (int32)B->sig_den : 4;
+            pc.state = ProcessContext::kTempoValid | ProcessContext::kTimeSigValid | (playing ? ProcessContext::kPlaying : 0);
+            if (havePpq) {
+                const double bar = pc.timeSigNumerator * 4.0 / pc.timeSigDenominator;
+                pc.projectTimeMusic = B->ppq; pc.barPositionMusic = std::floor(B->ppq / bar) * bar; pc.projectTimeSamples = (int64)(B->ppq * 60.0 / bpm * rate);
+                pc.state |= ProcessContext::kProjectTimeMusicValid | ProcessContext::kBarPositionValid;
+            }
         }
         ProcessData d{}; d.processMode = kRealtime; d.symbolicSampleSize = kSample32; d.numSamples = n;
         d.numInputs = nIn ? 1 : 0; d.inputs = nIn ? &inB : nullptr; d.numOutputs = 1; d.outputs = &outB;
