@@ -13,6 +13,17 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.StrokeCap
@@ -48,29 +59,62 @@ fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
 @Composable
 private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: Float, mute: Boolean, solo: Boolean, selected: Boolean, fxCount: Int, fxOn: Boolean, onFx: () -> Unit, stereo: Float, onStereo: (Float) -> Unit,
                   onGain: (Float) -> Unit, onPan: (Float) -> Unit, onMute: () -> Unit, onSolo: () -> Unit, onSelect: () -> Unit) {
-    Column(Modifier.width(92.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Zk.panel).border(1.dp, if (selected) color else Zk.line, RoundedCornerShape(12.dp))
-        .pointerInput(Unit) { detectTapGestures { onSelect() } }.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(name, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        LabelButton(if (fxCount == 0) "FX" else "FX $fxCount", fxOn, color, w = 60.dp, h = 26.dp, onClick = onFx)
-        if (pan != null) {
-            Slider(pan, onPan, valueRange = -1f..1f, modifier = Modifier.height(28.dp).doubleTapReset { onPan(0f) }, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = Zk.line, inactiveTrackColor = Zk.line))
-            Text(if (pan == 0f) "C" else if (pan < 0) "L${(-pan * 100).toInt()}" else "R${(pan * 100).toInt()}", color = Zk.dim, fontSize = 10.sp)
-        } else Spacer(Modifier.height(28.dp))
-        StereoWheel(stereo, color, onStereo)
-        Row(Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight().doubleTapReset { onGain(1f) })  // double tap = 0 dB
+    // While the volume fader is used it grows over the whole height of the strip, and shrinks back when it is released.
+    var faderActive by remember { mutableStateOf(false) }
+    val grow by androidx.compose.animation.core.animateFloatAsState(if (faderActive) 1f else 0f, androidx.compose.animation.core.tween(if (faderActive) 240 else 360), label = "fader")
+    var phTop by remember { mutableFloatStateOf(0f) }; var phH by remember { mutableFloatStateOf(0f) }; var boxH by remember { mutableFloatStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current; val edge = with(density) { 8.dp.toPx() }
+    Box(Modifier.width(92.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Zk.panel).border(1.dp, if (selected) color else Zk.line, RoundedCornerShape(12.dp))
+        .pointerInput(Unit) { detectTapGestures { onSelect() } }.androidx_onSize { boxH = it }) {
+        Column(Modifier.fillMaxSize().padding(8.dp).graphicsLayer { alpha = 1f - 0.75f * grow }, horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(name, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            LabelButton(if (fxCount == 0) "FX" else "FX $fxCount", fxOn, color, w = 60.dp, h = 26.dp, onClick = onFx)
+            if (pan != null) {
+                Slider(pan, onPan, valueRange = -1f..1f, modifier = Modifier.height(28.dp).doubleTapReset { onPan(0f) }, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = Zk.line, inactiveTrackColor = Zk.line))
+                Text(if (pan == 0f) "C" else if (pan < 0) "L${(-pan * 100).toInt()}" else "R${(pan * 100).toInt()}", color = Zk.dim, fontSize = 10.sp)
+            } else Spacer(Modifier.height(28.dp))
+            StereoWheel(stereo, color, onStereo)
+            // the place of the fader at rest: the fader itself is drawn on top (below) so that it can grow over the strip
+            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp).androidx_onPlaced { top, h -> phTop = top; phH = h })
+            Text(gainToDb(gain) + " dB", color = Zk.dim, fontSize = 10.sp)
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { LabelButton("M", mute, Zk.warn, onClick = onMute); LabelButton("S", solo, Zk.accent, onClick = onSolo) }
+        }
+        val top = phTop + (edge - phTop) * grow; val bottom = (phTop + phH) + ((boxH - edge) - (phTop + phH)) * grow
+        Row(Modifier.offset { androidx.compose.ui.unit.IntOffset(edge.toInt(), top.toInt()) }.width(76.dp).height(with(density) { (bottom - top).coerceAtLeast(1f).toDp() }), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight().doubleTapReset { onGain(1f) }, onActive = { faderActive = it })  // double tap = 0 dB
             Meter(meter, Modifier.width(14.dp).fillMaxHeight())
         }
-        Text(gainToDb(gain) + " dB", color = Zk.dim, fontSize = 10.sp)
-        Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { LabelButton("M", mute, Zk.warn, onClick = onMute); LabelButton("S", solo, Zk.accent, onClick = onSolo) }
     }
 }
 
+private fun Modifier.androidx_onSize(f: (Float) -> Unit): Modifier = this.onSizeChanged { f(it.height.toFloat()) }
+private fun Modifier.androidx_onPlaced(f: (Float, Float) -> Unit): Modifier = this.onGloballyPositioned { f(it.positionInParent().y, it.size.height.toFloat()) }
+
 @Composable
-fun Fader(value: Float, color: Color, onChange: (Float) -> Unit, modifier: Modifier) {
-    Canvas(modifier.pointerInput(Unit) { detectTapGestures { onChange(1f - (it.y / size.height).coerceIn(0f, 1f)) } }
-        .pointerInput(Unit) { detectDragGestures { ch, _ -> ch.consume(); onChange(1f - (ch.position.y / size.height).coerceIn(0f, 1f)) } }) {
+fun Fader(value: Float, color: Color, onChange: (Float) -> Unit, modifier: Modifier, onActive: ((Boolean) -> Unit)? = null) {
+    var rootY by remember { mutableFloatStateOf(0f) }
+    val gestures = if (onActive == null) Modifier.pointerInput(Unit) { detectTapGestures { onChange(1f - (it.y / size.height).coerceIn(0f, 1f)) } }
+        .pointerInput(Unit) { detectDragGestures { ch, _ -> ch.consume(); onChange(1f - (ch.position.y / size.height).coerceIn(0f, 1f)) } }
+    else Modifier.pointerInput(Unit) {
+        // A touch sets the value where it lands; moving the finger then changes it by the distance moved (measured on the screen: the fader grows while it is used).
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            onActive(true)
+            var v = (1f - down.position.y / size.height).coerceIn(0f, 1f); onChange(v)
+            var last = rootY + down.position.y
+            try {
+                while (true) {
+                    val ev = awaitPointerEvent(); val ch = ev.changes.firstOrNull() ?: break
+                    if (!ch.pressed) break
+                    val now = rootY + ch.position.y; val dy = now - last; last = now
+                    if (dy != 0f) { v = (v - dy / size.height).coerceIn(0f, 1f); onChange(v) }
+                    ch.consume()
+                }
+            } finally { onActive(false) }
+        }
+    }
+    Canvas(modifier.onGloballyPositioned { rootY = it.positionInRoot().y }.then(gestures)) {
         val cx = size.width / 2
         drawRoundRect(Zk.line, Offset(cx - 2.dp.toPx(), 0f), Size(4.dp.toPx(), size.height), CornerRadius(2.dp.toPx()))
         val unity = size.height * (1f - 0.75f)
