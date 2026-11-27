@@ -76,14 +76,18 @@ private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: F
             StereoWheel(stereo, color, onStereo)
             // the place of the fader at rest: the fader itself is drawn on top (below) so that it can grow over the strip
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp).androidx_onPlaced { top, h -> phTop = top; phH = h })
-            Text(gainToDb(gain) + " dB", color = Zk.dim, fontSize = 10.sp)
+            Text(gainToDb(gain) + " dB", color = Zk.dim, fontSize = 10.sp, modifier = Modifier.graphicsLayer { alpha = 1f - grow })
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { LabelButton("M", mute, Zk.warn, onClick = onMute); LabelButton("S", solo, Zk.accent, onClick = onSolo) }
         }
         val top = phTop + (edge - phTop) * grow; val bottom = (phTop + phH) + ((boxH - edge) - (phTop + phH)) * grow
-        Row(Modifier.offset { androidx.compose.ui.unit.IntOffset(edge.toInt(), top.toInt()) }.width(76.dp).height(with(density) { (bottom - top).coerceAtLeast(1f).toDp() }), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight().doubleTapReset { onGain(1f) }, onActive = { faderActive = it })  // double tap = 0 dB
-            Meter(meter, Modifier.width(14.dp).fillMaxHeight())
+        Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(edge.toInt(), top.toInt()) }.width(76.dp).height(with(density) { (bottom - top).coerceAtLeast(1f).toDp() })) {
+            // the bigger readout takes the bottom of the grown fader; the fader gives up that room progressively
+            Row(Modifier.fillMaxSize().padding(bottom = (26f * grow).dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Fader(gainToFader(gain), color, onChange = { onGain(faderToGain(it)) }, Modifier.weight(1f).fillMaxHeight(), onActive = { faderActive = it }, onReset = { onGain(1f) })   // double tap = 0 dB
+                Meter(meter, Modifier.width(14.dp).fillMaxHeight())
+            }
+            Text(gainToDb(gain) + " dB", color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.align(Alignment.BottomCenter).graphicsLayer { alpha = grow })
         }
     }
 }
@@ -92,26 +96,33 @@ private fun Modifier.androidx_onSize(f: (Float) -> Unit): Modifier = this.onSize
 private fun Modifier.androidx_onPlaced(f: (Float, Float) -> Unit): Modifier = this.onGloballyPositioned { f(it.positionInParent().y, it.size.height.toFloat()) }
 
 @Composable
-fun Fader(value: Float, color: Color, onChange: (Float) -> Unit, modifier: Modifier, onActive: ((Boolean) -> Unit)? = null) {
+fun Fader(value: Float, color: Color, onChange: (Float) -> Unit, modifier: Modifier, onActive: ((Boolean) -> Unit)? = null, onReset: (() -> Unit)? = null) {
     var rootY by remember { mutableFloatStateOf(0f) }
     val gestures = if (onActive == null) Modifier.pointerInput(Unit) { detectTapGestures { onChange(1f - (it.y / size.height).coerceIn(0f, 1f)) } }
         .pointerInput(Unit) { detectDragGestures { ch, _ -> ch.consume(); onChange(1f - (ch.position.y / size.height).coerceIn(0f, 1f)) } }
     else Modifier.pointerInput(Unit) {
         // A touch sets the value where it lands; moving the finger then changes it by the distance moved (measured on the screen: the fader grows while it is used).
+        // The double tap is detected here, in screen coordinates: the fader moves and grows while it is touched, so its own coordinates cannot be compared between two taps.
+        var lastTapAt = 0L; var lastTapY = 0f
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             onActive(true)
+            val t0 = System.currentTimeMillis()
             var v = (1f - down.position.y / size.height).coerceIn(0f, 1f); onChange(v)
-            var last = rootY + down.position.y
+            var last = rootY + down.position.y; val startY = last; var moved = 0f
             try {
                 while (true) {
                     val ev = awaitPointerEvent(); val ch = ev.changes.firstOrNull() ?: break
                     if (!ch.pressed) break
-                    val now = rootY + ch.position.y; val dy = now - last; last = now
+                    val now = rootY + ch.position.y; val dy = now - last; last = now; moved = Math.max(moved, Math.abs(now - startY))
                     if (dy != 0f) { v = (v - dy / size.height).coerceIn(0f, 1f); onChange(v) }
                     ch.consume()
                 }
             } finally { onActive(false) }
+            val t1 = System.currentTimeMillis()
+            if (moved < viewConfiguration.touchSlop && t1 - t0 < 350) {
+                if (onReset != null && t1 - lastTapAt < 400 && Math.abs(startY - lastTapY) < 64.dp.toPx()) { onReset(); lastTapAt = 0L } else { lastTapAt = t1; lastTapY = startY }
+            }
         }
     }
     Canvas(modifier.onGloballyPositioned { rootY = it.positionInRoot().y }.then(gestures)) {
