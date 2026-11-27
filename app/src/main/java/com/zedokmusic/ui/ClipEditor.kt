@@ -28,6 +28,8 @@ import com.zedokmusic.model.AudioFx
 import com.zedokmusic.model.ClipM
 import com.zedokmusic.model.DawViewModel
 import com.zedokmusic.model.TrackM
+import com.zedokmusic.model.Theory
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -109,4 +111,86 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
     Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Zk.accent else Zk.panel2).then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 10.dp, vertical = 7.dp)) {
         Text(text, color = if (!enabled) Zk.dim.copy(alpha = .4f) else if (on) Color(0xFF00201B) else Zk.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
+}
+
+/**
+ * Edits the sample of a Zedok Sampler (the clip editor's pitch / time / gain, for a sound that is not a clip): a sample that is not a C can be moved to the nearest C,
+ * stretched to the tempo, and so on. "Use in sampler" renders the new version into the project's Samples folder and loads it in the sampler.
+ */
+@Composable
+fun SampleEditDialog(vm: DawViewModel, t: TrackM, path: String, onDismiss: () -> Unit) {
+    var semis by remember { mutableFloatStateOf(0f) }; var speed by remember { mutableFloatStateOf(1f) }; var gainDb by remember { mutableFloatStateOf(0f) }
+    var mode by remember { mutableIntStateOf(AudioFx.MODE_STRETCH) }
+    var bpmText by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val srcBpm = bpmText.replace(',', '.').toFloatOrNull()?.takeIf { it in 20f..400f } ?: 0f
+    val color = com.zedokmusic.ui.nplug.accentOf("sampler")
+    val srcLen by produceState(0f, path) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AudioFx.wavSeconds(File(path)) } }
+    val hz by produceState(0f, path) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AudioFx.readWav(File(path))?.let { AudioFx.detectPitchHz(it) } ?: 0f } }
+    val scope = rememberCoroutineScope()
+    val midi = if (hz > 0f) 69f + 12f * (Math.log((hz / 440f).toDouble()) / Math.log(2.0)).toFloat() else Float.NaN
+    val pitchRatio = if (mode == AudioFx.MODE_RESAMPLE) Math.pow(2.0, semis / 12.0).toFloat() else 1f
+    val outSec = if (srcLen > 0f) srcLen / (speed * pitchRatio) else 0f
+    val changed = Math.abs(semis) > 1e-3f || Math.abs(speed - 1f) > 1e-4f || Math.abs(gainDb) > 1e-3f
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, containerColor = Zk.panel, title = { Text(File(path).nameWithoutExtension, fontSize = 17.sp, maxLines = 3) }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (!midi.isNaN()) Text("Pitch of the sample: ${Theory.name(Math.round(midi))} (${"%+d".format(Math.round((midi - Math.round(midi)) * 100f))} cents)", color = Zk.text, fontSize = 13.sp)
+            else Text("No clear pitch found (drums, noise or a chord).", color = Zk.dim, fontSize = 12.sp)
+            Section("Pitch")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Chip("−12", false) { semis = (semis - 12f).coerceIn(-48f, 48f) }; Chip("−1", false) { semis = (semis - 1f).coerceIn(-48f, 48f) }
+                Text("%+.1f st".format(semis), color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(70.dp), maxLines = 1)
+                Chip("+1", false) { semis = (semis + 1f).coerceIn(-48f, 48f) }; Chip("+12", false) { semis = (semis + 12f).coerceIn(-48f, 48f) }; Chip("0", false) { semis = 0f }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Chip("To nearest C", false, enabled = !midi.isNaN()) { val c = Math.round(midi / 12f) * 12f; semis = (Math.round((c - midi) * 10f) / 10f).coerceIn(-48f, 48f) }
+                Text("moves the sample to a C, so the root note C is right", color = Zk.dim, fontSize = 11.sp)
+            }
+            Slider(semis, { semis = (it * 10f).toInt() / 10f }, valueRange = -24f..24f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+            Section("Time")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Slider(speed, { speed = (it * 1000f).toInt() / 1000f }, Modifier.weight(1f), valueRange = 0.25f..4f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Text("×%.3f".format(speed), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(66.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { for (v in listOf(0.5f, 0.75f, 1f, 1.5f, 2f)) Chip(if (v == 1f) "1×" else "$v×", speed == v) { speed = v } }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Sample BPM", color = Zk.dim, fontSize = 12.sp)
+                Box(Modifier.width(70.dp).height(34.dp).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
+                    if (bpmText.isEmpty()) Text("e.g. 90", color = Zk.dim, fontSize = 12.sp)
+                    BasicTextField(bpmText, { bpmText = it.take(6) }, singleLine = true, textStyle = TextStyle(color = Zk.text, fontSize = 13.sp), cursorBrush = SolidColor(color), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+                }
+                Chip("Fit to ${vm.bpm.toInt()} BPM", false, enabled = srcBpm > 0f) { speed = (vm.bpm / srcBpm).coerceIn(0.25f, 4f) }
+            }
+            if (srcLen > 0f) Text("Length: %.2f s → %.2f s".format(srcLen, outSec), color = Zk.dim, fontSize = 11.sp)
+            Section("Gain")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Slider(gainDb, { gainDb = (it * 10f).toInt() / 10f }, Modifier.weight(1f), valueRange = -24f..12f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Text("%+.1f dB".format(gainDb), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(64.dp)); Chip("0", false) { gainDb = 0f }
+            }
+            Section("Method")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Chip("Stretch", mode == AudioFx.MODE_STRETCH) { mode = AudioFx.MODE_STRETCH }; Chip("Resample", mode == AudioFx.MODE_RESAMPLE) { mode = AudioFx.MODE_RESAMPLE } }
+            if (busy) Text("Processing…", color = color, fontSize = 12.sp)
+        }
+    }, confirmButton = {
+        TextButton({
+            busy = true
+            scope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                val dir = vm.projectSamplesDir()
+                val pcm = AudioFx.readWav(File(path))
+                var file: File? = null; var err: String? = null
+                if (dir == null) err = "There is no project folder." else if (pcm == null) err = "Could not read ${File(path).name}."
+                else runCatching {
+                    dir.mkdirs()
+                    val base = File(path).nameWithoutExtension.replace(Regex(" edited( \\(\\d+\\))?$"), "")
+                    var out = File(dir, "$base edited.wav"); var k = 2
+                    while (out.exists()) out = File(dir, "$base edited ($k).wav").also { k++ }
+                    AudioFx.writeWav(out, AudioFx.process(pcm!!, gainDb, semis, speed, mode)); file = out
+                }.onFailure { err = "Could not process the sample: ${it.message}" }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    busy = false
+                    if (err != null) vm.message = err else { vm.setPluginState(t, "sample", file!!.absolutePath); vm.samplesChanged(); vm.message = "New version loaded in ${t.pluginName.ifBlank { t.name }}: ${file!!.name}"; onDismiss() }
+                }
+            }
+        }, enabled = changed && !busy) { Text("Use in sampler") }
+    }, dismissButton = { TextButton({ if (!busy) onDismiss() }) { Text("Cancel") } })
 }

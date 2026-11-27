@@ -87,6 +87,30 @@ object AudioFx {
     // ------------------------------------------------------------------ waveform peaks (cached on disk)
     const val PEAK_FRAMES = 256   // source frames per stored bucket
 
+    /** Fundamental frequency (Hz) of a tonal sample, by autocorrelation of the loudest part, or 0 when there is none (noise, drums...). */
+    fun detectPitchHz(p: Pcm): Float {
+        val total = min(p.frames, p.rate * 2); if (total < 4096) return 0f
+        val mono = FloatArray(total) { i -> var s = 0f; for (c in p.data) s += c[i]; s / p.data.size }
+        var bi = 0; var bm = 0f; var i = 0
+        while (i + 1024 <= total) { var e = 0f; for (k in 0 until 1024) e += abs(mono[i + k]); if (e > bm) { bm = e; bi = i }; i += 512 }
+        val start = max(0, min(bi + 1024, total - 8192)); val len = min(8192, total - start); if (len < 2048) return 0f
+        var mean = 0f; for (k in 0 until len) mean += mono[start + k]; mean /= len
+        val x = FloatArray(len) { mono[start + it] - mean }
+        val minLag = max(8, p.rate / 2000); val maxLag = min(len / 2, p.rate / 40)
+        val r = FloatArray(maxLag + 2)
+        for (lag in 0..maxLag + 1) { var s = 0.0; for (k in 0 until len - lag) s += x[k] * x[k + lag]; r[lag] = s.toFloat() }
+        if (r[0] < 1e-9f) return 0f
+        var l = minLag; while (l < maxLag && r[l] > 0f) l++   // skip the first lobe of the correlation
+        var best = -1; var bv = 0f
+        for (k in max(l, 1)..maxLag) { val v = r[k] / r[0]; if (v > bv && r[k] >= r[k - 1] && r[k] >= r[k + 1]) { bv = v; best = k } }
+        if (best < 0 || bv < 0.3f) return 0f
+        var pick = best                                      // the smallest lag that is nearly as good: avoids octave errors
+        for (k in max(l, 1)..best) { val v = r[k] / r[0]; if (v >= 0.85f * bv && r[k] >= r[k - 1] && r[k] >= r[k + 1]) { pick = k; break } }
+        val a = r[pick - 1]; val b = r[pick]; val c = r[pick + 1]; val den = a - 2f * b + c
+        val shift = if (abs(den) > 1e-12f) 0.5f * (a - c) / den else 0f
+        return p.rate / (pick + shift.coerceIn(-1f, 1f))
+    }
+
     /** Duration in seconds, read from the header only (no decoding). */
     fun wavSeconds(f: File): Float = runCatching {
         RandomAccessFile(f, "r").use { r ->

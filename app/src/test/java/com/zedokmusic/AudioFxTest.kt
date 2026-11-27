@@ -53,4 +53,13 @@ class AudioFxTest {
         val tail = o.data[0].takeLast(o.frames / 10).maxOf { abs(it) }
         assertTrue("tail is silent ($tail)", tail > 0.1f)
     }
+    @Test fun pitchDetection() {
+        for (f in doubleArrayOf(110.0, 261.63, 440.0, 880.0)) {
+            val hz = AudioFx.detectPitchHz(sine(f, 1.0))
+            assertTrue("$f detected as $hz", abs(hz - f) < f * 0.01)
+        }
+        // an F with a loud second harmonic is still an F
+        val p = sine(174.61, 1.0); val q = sine(349.22, 1.0); for (i in p.data[0].indices) p.data[0][i] += 0.6f * q.data[0][i]
+        val hz = AudioFx.detectPitchHz(p); assertTrue("F with harmonic detected as $hz", abs(hz - 174.61) < 3.0)
+    }
 }
