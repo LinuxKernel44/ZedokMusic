@@ -681,6 +681,27 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
         mixTracks(*p, frames, out, audioMix_, meters_);
         masterFxRealtime(*p, audioMix_, out, frames, budgetNs);
         masterOut(*p, frames, out, audioMix_, meters_);
+        // --- anti-click ---
+        constexpr int kDeclickFrames = 480, kFadeInFrames = 384;   // 10 ms / 8 ms at 48 kHz
+        if (jumped) {
+            for (int ch = 0; ch < 2; ch++) { declickOff_[ch] = lastOut_[ch] - out[ch]; declickStep_[ch] = declickOff_[ch] / kDeclickFrames; }
+            declickLeft_ = kDeclickFrames;
+        }
+        if (preroll) fadeInLeft_ = kFadeInFrames;
+        else if (fadeInLeft_ > 0 && !jumped) {
+            for (int i = 0; i < frames; i++) {
+                const float g = fadeInLeft_ > 0 ? 1.f - (float)fadeInLeft_ / kFadeInFrames : 1.f;
+                out[i * 2] *= g; out[i * 2 + 1] *= g;
+                if (fadeInLeft_ > 0) fadeInLeft_--;
+            }
+        }
+        if (declickLeft_ > 0) {
+            for (int i = 0; i < frames && declickLeft_ > 0; i++, declickLeft_--) {
+                out[i * 2] += declickOff_[0]; out[i * 2 + 1] += declickOff_[1];
+                declickOff_[0] -= declickStep_[0]; declickOff_[1] -= declickStep_[1];
+            }
+        }
+        lastOut_[0] = out[(frames - 1) * 2]; lastOut_[1] = out[(frames - 1) * 2 + 1];
         blockCounter_++;
         pos_.store(next, std::memory_order_relaxed);
         pluginSubmit(*p, preroll ? pos : next, frames, playing, jumped, true);

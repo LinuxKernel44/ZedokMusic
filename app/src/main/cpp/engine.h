@@ -270,6 +270,10 @@ private:
     std::atomic<uint32_t> paramHead_{0}, paramTail_{0};
     std::atomic<int64_t> lateTotal_{0};
     bool pluginWasPlaying_ = false;   // audio-thread-only
+    // anti-click when the position jumps (seek while playing, start, stop): the step between the last sample and the new signal decays
+    // over a few milliseconds, and the first real block after the silent pre-roll fades in. Audio-thread-only.
+    float lastOut_[2] = {0.f, 0.f}, declickOff_[2] = {0.f, 0.f}, declickStep_[2] = {0.f, 0.f};
+    int declickLeft_ = 0, fadeInLeft_ = 0;
     int64_t pluginExpectedPos_ = 0;   // audio-thread-only
 };
 
