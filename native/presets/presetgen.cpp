@@ -19,6 +19,7 @@ static Measure render(Processor& p, const std::vector<float>& vals, const std::v
     p.prepare(sr, bs); p.reset();
     std::vector<float> L(bs), R(bs), zero(bs, 0.f); Measure m; double e = 0; long cnt = 0;
     for (int pos = 0; pos < total; pos += bs) {
+        if (!strcmp(p.name(), "Zedok Piano")) usleep(2600);   // the piano decodes on a worker thread: keep the pace of real time
         std::vector<ZkEvent> ev;
         if (pos == 0) for (int n : notes) ev.push_back({0, ZK_NOTE_ON, 0, (uint8_t)n, 100});
         const int off = (int)(hold * sr); if (off >= pos && off < pos + bs) for (int n : notes) ev.push_back({(uint32_t)(off - pos), ZK_NOTE_OFF, 0, (uint8_t)n, 0});
@@ -61,10 +62,11 @@ int main(int argc, char** argv) {
     else if (id == "drums") list = drumsPresets();
     else if (id == "grain") list = grainPresets();
     else if (id == "sampler") list = samplerPresets();
+    else if (id == "piano") list = pianoPresets();
     else { fprintf(stderr, "no presets for %s\n", id.c_str()); return 1; }
     std::unique_ptr<Processor> p(createProcessor(id)); if (!p) return 1;
     const auto& specs = p->params();
-    p->prepare(48000, 128); if (id == "grain") usleep(900000);   // the grain textures are built on a background thread
+    p->prepare(48000, 128); if (id == "grain") usleep(900000); if (id == "piano") { float t_[2] = {0, 0}; for (int i_ = 0; i_ < 400; i_++) { if (p->telemetry(0, t_, 2) == 2 && t_[1] >= 2.f) break; usleep(50000); } }   // the grain textures are built on a background thread
     FILE* f = fopen(out, "w"); FILE* r = rep ? fopen(rep, "w") : nullptr;
     fprintf(f, "{\"plugin\":\"%s\",\"version\":1,\"presets\":[\n", id.c_str());
     int idx = 0, problems = 0;

@@ -44,12 +44,14 @@ int main(int argc, char** argv) {
     }
     p->prepare(sr, 128);
     if (!strcmp(argv[1], "grain")) usleep(600000);   // the grain textures are built on a background thread
+    if (!strcmp(argv[1], "piano")) { float t_[2] = {0, 0}; for (int i_ = 0; i_ < 400; i_++) { if (p->telemetry(0, t_, 2) == 2 && t_[1] >= 2.f) break; usleep(50000); } }
     for (auto& kv : states) if (!p->setState(kv.first, kv.second)) fprintf(stderr, "state %s rejected\n", kv.first.c_str());
     const auto tStart = std::chrono::steady_clock::now();
     const int total = (int)(secs * sr); std::vector<float> L(total), R(total), zero(128, 0.f);
     std::vector<ZkEvent> ev;
     for (int pos = 0; pos < total; pos += 128) {
         const int n = std::min(128, total - pos); ev.clear();
+        if (!strcmp(argv[1], "piano")) usleep(2600);   // the piano decodes its sounds on a worker thread: keep the pace of real time
         for (auto& nt : notes) {
             const int on = (int)(nt.start * sr), off = (int)((nt.start + nt.len) * sr);
             if (on >= pos && on < pos + n) ev.push_back({(uint32_t)(on - pos), ZK_NOTE_ON, 0, (uint8_t)nt.pitch, (uint8_t)nt.vel});

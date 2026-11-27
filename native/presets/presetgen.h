@@ -26,3 +26,4 @@ PresetList colorPresets();
 PresetList drumsPresets();
 PresetList grainPresets();
 PresetList samplerPresets();
+PresetList pianoPresets();

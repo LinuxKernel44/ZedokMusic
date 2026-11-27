@@ -38,6 +38,8 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     var name by mutableStateOf(name)
     var gain by mutableFloatStateOf(1f)
     var pan by mutableFloatStateOf(0f)
+    /** Stereo separation wheel, -1 (twice as wide) .. 0 (unchanged) .. +1 (mono). */
+    var stereo by mutableFloatStateOf(0f)
     var mute by mutableStateOf(false)
     var solo by mutableStateOf(false)
     /** 0 none, 1 starting, 2 ready, 3 error */

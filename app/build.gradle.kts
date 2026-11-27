@@ -13,8 +13,8 @@ android {
         minSdk = 28
         // targetSdk 28 is required so Wine/Box64 binaries can be exec'd from app data (W^X, Android 10+).
         targetSdk = 28
-        versionCode = 73
-        versionName = "0.47.4-alpha"
+        versionCode = 74
+        versionName = "0.48.0-alpha"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared") } }
     }
@@ -50,7 +50,7 @@ android {
     ndkVersion = "27.0.12077973"
     packaging { jniLibs.useLegacyPackaging = true }
     // The runtime archive is already compressed; store it as-is so the native extractor can read it straight from the APK.
-    androidResources { noCompress += listOf("zst", "exe") }
+    androidResources { noCompress += listOf("zst", "exe", "zpk") }
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.10.01"))

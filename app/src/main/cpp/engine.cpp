@@ -111,6 +111,8 @@ bool Engine::setClipGain(int clipId, float gain) {
     void Engine::name { edit([&](Project& p) { for (auto& t : p.tracks) if (t.id == id) { expr; } }); }
 TRACK_SET(setTrackGain(int id, float g), t.gain = std::clamp(g, 0.f, 4.f))
 TRACK_SET(setTrackPan(int id, float v), t.pan = std::clamp(v, -1.f, 1.f))
+TRACK_SET(setTrackWidth(int id, float v), t.width = std::clamp(v, 0.f, 2.f))
+void Engine::setMasterWidth(float w) { edit([&](Project& p) { p.masterWidth = std::clamp(w, 0.f, 2.f); }); }
 TRACK_SET(setTrackMute(int id, bool m), t.mute = m)
 TRACK_SET(setTrackSolo(int id, bool s), t.solo = s)
 void Engine::setMasterGain(float g) { edit([&](Project& p) { p.masterGain = std::clamp(g, 0.f, 4.f); }); }
@@ -167,7 +169,7 @@ int64_t Engine::renderBlockDry(const Project& p, int64_t pos, int frames, MixSta
 }
 
 void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
-    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; ms.init = true; }
+    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; for (auto& w : ms.smoothWidth) w = 1.f; ms.init = true; }
     memset(out, 0, sizeof(float) * 2 * frames);
     bool anySolo = false;
     for (auto& t : p.tracks) anySolo |= t.solo;
@@ -182,9 +184,12 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
         float pl = cosf(ang) * (float)M_SQRT2, pr = sinf(ang) * (float)M_SQRT2;
         const float* tb = ms.dry[ti];
         float tpk = 0.f;
+        const float w0 = ms.smoothWidth[t.id], w1 = t.width; ms.smoothWidth[t.id] = w1;   // stereo width: mid / side, the side gain moves smoothly
         for (int i = 0; i < frames; i++) {
             float g = g0 + (g1 - g0) * ((float)i / (float)frames);
-            float l = tb[i * 2] * g * pl, r = tb[i * 2 + 1] * g * pr;
+            float xl = tb[i * 2], xr = tb[i * 2 + 1];
+            if (w0 != 1.f || w1 != 1.f) { const float w = w0 + (w1 - w0) * ((float)i / (float)frames); const float m = 0.5f * (xl + xr), s = 0.5f * (xl - xr) * w; xl = m + s; xr = m - s; }
+            float l = xl * g * pl, r = xr * g * pr;
             out[i * 2] += l; out[i * 2 + 1] += r;
             tpk = std::max(tpk, std::max(fabsf(l), fabsf(r)));
         }
@@ -195,8 +200,10 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
 void Engine::masterOut(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
     float masterPeak = 0.f;
     float m0 = ms.smoothMaster, m1 = p.masterGain; ms.smoothMaster = m1;
+    const float mw0 = ms.smoothMasterWidth, mw1 = p.masterWidth; ms.smoothMasterWidth = mw1;
     for (int i = 0; i < frames; i++) {
         float g = m0 + (m1 - m0) * ((float)i / (float)frames);
+        if (mw0 != 1.f || mw1 != 1.f) { const float w = mw0 + (mw1 - mw0) * ((float)i / (float)frames); const float m = 0.5f * (out[i * 2] + out[i * 2 + 1]), s = 0.5f * (out[i * 2] - out[i * 2 + 1]) * w; out[i * 2] = m + s; out[i * 2 + 1] = m - s; }
         out[i * 2] *= g; out[i * 2 + 1] *= g;
         masterPeak = std::max(masterPeak, std::max(fabsf(out[i * 2]), fabsf(out[i * 2 + 1])));
     }

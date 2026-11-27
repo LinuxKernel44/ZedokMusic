@@ -41,6 +41,8 @@ J(jint, addToneClip, jint track, jlong start, jdouble seconds, jdouble freq, jdo
 }
 J(void, setTrackGain, jint id, jfloat g) { eng().setTrackGain(id, g); }
 J(void, setTrackPan, jint id, jfloat p) { eng().setTrackPan(id, p); }
+J(void, setTrackWidth, jint id, jfloat w) { eng().setTrackWidth(id, w); }
+J(void, setMasterWidth, jfloat w) { eng().setMasterWidth(w); }
 J(void, setTrackMute, jint id, jboolean m) { eng().setTrackMute(id, m); }
 J(void, setTrackSolo, jint id, jboolean s) { eng().setTrackSolo(id, s); }
 J(void, setMasterGain, jfloat g) { eng().setMasterGain(g); }
@@ -72,6 +74,7 @@ J(jboolean, addNote, jint track, jlong start, jlong len, jint pitch, jint vel) {
 J(void, clearNotes, jint track) { eng().clearNotes(track); }
 J(jboolean, createPluginBridge, jint track, jstring path) { return eng().createPluginBridge(track, str(env, path), kCallbackFrames); }
 J(jboolean, createNativePlugin, jint track, jstring id) { return eng().createNativePlugin(track, str(env, id)); }
+J(void, setDataDir, jstring dir) { zdsp::dataDir() = str(env, dir); }
 J(jboolean, setPluginState, jint track, jstring key, jstring value) { return eng().setPluginState(track, str(env, key), str(env, value)); }
 J(jstring, getPluginState, jint track, jstring key) { return env->NewStringUTF(eng().getPluginState(track, str(env, key)).c_str()); }
 J(jfloatArray, pluginTelemetry, jint track, jint what) {

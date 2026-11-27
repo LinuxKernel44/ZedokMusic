@@ -61,6 +61,7 @@ struct TrackState {
     int pluginSlot = -1;                            // index into MixState::plugOut
     std::vector<FxState> fx;                        // insert effects, in series, after the clips and the instrument
     float gain = 1.f, pan = 0.f;
+    float width = 1.f;                              // stereo width: 0 mono, 1 unchanged, 2 twice as wide (side signal gain)
     bool mute = false, solo = false;
 };
 
@@ -69,6 +70,7 @@ struct Project {
     std::vector<TrackState> tracks;
     std::vector<FxState> masterFx;                  // insert effects on the summed mix
     float masterGain = 1.f;
+    float masterWidth = 1.f;
     bool loop = false;
     int64_t loopStart = 0, loopEnd = 0;
 };
@@ -92,7 +94,8 @@ struct MixState {
     FxChain masterChain;
     int latencyBlocks = 0;                          // longest track chain (callbacks), set by Engine::fxRealtime
     float smoothGain[kMaxTracks];
-    float smoothMaster = 1.f;
+    float smoothWidth[kMaxTracks];
+    float smoothMaster = 1.f, smoothMasterWidth = 1.f;
     bool init = false;
     bool playClips = true;  // false while the transport is stopped (plugins still sound for live MIDI)
     std::vector<float> scratch;
@@ -124,6 +127,8 @@ public:
     bool setClipGain(int clipId, float gain);
     void setTrackGain(int id, float g);
     void setTrackPan(int id, float p);
+    void setTrackWidth(int id, float w);
+    void setMasterWidth(float w);
     void setTrackMute(int id, bool m);
     void setTrackSolo(int id, bool s);
     void setMasterGain(float g);

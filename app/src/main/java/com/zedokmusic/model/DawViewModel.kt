@@ -163,6 +163,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         current = this
         store?.create(projectName)
         e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
+        PianoPack.ensure(getApplication())
         engineOk = e.start()
         midi.autoConnect = { AppSettings.midiAuto.on }
         midi.start()
@@ -362,6 +363,11 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setGain(t: TrackM, g: Float) { t.gain = g; e.setTrackGain(t.id, g); dirty = true }
     fun setPan(t: TrackM, p: Float) { t.pan = p; e.setTrackPan(t.id, p); dirty = true }
+    /** The wheel value (-1 wide .. +1 mono) as the width factor of the engine (2 .. 0). */
+    private fun widthOf(s: Float) = 1f - s
+    fun setStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
+    var masterStereo by mutableFloatStateOf(0f); private set
+    fun applyMasterStereo(s: Float) { masterStereo = s.coerceIn(-1f, 1f); e.setMasterWidth(widthOf(masterStereo)); dirty = true }
     fun setMute(t: TrackM, m: Boolean) { t.mute = m; e.setTrackMute(t.id, m); dirty = true }
     fun setSolo(t: TrackM, s: Boolean) { t.solo = s; e.setTrackSolo(t.id, s); dirty = true }
     fun setMaster(g: Float) { masterGain = g; e.setMasterGain(g); dirty = true }
@@ -856,10 +862,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
     private fun write(f: File, mapPath: (String) -> String = { it }) {
-        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("loopBars", loopBars).put("loop", loop).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
+        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("masterStereo", masterStereo.toDouble()).put("loopBars", loopBars).put("loop", loop).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
             .put("view", JSONObject().put("ppb", ppb.toDouble()).put("ax", arrangeX).put("ay", arrangeY).put("rx", rollX).put("ry", rollY))
         val arr = JSONArray()
-        for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble())
+        for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
             .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
@@ -916,7 +922,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         pluginTarget = null; panelExpanded = false
         editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
-        bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); applyLoop()
+        bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); masterStereo = 0f; e.setMasterWidth(1f); applyLoop()
         pendingLanes.clear(); pendingParams.clear(); pendingStates.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
     }
@@ -1136,7 +1142,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (!f.exists()) return
         try {
             val root = JSONObject(f.readText())
-            bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain)
+            bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain); masterStereo = root.optDouble("masterStereo", 0.0).toFloat(); e.setMasterWidth(widthOf(masterStereo))
             loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
             root.optJSONObject("scale").let { sc -> scaleRoot = sc?.optInt("root", 0)?.coerceIn(0, 11) ?: 0; scaleType = sc?.optInt("type", 0)?.coerceIn(0, Theory.SCALES.size - 1) ?: 0 }
             root.optJSONObject("view")?.let { v ->
@@ -1153,7 +1159,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                     val id = e.addTrack(); t = TrackM(id, o.getString("name"), TrackKind.Instrument, newColor(), plugin); tracks.add(t)
                     t.pluginState = 1; if (!host.launch(id, plugin)) t.pluginState = 3
                 } else { val id = e.addTrack(); t = TrackM(id, o.getString("name"), TrackKind.Audio, newColor(), null); tracks.add(t) }
-                t.gain = o.optDouble("gain", 1.0).toFloat(); t.pan = o.optDouble("pan", 0.0).toFloat()
+                t.gain = o.optDouble("gain", 1.0).toFloat(); t.pan = o.optDouble("pan", 0.0).toFloat(); t.stereo = o.optDouble("stereo", 0.0).toFloat(); e.setTrackWidth(t.id, widthOf(t.stereo))
                 t.mute = o.optBoolean("mute"); t.solo = o.optBoolean("solo")
                 e.setTrackGain(t.id, t.gain); e.setTrackPan(t.id, t.pan); e.setTrackMute(t.id, t.mute); e.setTrackSolo(t.id, t.solo)
                 val na = o.getJSONArray("notes")

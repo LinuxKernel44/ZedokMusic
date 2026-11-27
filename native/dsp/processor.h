@@ -12,6 +12,9 @@
 
 namespace zdsp {
 
+// Folder where the app keeps the data files of the plugins (the piano sound pack...). Set once by the app before plugins are created.
+inline std::string& dataDir() { static std::string d; return d; }
+
 enum class Curve : uint8_t { Linear, Log, Power, Choice, Toggle };
 
 struct ParamSpec {

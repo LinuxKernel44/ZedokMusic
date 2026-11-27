@@ -40,6 +40,9 @@ object NativeEngine {
     external fun addToneClip(track: Int, startFrame: Long, seconds: Double, freq: Double, amp: Double): Int
     external fun setTrackGain(id: Int, gain: Float)
     external fun setTrackPan(id: Int, pan: Float)
+    external fun setTrackWidth(id: Int, width: Float)
+    external fun setMasterWidth(width: Float)
+    external fun setDataDir(dir: String)
     external fun setTrackMute(id: Int, mute: Boolean)
     external fun setTrackSolo(id: Int, solo: Boolean)
     external fun setMasterGain(gain: Float)

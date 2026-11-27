@@ -37,3 +37,14 @@ and are **not** distributed with ZedokMusic.
 `libmp3lame` from https://lame.sourceforge.io/ (lame-3.100.tar.gz), unmodified, under the GNU LGPL 2.1 (full text in
 `app/src/main/cpp/third_party/lame/COPYING`). It is built as a separate shared library (`libmp3lame.so`) that the app links
 dynamically, so it can be replaced by a modified build. The source in this repository is the complete corresponding source.
+
+## Salamander Grand Piano V3 (Zedok Piano sounds)
+
+The piano sounds of Zedok Piano come from the **Salamander Grand Piano V3** (Yamaha C5), recorded and edited by **Alexander Holm**
+(https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html), licensed under **Creative Commons Attribution 3.0**
+(https://creativecommons.org/licenses/by/3.0/). The 24-bit WAV files were trimmed and converted to Ogg Vorbis (`tools/build-piano-pack.py`);
+that is the only change. Credit: "Salamander Grand Piano by Alexander Holm, CC BY 3.0".
+
+## stb_vorbis (Ogg Vorbis decoder)
+
+`native/dsp/third_party/stb_vorbis.c` by Sean Barrett (https://github.com/nothings/stb), public domain.

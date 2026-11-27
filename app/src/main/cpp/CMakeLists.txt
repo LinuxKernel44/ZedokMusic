@@ -19,7 +19,7 @@ set_target_properties(mp3lame PROPERTIES C_STANDARD 99)
 target_link_options(mp3lame PRIVATE -Wl,-z,max-page-size=16384)
 target_link_libraries(mp3lame m)
 set(ZK_DSP ${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/dsp)
-add_library(zedokaudio SHARED ${ZK_DSP}/registry.cpp jni.cpp engine.cpp wav.cpp extract.cpp recorder.cpp xclient.cpp flac_enc.cpp mp3_enc.cpp)
+add_library(zedokaudio SHARED ${ZK_DSP}/registry.cpp ${ZK_DSP}/stb_vorbis_impl.c jni.cpp engine.cpp wav.cpp extract.cpp recorder.cpp xclient.cpp flac_enc.cpp mp3_enc.cpp)
 target_compile_options(zedokaudio PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 target_include_directories(zedokaudio PRIVATE ${ZK_COMMON} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lame/include)
 # Android 15+ devices may use 16 KB memory pages: native libraries must be aligned for them.
