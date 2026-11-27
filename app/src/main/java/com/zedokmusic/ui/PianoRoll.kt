@@ -125,17 +125,17 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     }
 
     if (scaleDialog) androidx.compose.material3.AlertDialog(onDismissRequest = { scaleDialog = false }, containerColor = Zk.panel, title = { Text("Project scale") }, text = {
-        Column {
-            Text("Rows of the piano roll that belong to the scale are lighter, the others darker, and the root is tinted. The scale is saved with the project.", color = Zk.dim, fontSize = 12.sp)
+        // The whole content scrolls as one piece: on a landscape phone the dialog is short, and a list with its own height used to be squeezed to one cut-off line.
+        Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+            Text("Rows in the scale are lighter, the others darker, the root is tinted. Saved with the project.", color = Zk.dim, fontSize = 12.sp)
             Spacer(Modifier.height(8.dp))
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 for (r in 0 until 12) LabelButton(Theory.NAMES[r], r == scaleRoot, Zk.accent, w = 40.dp, h = 32.dp) { vm.setScale(r, scaleType) }
             }
             Spacer(Modifier.height(8.dp))
-            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = dialogListMax(240.dp))) {
-                itemsIndexed(Theory.SCALES) { i, s ->
-                    Text(s.label, color = if (i == scaleType) Zk.accent else Zk.text, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().clickable { vm.setScale(scaleRoot, i) }.padding(vertical = 9.dp))
-                }
+            Theory.SCALES.forEachIndexed { i, sc ->
+                Text(sc.label, color = if (i == scaleType) Zk.accent else Zk.text, fontSize = 14.sp, fontWeight = if (i == scaleType) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+                    modifier = Modifier.fillMaxWidth().clickable { vm.setScale(scaleRoot, i) }.padding(vertical = 9.dp))
             }
         }
     }, confirmButton = { androidx.compose.material3.TextButton({ scaleDialog = false }) { Text("Close") } })
