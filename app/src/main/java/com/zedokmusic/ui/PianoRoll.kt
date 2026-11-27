@@ -259,7 +259,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             val slop = viewConfiguration.touchSlop
                             val handleR = 28.dp.toPx(); val tol = 8.dp.toPx()
                             val lpTime = viewConfiguration.longPressTimeoutMillis
-                            var lastTapAt = 0L; var lastTapNote: NoteM? = null
+                            var lastTapAt = 0L; var lastTapNote: NoteM? = null; var lastEmptyTapAt = 0L
                             fun hitRect(r: androidx.compose.ui.geometry.Rect) = track.notes.filter { n ->
                                 val nx0 = n.start * pw; val nx1 = (n.start + n.length) * pw; val ny0 = (TOP - n.pitch) * rowPx
                                 nx1 >= r.left && nx0 <= r.right && ny0 + rowPx >= r.top && ny0 <= r.bottom
@@ -272,11 +272,15 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                 var mode = 0  // 0 empty, 1 move, 2 resize the end, 3 resize the start (one note)
                                 var target: NoteM? = null
                                 val selNow = selection.filter { track.notes.contains(it) }
-                                val cur = selNow.singleOrNull()
-                                if (cur != null) {  // the handles of a single selected note win: easy to grab, even on tiny notes
-                                    val cy = (TOP - cur.pitch) * rowPx + rowPx / 2
-                                    if (hypot(x0 - (cur.start + cur.length) * pw, y0 - cy) < handleR) { mode = 2; target = cur }
-                                    else if (hypot(x0 - cur.start * pw, y0 - cy) < handleR) { mode = 3; target = cur }
+                                var cur: NoteM? = null
+                                run {  // the handles of the selected notes win: easy to grab, even on tiny notes; the nearest one is taken
+                                    var best = handleR
+                                    for (nn in selNow) {
+                                        val cy = (TOP - nn.pitch) * rowPx + rowPx / 2
+                                        val de = hypot(x0 - (nn.start + nn.length) * pw, y0 - cy); val ds = hypot(x0 - nn.start * pw, y0 - cy)
+                                        if (de < best) { best = de; mode = 2; target = nn; cur = nn }
+                                        if (ds < best) { best = ds; mode = 3; target = nn; cur = nn }
+                                    }
                                 }
                                 if (target == null) {
                                     val hit = track.notes.lastOrNull { it.pitch == pitch0 && x0 >= it.start * pw - tol && x0 <= (it.start + it.length) * pw + tol }
@@ -301,7 +305,9 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                         val now = System.currentTimeMillis()
                                         if (target == null) {
                                             if (selectMode) selection.clear()
-                                            else { val st = floor(x0 / pw / SNAP) * SNAP; vm.addNote(track, pitch0, st, defaultLen); selection.clear(); track.notes.lastOrNull()?.let { selection.add(it) }; preview = pitch0 }
+                                            else if (selNow.isNotEmpty()) {   // with notes selected: one tap elsewhere does nothing, a second one deselects them all
+                                                if (now - lastEmptyTapAt < 450) { selection.clear(); lastEmptyTapAt = 0L } else lastEmptyTapAt = now
+                                            } else { val st = floor(x0 / pw / SNAP) * SNAP; vm.addNote(track, pitch0, st, defaultLen); selection.clear(); track.notes.lastOrNull()?.let { selection.add(it) }; preview = pitch0 }
                                         } else if (!handleGrab && lastTapNote === target && now - lastTapAt < 320) {
                                             vm.removeNote(track, target); selection.remove(target); lastTapNote = null
                                         } else {
@@ -330,7 +336,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                     return@awaitEachGesture
                                 }
                                 val o = target ?: return@awaitEachGesture
-                                val group: List<NoteM> = if (mode == 3) listOf(o) else if (o in selNow) selNow else listOf(o)
+                                val group: List<NoteM> = if (o in selNow) selNow else listOf(o)
                                 if (o !in selNow) { selection.clear(); selection.add(o) }
                                 val grab = x0 / pw - o.start; val endFixed = o.start + o.length
                                 val minStart = group.minOf { it.start }; val minPitch = group.minOf { it.pitch }; val maxPitch = group.maxOf { it.pitch }
@@ -346,7 +352,11 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                             val newEnd = ((beat / SNAP).roundToInt() * SNAP).coerceAtLeast(o.start + SNAP); val dLen = newEnd - (o.start + o.length)
                                             group.associateWith { NoteM(it.pitch, it.start, (it.length + dLen).coerceAtLeast(SNAP), it.velocity) }
                                         }
-                                        3 -> { val st = ((beat / SNAP).roundToInt() * SNAP).coerceIn(0f, endFixed - SNAP); mapOf(o to NoteM(o.pitch, st, endFixed - st, o.velocity)) }
+                                        3 -> {   // the start handle: every selected note moves its start by the same amount (none goes below 0 or under the smallest length)
+                                            val want = ((beat / SNAP).roundToInt() * SNAP) - o.start
+                                            val dS = want.coerceIn(-minStart, group.minOf { it.length } - SNAP)
+                                            group.associateWith { NoteM(it.pitch, it.start + dS, it.length - dS, it.velocity) }
+                                        }
                                         else -> {
                                             val newStart = (((beat - grab) / SNAP).roundToInt() * SNAP)
                                             val dStart = (newStart - o.start).coerceAtLeast(-minStart)
@@ -394,11 +404,10 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             if (rowPx >= 14.dp.toPx() && w >= 26.dp.toPx()) drawText(tm.measure(Theory.name(shown.pitch), TextStyle(color = Color(0xFF0B0D10), fontSize = 10.sp)), topLeft = Offset(nx + 4.dp.toPx(), y + (rowPx - 12.dp.toPx()) / 2))
                             if (n in selSet) {
                                 drawRoundRect(Color.White, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
-                                if (selSet.size == 1) {
-                                    val cy = y + rowPx / 2
-                                    for (hx in floatArrayOf(nx, nx + w)) { drawCircle(Color.White, 8.dp.toPx(), Offset(hx, cy)); drawCircle(track.color, 4.dp.toPx(), Offset(hx, cy)) }
-                                    if (prev != null) drawText(tm.measure(beatsLabel(shown.length), TextStyle(color = Color.White, fontSize = 12.sp)), topLeft = Offset(nx, maxOf(0f, y - 16.dp.toPx())))
-                                }
+                                // every selected note shows its two resize handles; using one of them resizes all the selected notes together
+                                val cy = y + rowPx / 2
+                                for (hx in floatArrayOf(nx, nx + w)) { drawCircle(Color.White, 8.dp.toPx(), Offset(hx, cy)); drawCircle(track.color, 4.dp.toPx(), Offset(hx, cy)) }
+                                if (prev != null && selSet.size == 1) drawText(tm.measure(beatsLabel(shown.length), TextStyle(color = Color.White, fontSize = 12.sp)), topLeft = Offset(nx, maxOf(0f, y - 16.dp.toPx())))
                             }
                         }
                         rectSel?.let { r -> drawRect(Zk.accent.copy(alpha = .14f), r.topLeft, r.size); drawRect(Zk.accent, r.topLeft, r.size, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx())) }
