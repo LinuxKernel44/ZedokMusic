@@ -42,11 +42,11 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun projectPresetsDir(): File? = store?.presets(projectName)
 
     val tracks = mutableStateListOf<TrackM>()
-    var bpm by mutableFloatStateOf(120f); private set
+    var bpm by mutableFloatStateOf(DEFAULT_BPM); private set
     var playing by mutableStateOf(false); private set
     /** The project's scale: root (0 = C ... 11 = B) and type (index in Theory.SCALES, 0 = none). Shown in the piano roll grid and saved with the project. */
-    var scaleRoot by mutableIntStateOf(0); private set
-    var scaleType by mutableIntStateOf(0); private set
+    var scaleRoot by mutableIntStateOf(0); private set        // every project keeps its own scale; a new project starts in C minor
+    var scaleType by mutableIntStateOf(2); private set
     fun setScale(root: Int, type: Int) { scaleRoot = root.coerceIn(0, 11); scaleType = type.coerceIn(0, Theory.SCALES.size - 1); dirty = true }
     var loop by mutableStateOf(false); private set
     /** The timelines scroll along with the play cursor. */
@@ -164,6 +164,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         store?.create(projectName)
         e.configure(AppSettings.outputDevice.value, AppSettings.bufferBursts, AppSettings.exclusive.on)
         PianoPack.ensure(getApplication())
+        e.setTempo(bpm.toDouble())
         engineOk = e.start()
         midi.autoConnect = { AppSettings.midiAuto.on }
         midi.start()
@@ -923,7 +924,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         pluginTarget = null; panelExpanded = false
         editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
-        bpm = 120f; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); masterStereo = 0f; e.setMasterWidth(1f); applyLoop()
+        bpm = DEFAULT_BPM; e.setTempo(bpm.toDouble()); scaleRoot = 0; scaleType = 2; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); masterStereo = 0f; e.setMasterWidth(1f); applyLoop()
         pendingLanes.clear(); pendingParams.clear(); pendingStates.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
     }
@@ -1182,7 +1183,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         dirty = false
     }
 
-    companion object { @Volatile var current: DawViewModel? = null; const val ZOOM_MIN = 4f; const val ZOOM_MAX = 400f }
+    companion object { const val DEFAULT_BPM = 130f; @Volatile var current: DawViewModel? = null; const val ZOOM_MIN = 4f; const val ZOOM_MAX = 400f }
 
     override fun onCleared() { current = null; stopRecording(); midi.stop(); save(); host.stopAll(); e.pause(); e.stop() }
 }
