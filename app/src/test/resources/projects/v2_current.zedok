@@ -1,0 +1,7 @@
+{
+ "version": 2,
+ "bpm": 130, "master": 1, "masterStereo": 0.3, "loopBars": 4, "loop": false,
+ "scale": {"root": 0, "type": 2},
+ "tracks": [{"name": "Piano", "kind": "Instrument", "gain": 1, "pan": 0, "stereo": -0.2, "mute": false, "solo": false, "plugin": "zedok:piano", "notes": [[60, 0, 4, 100]], "clips": [], "fx": []}],
+ "masterFx": []
+}

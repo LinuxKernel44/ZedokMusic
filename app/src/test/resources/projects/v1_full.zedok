@@ -1,0 +1,19 @@
+{
+ "version": 1,
+ "bpm": 96.5,
+ "master": 0.8,
+ "loopBars": 8,
+ "loop": true,
+ "scale": {"root": 9, "type": 2},
+ "view": {"ppb": 60, "ax": 10, "ay": 20, "rx": 5, "ry": 30},
+ "tracks": [
+  {"name": "Keys", "kind": "Instrument", "gain": 0.7, "pan": -0.25, "mute": true, "solo": false, "plugin": "zedok:hybrid",
+   "notes": [[57, 0, 2, 100]], "params": [["Cutoff", 0.4]],
+   "lanes": [{"param": "Cutoff", "points": [[0, 0.2, 1], [4, 0.9, 2]]}],
+   "fx": [{"plugin": "C:\\fx\\Verb.vst3", "name": "Verb", "bypass": false, "params": [], "lanes": []}],
+   "preset": "Warm", "nstate": {"k": "v"}, "clips": []},
+  {"name": "Vox", "kind": "Audio", "plugin": null, "notes": [],
+   "clips": [{"path": "D:\\Samples\\vox.wav", "src": "D:\\Samples\\vox.wav", "start": 4, "gain": -3, "semis": 2, "speed": 1.1, "mode": 1, "srcBpm": 100}]}
+ ],
+ "masterFx": [{"plugin": "C:\\fx\\Lim.vst3", "name": "Lim", "bypass": true, "params": [], "lanes": []}]
+}

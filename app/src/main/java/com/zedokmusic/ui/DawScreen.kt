@@ -75,7 +75,7 @@ fun DawScreen(vm: DawViewModel) {
             CompositionLocalProvider(LocalShort provides short) {
             Column(Modifier.fillMaxSize()) {
                 Transport(vm, !wide && !short, short, showKeys, rollOpen, onRecord = { onRecord() }, onMidi = { dialog = "midi" }, onKeys0 = {}, { showKeys = !showKeys }, onAddInstrument = { plugins = vm.scanPlugins(); dialog = "plugins" },
-                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.save(); vm.message = "Project saved" }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" }, onSettings = { showSettings = true }, onProject = { dialog = it })
+                    onAddAudio = { vm.addAudioTrack() }, onTempo = { dialog = "tempo" }, onSave = { vm.saveByHand() }, onExport = { dialog = "export" }, onExports = { dialog = "exports" }, onInstallers = { dialog = "installers" }, onSettings = { showSettings = true }, onProject = { dialog = it })
                 if (short) {
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         Column(Modifier.width(74.dp).fillMaxHeight().background(Zk.panel).verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

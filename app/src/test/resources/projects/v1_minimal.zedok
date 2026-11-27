@@ -1,0 +1,7 @@
+{
+ "version": 1,
+ "bpm": 128,
+ "tracks": [
+  {"name": "Lead", "kind": "Instrument", "plugin": "C:\\Plugins\\Old.vst3", "notes": [[60, 0, 1, 100], [64, 1, 0.5, 90]], "clips": []}
+ ]
+}

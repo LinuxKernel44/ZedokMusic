@@ -34,6 +34,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var projectName by mutableStateOf(store?.let { s -> prefs.getString("project", null)?.takeIf { s.exists(it) } ?: s.list().firstOrNull()?.name } ?: "Untitled"); private set
     /** True while another project is being opened. */
     var projectBusy by mutableStateOf(false); private set
+    /** True when the open project was written by a newer app: it is shown empty and never saved, so the newer file is not overwritten. */
+    private var formatLocked = false
     private val projectFile get() = store?.file(projectName)
     fun projectDir(): File? = store?.dir(projectName)
     /** Samples that belong to this project: imports and recordings are stored here, not in a shared library. */
@@ -860,10 +862,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- persistence ----------
     /** Writes the project when something changed, including the zoom and scroll positions (called when the app leaves the screen). */
-    fun flush() { if (!projectBusy && (dirty || viewDirty) && AppSettings.autosave.on && !recording) { save(); dirty = false } }
+    fun flush() { if (!projectBusy && !formatLocked && (dirty || viewDirty) && AppSettings.autosave.on && !recording) { save(); dirty = false } }
+
+    /** The File → Save command: says so when the project cannot be saved (written by a newer app). */
+    fun saveByHand() { if (formatLocked) message = "This project comes from a newer version of ZedokMusic: it is not saved, so the newer file stays intact." else { save(); message = "Project saved" } }
 
     fun save() {
         val f = projectFile ?: return
+        if (formatLocked) return
         viewDirty = false
         store?.backup(projectName)
         store?.create(projectName)
@@ -882,7 +888,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
     private fun write(f: File, mapPath: (String) -> String = { it }) {
-        val root = JSONObject().put("version", 1).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("masterStereo", masterStereo.toDouble()).put("loopBars", loopBars).put("loop", loop).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
+        val root = JSONObject().put("version", ProjectFormat.CURRENT).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("masterStereo", masterStereo.toDouble()).put("loopBars", loopBars).put("loop", loop).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
             .put("view", JSONObject().put("ppb", ppb.toDouble()).put("ax", arrangeX).put("ay", arrangeY).put("rx", rollX).put("ry", rollY))
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
@@ -937,6 +943,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     private fun closeCurrent() {
+        formatLocked = false
         tracks.toList().forEach { removeTrack(it) }
         masterFx.toList().forEach { removeEffect(null, it) }
         pluginTarget = null; panelExpanded = false
@@ -969,6 +976,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun saveAs(name: String) {
         val s = store ?: return
         if (projectBusy) return
+        if (formatLocked) { message = "This project was saved by a newer version of ZedokMusic and cannot be saved by this one."; return }
         val old = projectName; val n = s.uniqueName(name)
         save()
         s.create(n)
@@ -1186,11 +1194,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun load() {
+        formatLocked = false
         if (historyReady) { undoS.clear(); redoS.clear() }
         val f = projectFile ?: return
         if (!f.exists()) return
         try {
-            val root = JSONObject(f.readText())
+            val root = try { ProjectFormat.migrate(JSONObject(f.readText())) } catch (ex: ProjectFormat.TooNew) { formatLocked = true; message = ex.message; dirty = false; return }
             bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain); masterStereo = root.optDouble("masterStereo", 0.0).toFloat(); e.setMasterWidth(widthOf(masterStereo))
             loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
             root.optJSONObject("scale").let { sc -> scaleRoot = sc?.optInt("root", 0)?.coerceIn(0, 11) ?: 0; scaleType = sc?.optInt("type", 0)?.coerceIn(0, Theory.SCALES.size - 1) ?: 0 }
