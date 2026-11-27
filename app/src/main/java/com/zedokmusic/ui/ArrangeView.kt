@@ -266,6 +266,7 @@ private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit)
     val RowH = rowH()
     val sel = vm.selected == t
     var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
     Box(Modifier.width(HeaderW).height(RowH).background(if (sel) Zk.panel2 else Zk.panel).border(0.5.dp, Zk.line).clickable { vm.selected = t }) {
         Box(Modifier.width(4.dp).fillMaxHeight().background(t.color))
         Column(Modifier.padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp).fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
@@ -275,10 +276,12 @@ private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit)
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(t.name, color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (renaming) NameDialog("Rename track", t.name, "Rename", null, { vm.renameTrack(t, it) }, { renaming = false })
                 Box {
                     Text("⋮", color = Zk.dim, fontSize = 18.sp, modifier = Modifier.clickable { menu = true }.padding(horizontal = 6.dp))
                     DropdownMenu(menu, { menu = false }) {
                         if (t.kind == TrackKind.Audio) DropdownMenuItem(text = { Text("Add sample…") }, onClick = { menu = false; onImport(t) })
+                        DropdownMenuItem(text = { Text("Rename track…") }, onClick = { menu = false; renaming = true })
                         DropdownMenuItem(text = { Text("Delete track") }, onClick = { menu = false; vm.removeTrack(t) })
                     }
                 }

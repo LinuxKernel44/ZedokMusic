@@ -35,7 +35,10 @@ fun SamplerScreen(ps: PluginState) {
     var tab by remember { mutableIntStateOf(0) }
     var picker by remember { mutableStateOf(false) }
     val vm = ps.vm; val t = ps.t
-    if (picker) SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { picker = false }, { f -> vm.setPluginState(t, "sample", f.absolutePath); picker = false }, { picker = false })
+    var browse by remember { mutableStateOf(false) }
+    val importer = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) vm.importSamples(uris) }
+    if (browse) com.zedokmusic.ui.SoundPickerDialog(vm, { node -> browse = false; picker = false; vm.kits.loadAsSample(t, listOf(node)) }, { browse = false })
+    if (picker && !browse) SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { importer.launch(arrayOf("audio/*", "application/octet-stream")) }, { f -> vm.setPluginState(t, "sample", f.absolutePath); picker = false }, { picker = false }, onBrowse = { browse = true })
     Column(Modifier.fillMaxSize()) {
         TabBar(listOf("Sample", "Envelopes", "Filter & LFO", "Main"), tab, SA) { tab = it }
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = ScrollBottomPad), verticalArrangement = Arrangement.spacedBy(8.dp)) {

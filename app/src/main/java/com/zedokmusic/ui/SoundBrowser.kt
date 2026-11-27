@@ -39,7 +39,7 @@ private enum class BTab(val label: String) { Kits("Drumkits"), Project("Project"
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClose: () -> Unit) {
+fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onPick: ((KitNode) -> Unit)? = null, onClose: () -> Unit) {
     val kits = vm.kits; val dnd = LocalDnd.current; val color = Zk.accent
     var tab by remember { mutableStateOf(BTab.Kits) }
     var query by remember { mutableStateOf("") }
@@ -69,12 +69,12 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClo
 
     Column(modifier.background(Zk.panel)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Sounds", color = Zk.text, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(if (onPick != null) "Pick a sound" else "Sounds", color = Zk.text, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             if (canSwitch) LabelButton(if (com.zedokmusic.settings.AppSettings.browserDocked.on) "⇄ Drawer" else "⇄ Dock", false, w = 78.dp, h = 28.dp) { com.zedokmusic.settings.AppSettings.browserDocked.set(!com.zedokmusic.settings.AppSettings.browserDocked.on) }
             LabelButton("✕", false, w = 30.dp, h = 28.dp, onClick = onClose)
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            for (t in BTab.values()) LabelButton(t.label, tab == t, color, w = if (t == BTab.Plugins) 62.dp else 76.dp, h = 28.dp) { tab = t; selected.clear(); kits.preview.stop() }
+            for (t in BTab.values().filter { onPick == null || it != BTab.Plugins }) LabelButton(t.label, tab == t, color, w = if (t == BTab.Plugins) 62.dp else 76.dp, h = 28.dp) { tab = t; selected.clear(); kits.preview.stop() }
         }
         if (tab != BTab.Plugins) Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
@@ -93,10 +93,10 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClo
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(rows, key = { r -> when (r) { is TreeRow.D -> "d:" + r.dir.path; is TreeRow.F -> "f:" + r.node.ref } }) { r ->
                         when (r) {
-                            is TreeRow.D -> FolderRow(r, color, dnd, onToggle = { setOpen(r.dir.path, !r.open) }, payload = {
+                            is TreeRow.D -> FolderRow(r, color, dnd, onPick == null, onToggle = { setOpen(r.dir.path, !r.open) }, payload = {
                                 DragPayload(r.dir.name, folderImport = if (tab == BTab.Kits) ({ t: TrackM -> kits.importLibraryFolder(t, r.dir.path) }) else ({ t: TrackM -> vm.projectDir()?.let { kits.importFolder(t, FileNode(File(it, r.dir.path))) }; Unit }))
                             })
-                            is TreeRow.F -> SoundRow(r, flat, color, dnd, kits, selected, payload = {
+                            is TreeRow.F -> SoundRow(r, flat, color, dnd, kits, selected, onPick, payload = {
                                 val sel = rows.filterIsInstance<TreeRow.F>().filter { it.node.ref in selected }.map { it.node }
                                 DragPayload(r.node.name, if (r.node.ref in selected && sel.size > 1) sel else listOf(r.node))
                             })
@@ -105,7 +105,7 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClo
                 }
             }
         }
-        Text(if (selected.isEmpty()) "Long press a sound, or drag ⋮⋮, onto a track." else "${selected.size} selected · drag one to move them all", color = Zk.dim, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+        Text(if (onPick != null) "Tap a sound to use it: it is copied into the project's Samples folder. ▶ previews it." else if (selected.isEmpty()) "Long press a sound, or drag ⋮⋮, onto a track." else "${selected.size} selected · drag one to move them all", color = Zk.dim, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
     }
     // a finished drop clears the selection
     DisposableEffect(dnd) { val l: (Boolean) -> Unit = { ok -> if (ok) selected.clear() }; dnd.finishListeners.add(l); onDispose { dnd.finishListeners.remove(l) } }
@@ -115,29 +115,29 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onClo
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun FolderRow(r: TreeRow.D, color: Color, dnd: DndState, onToggle: () -> Unit, payload: () -> DragPayload) {
+private fun FolderRow(r: TreeRow.D, color: Color, dnd: DndState, showHandle: Boolean, onToggle: () -> Unit, payload: () -> DragPayload) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = (r.depth * 14).dp), verticalAlignment = Alignment.CenterVertically) {
         Text(if (r.open) "▾" else "▸", color = color, fontSize = 16.sp, textAlign = TextAlign.Center, modifier = Modifier.width(26.dp))
         Text(r.dir.name, color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, modifier = Modifier.weight(1f).padding(vertical = 11.dp).basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200, velocity = 36.dp))
         Text("${r.dir.total}", color = Zk.dim, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp))
-        Handle(dnd, payload)
+        if (showHandle) Handle(dnd, payload)
     }
     HorizontalDivider(color = Zk.line)
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SoundRow(r: TreeRow.F, flat: Boolean, color: Color, dnd: DndState, kits: KitManager, selected: androidx.compose.runtime.snapshots.SnapshotStateList<String>, payload: () -> DragPayload) {
+private fun SoundRow(r: TreeRow.F, flat: Boolean, color: Color, dnd: DndState, kits: KitManager, selected: androidx.compose.runtime.snapshots.SnapshotStateList<String>, pick: ((KitNode) -> Unit)?, payload: () -> DragPayload) {
     val node = r.node; val on = node.ref in selected; val playing = kits.preview.playing == node.ref; val fav = kits.isFavorite(node)
-    Row(Modifier.fillMaxWidth().background(if (on) color.copy(alpha = .16f) else Color.Transparent).clickable { if (on) selected.remove(node.ref) else selected.add(node.ref) }
-        .dragSource(dnd, immediate = false, payload).padding(start = (r.depth * 14).dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().background(if (on) color.copy(alpha = .16f) else Color.Transparent).clickable { if (pick != null) pick(node) else if (on) selected.remove(node.ref) else selected.add(node.ref) }
+        .then(if (pick == null) Modifier.dragSource(dnd, immediate = false, payload) else Modifier).padding(start = (r.depth * 14).dp), verticalAlignment = Alignment.CenterVertically) {
         Text(if (playing) "■" else "▶", color = if (playing) color else Zk.text, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.width(36.dp).clickable { kits.preview.toggle(node) }.padding(vertical = 10.dp))
         Column(Modifier.weight(1f)) {
             Text(node.name, color = Zk.text, fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip, modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200, velocity = 36.dp))
             if (flat && r.path != node.name) Text(r.path.substringBeforeLast('/'), color = Zk.dim, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(if (fav) "★" else "☆", color = if (fav) Zk.warn else Zk.dim, fontSize = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.width(32.dp).clickable { kits.toggleFavorite(node, r.path.substringBeforeLast('/', "")) }.padding(vertical = 6.dp))
-        Handle(dnd, payload)
+        if (pick == null) Handle(dnd, payload)
     }
     HorizontalDivider(color = Zk.line)
 }
@@ -168,4 +168,13 @@ private fun PluginRow(p: PluginInfo, dnd: DndState) {
         Handle(dnd) { DragPayload(p.name, plugin = p) }
     }
     HorizontalDivider(color = Zk.line)
+}
+
+/** The whole sound browser (drum kit library and project sounds) as a full-screen picker: tap a sound to choose it. */
+@Composable
+fun SoundPickerDialog(vm: DawViewModel, onPick: (KitNode) -> Unit, onDismiss: () -> Unit) {
+    DisposableEffect(Unit) { onDispose { vm.kits.preview.stop() } }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.92f).clip(RoundedCornerShape(16.dp))) { SoundBrowser(vm, Modifier.fillMaxSize(), canSwitch = false, onClose = onDismiss, onPick = onPick) }
+    }
 }

@@ -37,7 +37,7 @@ fun PluginPickerDialog(plugins: List<PluginInfo>, folder: String, onRescan: () -
 
 /** Samples of this project first, then the shared library; [onImport] copies new files into the project's own Samples folder. */
 @Composable
-fun SamplePickerDialog(project: List<File>, shared: List<File>, projectFolder: String, onImport: () -> Unit, onPick: (File) -> Unit, onDismiss: () -> Unit) {
+fun SamplePickerDialog(project: List<File>, shared: List<File>, projectFolder: String, onImport: () -> Unit, onPick: (File) -> Unit, onDismiss: () -> Unit, onBrowse: (() -> Unit)? = null) {
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel,
         title = { Text("Add sample") },
         text = {
@@ -51,7 +51,7 @@ fun SamplePickerDialog(project: List<File>, shared: List<File>, projectFolder: S
                 }
             }
         },
-        confirmButton = { TextButton(onImport) { Text("Import…") } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
+        confirmButton = { Row { if (onBrowse != null) TextButton(onBrowse) { Text("Kit browser…") }; TextButton(onImport) { Text("Import…") } } }, dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
 }
 
 @Composable

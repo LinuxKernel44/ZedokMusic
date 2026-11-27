@@ -259,6 +259,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val t = TrackM(id, "Audio ${tracks.count { it.kind == TrackKind.Audio } + 1}", TrackKind.Audio, newColor(), null)
         tracks.add(t); selected = t; dirty = true; return t
     }
+    fun renameTrack(t: TrackM, name: String) { val n = name.trim().take(40); if (n.isNotEmpty() && n != t.name) { t.name = n; dirty = true } }
     fun removeTrack(t: TrackM) {
         t.fx.toList().forEach { removeEffect(t, it) }
         if (t.pluginPath != null) { closeEditor(t); host.stop(t.id) }
