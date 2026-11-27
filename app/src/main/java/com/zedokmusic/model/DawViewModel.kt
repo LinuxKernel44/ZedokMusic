@@ -326,7 +326,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                     val name = File(c.src).nameWithoutExtension.replace(Regex("[^A-Za-z0-9 _.()+-]"), "_").take(40)
                     val sf = File(c.src)
                     val tag = Integer.toHexString((sf.absolutePath + "|" + sf.length() + "|" + sf.lastModified()).hashCode())
-                    val out = File(dir, "$name  %+.2f st  x%.3f  m$mode  $tag.wav".format(se, sp))
+                    val out = File(dir, "$name  %+.2f st  x%.5f  m$mode  $tag.wav".format(se, sp))
                     if (!out.exists() || out.length() < 44) {
                         val pcm = AudioFx.readWav(File(c.src))
                         if (pcm == null) err = "Could not read ${File(c.src).name}."

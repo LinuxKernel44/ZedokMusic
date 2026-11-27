@@ -43,6 +43,11 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
     val srcBpm = bpmText.replace(',', '.').toFloatOrNull()?.takeIf { it in 20f..400f } ?: 0f
     val color = t.color
     val srcLen = produceState(0f, c.src) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AudioFx.wavSeconds(File(c.src)) } }.value
+    // output duration: Stretch = source / speed; Resample = source / (speed x pitch ratio), because pitch and speed move together
+    val pitchRatio = if (mode == AudioFx.MODE_RESAMPLE) Math.pow(2.0, semis / 12.0).toFloat() else 1f
+    val outSec = if (srcLen > 0f) srcLen / (speed * pitchRatio) else 0f
+    val endBeat = c.start + outSec * vm.bpm / 60f
+    val onBar = outSec > 0f && Math.abs(endBeat / 4f - Math.round(endBeat / 4f)) * 4f < 0.004f
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text(if (group.size > 1) "${group.size} clips" else File(c.src).nameWithoutExtension, fontSize = 17.sp, maxLines = 3) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Section("Gain")
@@ -58,7 +63,16 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
                 Chip("+1", false) { semis = (semis + 1f).coerceIn(-48f, 48f) }; Chip("+12", false) { semis = (semis + 12f).coerceIn(-48f, 48f) }; Chip("0", false) { semis = 0f }
             }
             Slider(semis, { semis = (it * 10f).toInt() / 10f }, valueRange = -24f..24f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
-            Section("Time")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Section("Time"); Spacer(Modifier.weight(1f))
+                // stretches or shrinks the clip so that it ends exactly on the nearest bar line (4/4)
+                Chip("Fit to bar", onBar, enabled = srcLen > 0f) {
+                    var target = Math.round(endBeat / 4f) * 4f
+                    while (target < c.start + 1f) target += 4f
+                    val sec = (target - c.start) * 60f / vm.bpm
+                    speed = (srcLen / (sec * pitchRatio)).coerceIn(0.25f, 4f)
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Slider(speed, { speed = (it * 1000f).toInt() / 1000f }, Modifier.weight(1f), valueRange = 0.25f..4f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
                 Text("×%.3f".format(speed), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(66.dp))
@@ -73,7 +87,7 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
                 }
                 Chip("Fit to ${vm.bpm.toInt()} BPM", false, enabled = srcBpm > 0f) { speed = (vm.bpm / srcBpm).coerceIn(0.25f, 4f) }
             }
-            if (srcLen > 0f) Text("Length: %.2f s → %.2f s".format(srcLen, srcLen / speed), color = Zk.dim, fontSize = 11.sp)
+            if (srcLen > 0f) Text("Length: %.2f s → %.2f s".format(srcLen, outSec) + if (onBar) " · ends on a bar line (bar ${Math.round(endBeat / 4f) + 1})" else "", color = if (onBar) color else Zk.dim, fontSize = 11.sp)
             Section("Method")
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Chip("Stretch", mode == AudioFx.MODE_STRETCH) { mode = AudioFx.MODE_STRETCH }
