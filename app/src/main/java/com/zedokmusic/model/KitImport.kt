@@ -76,7 +76,7 @@ object KitScanner {
     private fun collect(dir: KitNode, prefix: String, depth: Int, out: MutableList<Pair<String, KitNode>>) {
         if (out.size >= MAX_FILES || depth > 6) return
         for (c in dir.children()) {
-            if (c.isDir) collect(c, prefix + c.name + "/", depth + 1, out)
+            if (c.isDir) { if (!c.name.startsWith(".")) collect(c, prefix + c.name + "/", depth + 1, out) }
             else if (KitFormats.isAudio(c.name) && !c.name.startsWith(".")) out.add(prefix + c.name to c)
         }
     }

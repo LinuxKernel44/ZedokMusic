@@ -42,7 +42,7 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
     var bpmText by remember(c) { mutableStateOf(if (c.srcBpm > 0f) "%.1f".format(c.srcBpm).removeSuffix(".0") else "") }
     val srcBpm = bpmText.replace(',', '.').toFloatOrNull()?.takeIf { it in 20f..400f } ?: 0f
     val color = t.color
-    val srcLen = remember(c.src) { AudioFx.readWav(File(c.src))?.let { it.frames.toFloat() / it.rate } ?: 0f }
+    val srcLen = produceState(0f, c.src) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { AudioFx.wavSeconds(File(c.src)) } }.value
     AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text(if (group.size > 1) "${group.size} clips" else File(c.src).nameWithoutExtension, fontSize = 17.sp, maxLines = 3) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Section("Gain")

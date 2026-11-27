@@ -324,11 +324,16 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 if (dir == null) err = "There is no project folder."
                 else {
                     val name = File(c.src).nameWithoutExtension.replace(Regex("[^A-Za-z0-9 _.()+-]"), "_").take(40)
-                    val out = File(dir, "$name  %+.2f st  x%.3f  m$mode.wav".format(se, sp))
-                    if (!out.exists()) {
+                    val sf = File(c.src)
+                    val tag = Integer.toHexString((sf.absolutePath + "|" + sf.length() + "|" + sf.lastModified()).hashCode())
+                    val out = File(dir, "$name  %+.2f st  x%.3f  m$mode  $tag.wav".format(se, sp))
+                    if (!out.exists() || out.length() < 44) {
                         val pcm = AudioFx.readWav(File(c.src))
                         if (pcm == null) err = "Could not read ${File(c.src).name}."
-                        else runCatching { AudioFx.writeWav(out, AudioFx.process(pcm, 0f, se, sp, mode)) }.onFailure { err = "Could not process the clip: ${it.message}" }
+                        else {
+                            dir.mkdirs(); val tmp = File(dir, out.name + ".tmp")
+                            runCatching { AudioFx.writeWav(tmp, AudioFx.process(pcm, 0f, se, sp, mode)); if (!tmp.renameTo(out)) error("rename failed") }.onFailure { tmp.delete(); err = "Could not process the clip: ${it.message}" }
+                        }
                     }
                     target = out
                 }
@@ -345,6 +350,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 n.src = c.src; n.gainDb = c.gainDb; n.semis = se; n.speed = sp; n.mode = mode; n.srcBpm = srcBpm
                 e.setClipGain(n.engineId, Math.pow(10.0, n.gainDb / 20.0).toFloat())
                 t.clips[i] = n; dirty = true
+                val si = clipSelection.indexOf(c); if (si >= 0) clipSelection[si] = n
+                if (clipClip.any { it.src === c }) clipClip = clipClip.map { if (it.src === c) ClipCopy(it.track, n, it.rel) else it }
             }
         }
     }
@@ -834,6 +841,16 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         store?.backup(projectName)
         store?.create(projectName)
         write(f)
+        sweepProcessed()
+    }
+
+    /** Deletes processed renders that no clip uses any more (kept for a minute in case one is still being loaded). */
+    private fun sweepProcessed() {
+        val dir = processedDir() ?: return
+        if (tracks.any { t -> t.clips.any { it.busy } }) return
+        val used = tracks.flatMap { t -> t.clips.map { File(it.path).absolutePath } }.toSet()
+        val now = System.currentTimeMillis()
+        dir.listFiles()?.forEach { f -> if (f.isFile && f.absolutePath !in used && now - f.lastModified() > 60_000) f.delete() }
     }
 
     /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
@@ -964,12 +981,23 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val dir = projectSamplesDir() ?: return 0
         dir.mkdirs()
         var n = 0
+        val moved = HashMap<String, String>()
         for (t in tracks) for (c in t.clips) {
-            val f = File(c.path)
-            if (!f.exists() || f.absolutePath.startsWith(dir.absolutePath + "/")) continue
-            var out = File(dir, f.name); var k = 2
-            while (out.exists()) out = File(dir, f.nameWithoutExtension + " ($k)." + f.extension).also { k++ }
-            runCatching { f.copyTo(out); c.path = out.absolutePath; n++ }
+            val oldPath = c.path
+            fun bring(p: String): String? {
+                val f = File(p)
+                if (!f.exists()) return null
+                if (f.absolutePath.startsWith(dir.absolutePath + "/")) return p
+                moved[p]?.let { return it }
+                var out = File(dir, f.name); var k = 2
+                while (out.exists()) out = File(dir, f.nameWithoutExtension + " ($k)." + f.extension).also { k++ }
+                return runCatching { f.copyTo(out); n++; out.absolutePath.also { moved[p] = it } }.getOrNull()
+            }
+            val np = bring(oldPath)
+            if (np != null) c.path = np
+            // the original recording follows (an unedited clip's original is the clip's own file)
+            val ns = if (c.src == oldPath) np else bring(c.src)
+            if (ns != null) c.src = ns
         }
         if (n > 0) { save(); samplesVersion++ }
         message = if (n > 0) "Copied $n sample(s) into this project." else "Every sample is already in this project."

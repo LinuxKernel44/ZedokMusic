@@ -87,6 +87,30 @@ object AudioFx {
     // ------------------------------------------------------------------ waveform peaks (cached on disk)
     const val PEAK_FRAMES = 256   // source frames per stored bucket
 
+    /** Duration in seconds, read from the header only (no decoding). */
+    fun wavSeconds(f: File): Float = runCatching {
+        RandomAccessFile(f, "r").use { r ->
+            val head = ByteArray(12); r.readFully(head)
+            if (String(head, 0, 4) != "RIFF" || String(head, 8, 4) != "WAVE") return 0f
+            var ch = 0; var rate = 0; var bits = 0
+            while (true) {
+                val h = ByteArray(8); if (r.read(h) < 8) return 0f
+                val id = String(h, 0, 4); val len = le32(h, 4).toLong() and 0xFFFFFFFFL
+                if (id == "fmt ") {
+                    val b = ByteArray(len.toInt().coerceAtMost(40)); r.readFully(b)
+                    ch = le16(b, 2); rate = le32(b, 4); bits = le16(b, 14)
+                    if (len > b.size) r.seek(r.filePointer + len - b.size)
+                    if (len and 1L == 1L) r.seek(r.filePointer + 1)
+                } else if (id == "data") {
+                    if (ch < 1 || rate <= 0 || bits < 8) return 0f
+                    val bytes = min(len, r.length() - r.filePointer)
+                    return (bytes / (bits / 8 * ch)).toFloat() / rate
+                } else r.seek(r.filePointer + len + (len and 1L))
+            }
+            0f
+        }
+    }.getOrDefault(0f)
+
     /** min / max per bucket of [PEAK_FRAMES] frames, as bytes (-127..127), interleaved [min0, max0, min1, max1...]. Cached next to the project in [cacheDir]. */
     fun peaks(wav: File, cacheDir: File?): ByteArray? {
         val key = wav.name.replace(Regex("[^A-Za-z0-9._-]"), "_") + "." + wav.length() + "." + wav.lastModified() + ".peaks"
@@ -161,8 +185,8 @@ object AudioFx {
             val ideal = (outPos / factor).toInt()
             val nat = prevPos + hop                       // where the previous frame would naturally continue
             var best = ideal; var bestC = -1e30
-            val lo = max(0, ideal - seek); val hi = min(n - frame - 1, ideal + seek)
-            if (hi < lo) break
+            if (n - frame - 1 < 0) break
+            val lo = max(0, min(ideal - seek, n - frame - 1)); val hi = max(lo, min(n - frame - 1, ideal + seek))
             var cand = lo
             // coarse-to-fine search (step 4 then refine) on the correlation with the natural continuation
             val ref0 = min(nat, n - frame - 1).coerceAtLeast(0)

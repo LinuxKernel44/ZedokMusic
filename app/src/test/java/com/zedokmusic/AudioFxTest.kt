@@ -43,4 +43,14 @@ class AudioFxTest {
         AudioFx.writeWav(f, p); val r = AudioFx.readWav(f)!!
         assertEquals(p.frames, r.frames); assertEquals(48000, r.rate); assertTrue(abs(p.data[0][1000] - r.data[0][1000]) < 1e-6f); f.delete()
     }
+    @Test fun headerDurationMatchesDecodedLength() {
+        val f = File.createTempFile("zedoktest", ".wav"); val p = sine(220.0, 0.5)
+        AudioFx.writeWav(f, p)
+        assertEquals(p.frames.toFloat() / p.rate, AudioFx.wavSeconds(f), 1e-4f); f.delete()
+    }
+    @Test fun stretchKeepsTheEndOfTheSound() {
+        val o = AudioFx.process(sine(440.0, 1.0), 0f, 0f, 2f, AudioFx.MODE_STRETCH)
+        val tail = o.data[0].takeLast(o.frames / 10).maxOf { abs(it) }
+        assertTrue("tail is silent ($tail)", tail > 0.1f)
+    }
 }

@@ -327,6 +327,7 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
 /** Plays a sound for the browser's preview (Android's own player: it works with any file the folder picker gives access to). */
 class SamplePreview(private val ctx: Context) {
     private var mp: android.media.MediaPlayer? = null
+    private var ready = false
     var playing by mutableStateOf<String?>(null); private set
     fun toggle(node: KitNode) {
         val ref = node.ref
@@ -336,7 +337,8 @@ class SamplePreview(private val ctx: Context) {
             val p = android.media.MediaPlayer()
             p.setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build())
             node.feed(p)
-            p.setOnPreparedListener { it.start() }
+            ready = false
+            p.setOnPreparedListener { if (mp === it) { ready = true; it.start() } }
             p.setOnCompletionListener { if (playing == ref) stop() }
             p.setOnErrorListener { _, _, _ -> if (playing == ref) stop(); true }
             mp = p; playing = ref; p.prepareAsync()
@@ -346,6 +348,9 @@ class SamplePreview(private val ctx: Context) {
     fun stop() {
         val p = mp; mp = null; playing = null
         if (p == null) return
+        runCatching { p.setOnPreparedListener(null); p.setOnCompletionListener(null); p.setOnErrorListener(null) }
+        if (!ready) { runCatching { p.reset() }; runCatching { p.release() }; return }
+        ready = false
         val h = android.os.Handler(android.os.Looper.getMainLooper())
         var step = 0
         val tick = object : Runnable {
