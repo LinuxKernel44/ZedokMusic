@@ -37,7 +37,7 @@ class ProjectFormatTest {
     @Test fun currentFormatIsLeftAsItIs() {
         val src = witness("v2_current.zedok")
         val r = ProjectFormat.migrate(witness("v2_current.zedok"))
-        assertEquals(src.toString(), r.toString())
+        assertEquals(src.put("version", 3).toString(), r.toString())   // an older file only gets its number raised
     }
 
     @Test fun migrationIsIdempotent() {
@@ -62,5 +62,13 @@ class ProjectFormatTest {
     @Test fun everyStepHasAWitness() {
         // the number of steps is checked when the object is created; this keeps a witness per format version
         for (v in 1..ProjectFormat.CURRENT) assertNotNull("witness for format $v", javaClass.getResource("/projects/" + (if (v == 1) "v1_full" else "v${v}_current") + ".zedok"))
+    }
+
+    @Test fun notesWithPropertiesAreKeptAsTheyAre() {
+        val src = witness("v3_current.zedok")
+        val r = ProjectFormat.migrate(witness("v3_current.zedok"))
+        assertEquals(src.toString(), r.toString())
+        assertEquals(9, r.getJSONArray("tracks").getJSONObject(0).getJSONArray("notes").getJSONArray(1).length())   // a note with its five properties
+        assertEquals(3, ProjectFormat.CURRENT)
     }
 }

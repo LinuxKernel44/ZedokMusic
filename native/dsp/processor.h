@@ -73,6 +73,25 @@ struct ProcessCtx {
     bool playing;
 };
 
+// The per-note properties of a Note On (pan, filter cutoff / resonance offsets, fine pitch, release time), decoded from the event.
+// All neutral (zero event bytes) means the note sounds exactly as before.
+struct NoteMod {
+    float pan = 0.f;       // -1 (left) .. +1 (right), added to the instrument's pan
+    float cutoff = 0.f;    // -1 .. +1: filter cutoff offset (instruments scale it to octaves)
+    float res = 0.f;       // -1 .. +1: filter resonance offset
+    float fine = 0.f;      // cents (-100 .. +100)
+    float relScale = 1.f;  // multiplier of the release time (1/4 .. 4)
+    static NoteMod from(const ZkEvent& e) {
+        NoteMod m;
+        if (e.pan) m.pan = e.pan / 127.f;
+        if (e.cutoff) m.cutoff = e.cutoff / 127.f;
+        if (e.res) m.res = e.res / 127.f;
+        if (e.fine) m.fine = e.fine / 127.f * 100.f;
+        if (e.release) m.relScale = std::exp2(e.release / 127.f * 2.f);
+        return m;
+    }
+};
+
 class Processor {
 public:
     virtual ~Processor() = default;

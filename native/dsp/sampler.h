@@ -173,7 +173,7 @@ private:
 
     // ------------------------------------------------------------------ voices
     struct EnvS {
-        int st = 0, cnt = 0; float v = 0.f;   // 0 idle, 1 delay, 2 attack, 3 hold, 4 decay, 5 sustain, 6 release
+        int st = 0, cnt = 0; float v = 0.f; float invRel = 1.f;   // 0 idle, 1 delay, 2 attack, 3 hold, 4 decay, 5 sustain, 6 release; invRel: 1 / the note's release scale
         void on() { st = 1; cnt = 0; }
         void off() { if (st) st = 6; }
         void kill() { st = 0; v = 0.f; cnt = 0; }
@@ -185,7 +185,7 @@ private:
             case 3: if (cnt++ >= p.hold) st = 4; break;
             case 4: v += (p.sus - v) * p.dCoef; if (std::fabs(v - p.sus) < 1e-4f) { v = p.sus; st = 5; } break;
             case 5: v = p.sus; break;
-            default: v -= v * p.rCoef; if (v < 1e-5f) { v = 0.f; st = 0; } break;
+            default: v -= v * p.rCoef * invRel; if (v < 1e-5f) { v = 0.f; st = 0; } break;
             }
             return v;
         }
@@ -194,7 +194,7 @@ private:
     struct Voice {
         bool active = false, gate = false, killing = false; int note = 60, slice = -1; float vel = 1.f; uint64_t age = 0; float curNote = 60.f;
         double u = 0.0; int dir = 1; double ap = 0.0; SGrain g[3]; int spawn = 0; double headFrame = 0.0; float killGain = 1.f;
-        EnvS env[3]; float lfoPh = 0.f, lfoSh = 0.f, lfoSm = 0.f, lfoT = 0.f; float envF = 0.f, envP = 0.f; SVF f[2], f2[2];
+        EnvS env[3]; float lfoPh = 0.f, lfoSh = 0.f, lfoSm = 0.f, lfoT = 0.f; float envF = 0.f, envP = 0.f; SVF f[2], f2[2]; NoteMod mod;
     };
     Voice voices_[kMaxVoices];
     std::vector<int> monoStack_; float lastNote_ = -1.f; uint64_t age_ = 0; float freeLfo_ = 0.f; Rng rng_{4242u};
@@ -210,11 +210,12 @@ private:
         default: { if (wrapped) { v.lfoSm = v.lfoSh; v.lfoSh = rng_.bi(); } const float t = ph * ph * (3.f - 2.f * ph); return v.lfoSm + (v.lfoSh - v.lfoSm) * t; } }
     }
 
-    bool startVoice(Voice& v, int note, int vel, bool retrigger) {
+    bool startVoice(Voice& v, int note, int vel, bool retrigger, const NoteMod& mod = NoteMod()) {
         int slice = -1;
         if (P_.slices > 0) { slice = note - (int)(P_.root + 0.5f); if (slice < 0 || slice >= P_.slices) return false; }
         const bool was = v.active; v.active = true; v.gate = true; v.killing = false; v.killGain = 1.f; v.note = note; v.slice = slice; v.vel = vel / 127.f; v.age = ++age_;
         v.curNote = (P_.glide > 0.5f && lastNote_ >= 0.f) ? lastNote_ : (float)note;
+        v.mod = mod; for (auto& e : v.env) e.invRel = 1.f / mod.relScale;
         if (retrigger || !was) {
             v.u = 0.0; v.dir = 1; v.ap = 0.0; v.spawn = 0; for (auto& g : v.g) g.on = false;
             for (int e = 0; e < 3; e++) { if (!was) v.env[e].kill(); v.env[e].on(); }
@@ -231,21 +232,21 @@ private:
         Voice* best = nullptr; float bl = 1e9f; for (auto& v : voices_) if (v.active && !v.gate && v.env[0].v < bl) { bl = v.env[0].v; best = &v; } if (best) return best;
         for (auto& v : voices_) if (v.active && (!best || v.age < best->age)) best = &v; return best;
     }
-    void doNoteOn(int note, int vel) {
+    void doNoteOn(int note, int vel, const NoteMod& mod = NoteMod()) {
         if (P_.mono != 0) {
             monoStack_.erase(std::remove(monoStack_.begin(), monoStack_.end(), note), monoStack_.end()); monoStack_.push_back(note);
             Voice& v = voices_[0]; const bool legato = P_.mono == 2 && v.active && v.gate;
             for (int i = 1; i < kMaxVoices; i++) if (voices_[i].active) releaseVoice(voices_[i]);
-            startVoice(v, note, vel, !legato); return;
+            startVoice(v, note, vel, !legato, mod); return;
         }
         if (P_.cutSelf) for (auto& v : voices_) if (v.active && v.note == note) { v.killing = true; }   // the old voice of this key fades out in a few ms
-        if (Voice* v = allocVoice()) { if (v->active && !v->killing) v->env[0].kill(); *v = Voice(); startVoice(*v, note, vel, true); }
+        if (Voice* v = allocVoice()) { if (v->active && !v->killing) v->env[0].kill(); *v = Voice(); startVoice(*v, note, vel, true, mod); }
     }
     void doNoteOff(int note) {
         const bool ignore = P_.oneShot && P_.loopMode == 0;
         if (P_.mono != 0) {
             monoStack_.erase(std::remove(monoStack_.begin(), monoStack_.end(), note), monoStack_.end()); Voice& v = voices_[0];
-            if (!monoStack_.empty()) { if (v.note == note) startVoice(v, monoStack_.back(), (int)(v.vel * 127), P_.mono != 2); return; }
+            if (!monoStack_.empty()) { if (v.note == note) startVoice(v, monoStack_.back(), (int)(v.vel * 127), P_.mono != 2, v.mod); return; }
             if (v.active && v.note == note && !ignore) releaseVoice(v);
             return;
         }
@@ -254,7 +255,7 @@ private:
     }
     void handleEvent(const ZkEvent& e) {
         if (e.type == ZK_ALL_NOTES_OFF) { for (auto& v : voices_) if (v.active) { if (e.pitch == 1) v.killing = true; else releaseVoice(v); } monoStack_.clear(); return; }
-        if (e.type == ZK_NOTE_ON) { if (e.velocity == 0) doNoteOff(e.pitch); else doNoteOn(e.pitch, e.velocity); } else if (e.type == ZK_NOTE_OFF) doNoteOff(e.pitch);
+        if (e.type == ZK_NOTE_ON) { if (e.velocity == 0) doNoteOff(e.pitch); else doNoteOn(e.pitch, e.velocity, NoteMod::from(e)); } else if (e.type == ZK_NOTE_OFF) doNoteOff(e.pitch);
     }
 
     // ------------------------------------------------------------------ rendering
@@ -300,7 +301,7 @@ private:
         const float lfo = lfoShape(p.lfoShape, v.lfoPh, v, wrapped) * lfoFade;
         // pitch
         const bool track = p.track && p.slices == 0;
-        float semis = (track ? (v.curNote - p.root) : 0.f) + p.coarse + p.fine * 0.01f + p.bend * p.bendRange + v.envP * p.pitEnv + lfo * p.lfoPitch;
+        float semis = (track ? (v.curNote - p.root) : 0.f) + p.coarse + p.fine * 0.01f + v.mod.fine * 0.01f + p.bend * p.bendRange + v.envP * p.pitEnv + lfo * p.lfoPitch;
         const double ratio = std::exp2((double)semis / 12.0);
         double tr = p.stretch; if (p.sync && p.sbpm > 1.f) tr *= tempo_ / p.sbpm;
         const bool stretchMode = p.timeMode == 1;
@@ -312,11 +313,12 @@ private:
         const bool filt = p.fType != 0;
         if (filt) {
             const float keyOct = (v.curNote - 60.f) / 12.f;
-            const float cut = clampf(p.fCut * std::exp2(keyOct * p.fKey + v.envF * p.fEnv * 6.f + lfo * p.lfoCut * 3.f), 20.f, 20000.f);
-            for (int c = 0; c < 2; c++) { v.f[c].set(sr_, cut, p.fRes); v.f2[c].set(sr_, cut, p.fRes); }
+            const float cut = clampf(p.fCut * std::exp2(keyOct * p.fKey + v.envF * p.fEnv * 6.f + lfo * p.lfoCut * 3.f + v.mod.cutoff * 3.f), 20.f, 20000.f);
+            const float fres = clampf(p.fRes + v.mod.res * 0.5f, 0.f, 1.f);
+            for (int c = 0; c < 2; c++) { v.f[c].set(sr_, cut, fres); v.f2[c].set(sr_, cut, fres); }
         }
         // pan, gain
-        const float pan = clampf(p.pan + lfo * p.lfoPan, -1.f, 1.f);
+        const float pan = clampf(p.pan + lfo * p.lfoPan + v.mod.pan, -1.f, 1.f);
         const float gl = std::cos((pan * 0.5f + 0.5f) * 1.5707963f) * 1.4142f, gr = std::sin((pan * 0.5f + 0.5f) * 1.5707963f) * 1.4142f;
         const float velG = (1.f - p.velSens) + p.velSens * v.vel;
         const float normG = p.normalize && b->peak > 1e-4f ? 1.f / b->peak : 1.f;

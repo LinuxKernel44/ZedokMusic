@@ -153,6 +153,53 @@ static int routingChecks() {
     return fails;
 }
 
+// ---- per-note properties (pan, fine pitch, cutoff, release) through the whole chain: project note -> engine event -> instrument ----
+static void oneNote(Engine& e, const char* plugin, int pitch, double lenSec, int8_t pan, int8_t cutoff, int8_t res, int8_t fine, int8_t release) {
+    int t = e.addTrack(); e.createNativePlugin(t, plugin);
+    Note n; n.start = 0; n.length = (int64_t)(lenSec * kProjectRate); n.pitch = (uint8_t)pitch; n.velocity = 110; n.pan = pan; n.cutoff = cutoff; n.res = res; n.fine = fine; n.release = release;
+    e.setNotes(t, {n});
+}
+static double rms(const std::vector<float>& v, int ch, size_t from, size_t to) { double s = 0; size_t k = 0; for (size_t i = from; i < to && 2 * i + ch < v.size(); i++, k++) s += (double)v[2 * i + ch] * v[2 * i + ch]; return std::sqrt(s / std::max<size_t>(1, k)); }
+static double upCrossHz(const std::vector<float>& v, size_t from, size_t to) {   // rising zero crossings per second of the left channel
+    int c = 0; for (size_t i = from + 1; i < to; i++) if (v[2 * (i - 1)] < 0.f && v[2 * i] >= 0.f) c++; return c / ((to - from) / (double)kProjectRate);
+}
+static int notePropChecks() {
+    int fails = 0; auto check = [&](const char* what, bool ok, double v) { printf("note props: %-56s %s (%.4g)\n", what, ok ? "ok" : "FAILED", v); if (!ok) fails++; };
+    const size_t a = kProjectRate / 4, b = kProjectRate * 3 / 4;
+    for (const char* plug : {"hybrid", "sampler", "piano", "drums"}) {
+        if (!strcmp(plug, "sampler") || !strcmp(plug, "piano")) continue;   // need a sample / the sound pack on disk: checked by hand on the phone
+        const int pitch = !strcmp(plug, "drums") ? 36 : 57;
+        char name[96];
+        const auto left = renderWith(1.0, [&](Engine& e) { oneNote(e, plug, pitch, 0.6, -127, 0, 0, 0, 0); });
+        const auto right = renderWith(1.0, [&](Engine& e) { oneNote(e, plug, pitch, 0.6, 127, 0, 0, 0, 0); });
+        const auto mid = renderWith(1.0, [&](Engine& e) { oneNote(e, plug, pitch, 0.6, 0, 0, 0, 0, 0); });
+        snprintf(name, sizeof name, "%s: pan -127 sounds only on the left", plug); const double lr = rms(left, 1, 0, 24000) / (rms(left, 0, 0, 24000) + 1e-12); check(name, lr < 0.05 && rms(left, 0, 0, 24000) > 0.01, lr);
+        snprintf(name, sizeof name, "%s: pan +127 sounds only on the right", plug); const double rl = rms(right, 0, 0, 24000) / (rms(right, 1, 0, 24000) + 1e-12); check(name, rl < 0.05 && rms(right, 1, 0, 24000) > 0.01, rl);
+        snprintf(name, sizeof name, "%s: all-zero properties change nothing, bit for bit", plug);
+        const auto zero = renderWith(1.0, [&](Engine& e) { int t = e.addTrack(); e.createNativePlugin(t, plug); Note n; n.length = (int64_t)(0.6 * kProjectRate); n.pitch = (uint8_t)pitch; n.velocity = 110; e.setNotes(t, {n}); });
+        check(name, maxDiff(mid, zero) == 0.0, maxDiff(mid, zero));
+    }
+    {   // hybrid fine pitch: +127 = +100 cents = x1.0595
+        const auto base = renderWith(1.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.9, 0, 0, 0, 0, 0); });
+        const auto up = renderWith(1.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.9, 0, 0, 0, 127, 0); });
+        const auto down = renderWith(1.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.9, 0, 0, 0, -127, 0); });
+        const double f0 = upCrossHz(base, 4800, 40000), f1 = upCrossHz(up, 4800, 40000), f2 = upCrossHz(down, 4800, 40000);
+        check("hybrid: fine +127 raises the pitch by about 100 cents", std::fabs(f1 / f0 - 1.0595) < 0.02, f1 / f0);
+        check("hybrid: fine -127 lowers the pitch by about 100 cents", std::fabs(f2 / f0 - 0.9439) < 0.02, f2 / f0);
+        // cutoff: a lower cutoff removes highs (fewer zero crossings, less energy), a higher one keeps them
+        const auto dark = renderWith(1.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.9, 0, -127, 0, 0, 0); });
+        const auto bright = renderWith(1.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.9, 0, 127, 0, 0, 0); });
+        auto brightness = [&](const std::vector<float>& v) { double d = 0, e = 0; for (size_t i = 4801; i < 40000; i++) { const double x = v[2 * i], y = v[2 * (i - 1)]; d += (x - y) * (x - y); e += x * x; } return std::sqrt(d / std::max(1e-12, e)); };   // high-frequency content relative to the level
+        check("hybrid: cutoff -127 is darker than cutoff +127", brightness(dark) < brightness(bright) * 0.7, brightness(dark) / std::max(1e-9, brightness(bright)));
+        // release: the tail after the note-off is longer with release +127 (x4) than with -127 (x1/4)
+        const auto shortRel = renderWith(2.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.3, 0, 0, 0, 0, -127); });
+        const auto longRel = renderWith(2.0, [&](Engine& e) { oneNote(e, "hybrid", 57, 0.3, 0, 0, 0, 0, 127); });
+        const size_t t0 = kProjectRate * 7 / 10, t1 = kProjectRate * 12 / 10;
+        check("hybrid: release +127 leaves a longer tail than -127", rms(longRel, 0, t0, t1) > 4.0 * rms(shortRel, 0, t0, t1) + 1e-6, rms(longRel, 0, t0, t1) / std::max(1e-9, rms(shortRel, 0, t0, t1)));
+    }
+    return fails;
+}
+
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "--print", file = argc > 2 ? argv[2] : ""; bool strict = false;
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--strict")) strict = true;
@@ -178,6 +225,7 @@ int main(int argc, char** argv) {
         }
     }
     fails += routingChecks();
+    fails += notePropChecks();
     if (mode == "--update") { FILE* f = fopen(file.c_str(), "w"); if (!f) return 2; fputs(table.c_str(), f); fclose(f); printf("wrote %s\n", file.c_str()); }
     printf(fails ? "FAILED (%d)\n" : "ok\n", fails);
     return fails ? 1 : 0;

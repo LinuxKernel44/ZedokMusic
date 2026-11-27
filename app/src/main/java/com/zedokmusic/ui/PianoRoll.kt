@@ -124,11 +124,11 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
         val ch = sel.associateWith(f); vm.replaceNotes(track, ch); selection.clear(); selection.addAll(sel.map { ch[it]!! })
     }
 
-    /** Sets the velocity of notes (one undo step); the selection follows the replaced notes. */
-    fun applyVelocities(vels: Map<NoteM, Int>) {
-        val ch = vels.mapValues { (n, v) -> NoteM(n.pitch, n.start, n.length, v.coerceIn(1, 127)) }.filter { (n, m) -> n.velocity != m.velocity }
+    /** Sets one property of notes (velocity, pan, cutoff, resonance, fine pitch, release) in one undo step; the selection follows the replaced notes. */
+    fun applyNoteProp(prop: Int, vals: Map<NoteM, Int>) {
+        val ch = vals.mapValues { (n, v) -> n.withProp(prop, v) }.filter { (n, m) -> n.prop(prop) != m.prop(prop) }
         if (ch.isEmpty()) return
-        val before = selNotes; vm.replaceNotes(track, ch, "Edit velocity"); selection.clear(); selection.addAll(before.map { ch[it] ?: it })
+        val before = selNotes; vm.replaceNotes(track, ch, "Edit " + NoteProps[prop].name.lowercase()); selection.clear(); selection.addAll(before.map { ch[it] ?: it })
     }
 
     if (scaleDialog) androidx.compose.material3.AlertDialog(onDismissRequest = { scaleDialog = false }, containerColor = Zk.panel, title = { Text("Project scale") }, text = {
@@ -195,19 +195,19 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutNotes(track, selNotes); selection.clear() }
                     LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeNotes(track, selNotes); selection.clear() }
                     Spacer(Modifier.width(4.dp))
-                    fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { NoteM(it.pitch + d, it.start, it.length, it.velocity) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
+                    fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { it.copy(pitch = it.pitch + d) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
                     for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp, enabled = selNotes.all { it.pitch + d in BOTTOM..TOP }) { transpose(d) }   // greyed when a selected note would leave the keyboard range
                     Spacer(Modifier.width(4.dp))
                     val avgVel = selNotes.map { it.velocity }.average().toInt()
                     var velDrag by remember(selNotes.size, avgVel) { mutableFloatStateOf(avgVel.toFloat()) }
                     Text("Vel ${velDrag.toInt()}", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.widthIn(min = 44.dp))
-                    androidx.compose.material3.Slider(velDrag, { velDrag = it }, Modifier.width(110.dp), valueRange = 1f..127f, onValueChangeFinished = { val v = velDrag.toInt().coerceIn(1, 127); mapSel { NoteM(it.pitch, it.start, it.length, v) } },
+                    androidx.compose.material3.Slider(velDrag, { velDrag = it }, Modifier.width(110.dp), valueRange = 1f..127f, onValueChangeFinished = { val v = velDrag.toInt().coerceIn(1, 127); mapSel { it.copy(velocity = v) } },
                         colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = track.color, activeTrackColor = track.color))
                     Spacer(Modifier.width(4.dp))
-                    LabelButton("Quant", false, w = 52.dp, h = 30.dp) { mapSel { NoteM(it.pitch, ((it.start / SNAP).roundToInt() * SNAP).coerceAtLeast(0f), it.length, it.velocity) } }
-                    LabelButton("−", false, w = 32.dp, h = 30.dp, enabled = selNotes.any { it.length > SNAP + 1e-4f }) { mapSel { NoteM(it.pitch, it.start, (it.length - SNAP).coerceAtLeast(SNAP), it.velocity) } }
+                    LabelButton("Quant", false, w = 52.dp, h = 30.dp) { mapSel { it.copy(start = ((it.start / SNAP).roundToInt() * SNAP).coerceAtLeast(0f)) } }
+                    LabelButton("−", false, w = 32.dp, h = 30.dp, enabled = selNotes.any { it.length > SNAP + 1e-4f }) { mapSel { it.copy(length = (it.length - SNAP).coerceAtLeast(SNAP)) } }
                     Text(if (selNotes.size == 1) beatsLabel(selNotes[0].length) else "len", color = Zk.text, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 34.dp))
-                    LabelButton("+", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, it.length + SNAP, it.velocity) } }
+                    LabelButton("+", false, w = 32.dp, h = 30.dp) { mapSel { it.copy(length = it.length + SNAP) } }
                     Spacer(Modifier.width(4.dp))
                     LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
                     LabelButton("Inv", false, w = 38.dp, h = 30.dp) { val keep = track.notes.filter { it !in selSet }; selection.clear(); selection.addAll(keep) }
@@ -359,19 +359,19 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                     dragPrev = when (mode) {
                                         2 -> {
                                             val newEnd = ((beat / SNAP).roundToInt() * SNAP).coerceAtLeast(o.start + SNAP); val dLen = newEnd - (o.start + o.length)
-                                            group.associateWith { NoteM(it.pitch, it.start, (it.length + dLen).coerceAtLeast(SNAP), it.velocity) }
+                                            group.associateWith { it.copy(length = (it.length + dLen).coerceAtLeast(SNAP)) }
                                         }
                                         3 -> {   // the start handle: every selected note moves its start by the same amount (none goes below 0 or under the smallest length)
                                             val want = ((beat / SNAP).roundToInt() * SNAP) - o.start
                                             val dS = want.coerceIn(-minStart, group.minOf { it.length } - SNAP)
-                                            group.associateWith { NoteM(it.pitch, it.start + dS, it.length - dS, it.velocity) }
+                                            group.associateWith { it.copy(start = it.start + dS, length = it.length - dS) }
                                         }
                                         else -> {
                                             val newStart = (((beat - grab) / SNAP).roundToInt() * SNAP)
                                             val dStart = (newStart - o.start).coerceAtLeast(-minStart)
                                             val pitchNow = (TOP - floor(c.position.y / rowPx).toInt())
                                             val dPitch = (pitchNow - o.pitch).coerceIn(BOTTOM - minPitch, TOP - maxPitch)
-                                            group.associateWith { NoteM(it.pitch + dPitch, it.start + dStart, it.length, it.velocity) }
+                                            group.associateWith { it.copy(pitch = it.pitch + dPitch, start = it.start + dStart) }
                                         }
                                     }
                                 }
@@ -445,7 +445,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         }
-        if (vm.velocityPane) VelocityPane(track, ppb, totalW, hs, selSet, vm.playhead) { changes -> applyVelocities(changes) }
+        if (vm.velocityPane) VelocityPane(track, ppb, totalW, hs, selSet, vm.playhead, vm.noteLane, { vm.noteLane = it }) { prop, changes -> applyNoteProp(prop, changes) }
         }
     }
 }
@@ -467,47 +467,73 @@ private fun BarButton(text: String, color: Color = Zk.text, onClick: () -> Unit)
 /** Empty room kept below scrolling content so that the last rows are not under the thumb / the system navigation gesture. */
 val ScrollBottomPad = 120.dp
 
+/** The note properties the lane under the piano roll can edit. Everything but velocity is -127..127 with 0 = unchanged. */
+internal class NotePropDef(val name: String, val lo: Int, val hi: Int, val unit: (Int) -> String)
+internal val NoteProps = listOf(
+    NotePropDef("Velocity", 1, 127) { "$it" },
+    NotePropDef("Pan", -127, 127) { if (it == 0) "C" else if (it < 0) "L ${-it * 100 / 127}" else "R ${it * 100 / 127}" },
+    NotePropDef("Cutoff", -127, 127) { "%+d".format(it * 100 / 127) + "%" },
+    NotePropDef("Resonance", -127, 127) { "%+d".format(it * 100 / 127) + "%" },
+    NotePropDef("Fine pitch", -127, 127) { "%+d c".format((it * 100f / 127f).roundToInt()) },
+    NotePropDef("Release", -127, 127) { "x%.2f".format(Math.pow(2.0, it / 127.0 * 2.0)) },
+)
+internal fun NoteM.prop(i: Int) = when (i) { 0 -> velocity; 1 -> pan; 2 -> cutoff; 3 -> res; 4 -> fine; else -> release }
+internal fun NoteM.withProp(i: Int, v: Int): NoteM { val d = NoteProps[i]; val x = v.coerceIn(d.lo, d.hi); return when (i) { 0 -> copy(velocity = x); 1 -> copy(pan = x); 2 -> copy(cutoff = x); 3 -> copy(res = x); 4 -> copy(fine = x); else -> copy(release = x) } }
+
 /**
- * The velocity lane under the piano roll: one stem per note at the note's start (height = velocity, the head is the grip). Drag a stem to set that
- * note's velocity; drag sideways to paint the velocity of the notes you pass; when the touched note is part of a selection of several notes, every
- * selected note moves by the same amount. The change is applied when the finger lifts (one undo step). Scrolls with the grid above.
+ * The lane under the piano roll: one stem per note at the note's start showing one property of the notes (velocity, or the per-note pan, cutoff,
+ * resonance, fine pitch, release: pick it with the name at the left). Drag a stem to set that note's value; drag sideways to paint the notes you pass;
+ * when the touched note is part of a selection of several notes, every selected note moves by the same amount. The change is applied when the finger
+ * lifts (one undo step). Scrolls with the grid above. Pan, cutoff, resonance and fine pitch rest at the middle line (0 = unchanged).
  */
 @Composable
-private fun VelocityPane(track: TrackM, ppb: Float, totalW: androidx.compose.ui.unit.Dp, hs: androidx.compose.foundation.ScrollState, selected: Set<NoteM>, playhead: Float, onCommit: (Map<NoteM, Int>) -> Unit) {
+private fun VelocityPane(track: TrackM, ppb: Float, totalW: androidx.compose.ui.unit.Dp, hs: androidx.compose.foundation.ScrollState, selected: Set<NoteM>, playhead: Float,
+                         prop: Int, onProp: (Int) -> Unit, onCommit: (Int, Map<NoteM, Int>) -> Unit) {
     val density = LocalDensity.current
-    val tm = rememberTextMeasurer()
-    var shown by remember { mutableStateOf<Map<NoteM, Int>>(emptyMap()) }   // velocities while a finger is down
+    var shown by remember { mutableStateOf<Map<NoteM, Int>>(emptyMap()) }   // values while a finger is down
     var touched by remember { mutableStateOf<NoteM?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    val def = NoteProps[prop]; val bipolar = def.lo < 0
     val padTop = 14.dp; val padBottom = 6.dp
     val latestNotes = rememberUpdatedState(track.notes.toList()); val latestSel = rememberUpdatedState(selected)
     Row(Modifier.fillMaxWidth().height(84.dp).background(Zk.panel)) {
         Column(Modifier.width(KeysW).fillMaxHeight().background(Zk.panel2).padding(4.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Text("Velocity", color = Zk.dim, fontSize = 10.sp, maxLines = 1)
+            Box {
+                Text(def.name + " ▾", color = Zk.accent, fontSize = 10.sp, maxLines = 1, softWrap = false, modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).clickable { menu = true }.padding(vertical = 3.dp))
+                androidx.compose.material3.DropdownMenu(menu, { menu = false }) {
+                    NoteProps.forEachIndexed { i, d -> androidx.compose.material3.DropdownMenuItem(text = { Text(d.name, color = if (i == prop) Zk.accent else Zk.text) }, onClick = { menu = false; onProp(i) }) }
+                }
+            }
             val t = touched
-            Text(if (t != null) "${shown[t] ?: t.velocity}" else "", color = Zk.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            Text(if (t != null) def.unit(shown[t] ?: t.prop(prop)) else "", color = Zk.text, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, softWrap = false)
         }
         Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hs)) {
-            Canvas(Modifier.width(totalW).fillMaxHeight().pointerInput(ppb, track) {
+            Canvas(Modifier.width(totalW).fillMaxHeight().pointerInput(ppb, track, prop) {
                 val pw = ppb * density.density
                 val top = padTop.toPx(); val bottom = padBottom.toPx()
                 val hitR = 16.dp.toPx()
-                fun velAt(y: Float): Int { val f = ((size.height - bottom - y) / (size.height - top - bottom)).coerceIn(0f, 1f); return (1 + f * 126f).roundToInt() }
-                fun yOf(v: Int) = size.height - bottom - (v - 1) / 126f * (size.height - top - bottom)
+                val span = (def.hi - def.lo).toFloat()
+                fun valAt(y: Float): Int {
+                    val f = ((size.height - bottom - y) / (size.height - top - bottom)).coerceIn(0f, 1f)
+                    val v = (def.lo + f * span).roundToInt()
+                    return if (bipolar && kotlin.math.abs(v) <= 3) 0 else v   // a snap to "unchanged" near the middle line
+                }
+                fun yOf(v: Int) = size.height - bottom - (v - def.lo) / span * (size.height - top - bottom)
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val notes = latestNotes.value
                     // the stem under the finger; when several stand at the same place (a chord) the one whose head is nearest to the finger
                     fun pick(x: Float, y: Float): NoteM? = notes.filter { kotlin.math.abs(it.start * pw - x) <= hitR }
-                        .minByOrNull { kotlin.math.abs(it.start * pw - x) * 0.4f + kotlin.math.abs(yOf(it.velocity) - y) }
+                        .minByOrNull { kotlin.math.abs(it.start * pw - x) * 0.4f + kotlin.math.abs(yOf(it.prop(prop)) - y) }
                     val first = pick(down.position.x, down.position.y) ?: return@awaitEachGesture
                     down.consume()
                     val group = if (first in latestSel.value && latestSel.value.size > 1) latestSel.value.toList() else listOf(first)
-                    val vels = HashMap<NoteM, Int>()
+                    val vals = HashMap<NoteM, Int>()
                     fun move(x: Float, y: Float) {
-                        val v = velAt(y)
-                        if (group.size > 1) { val d = v - first.velocity; for (n in group) vels[n] = (n.velocity + d).coerceIn(1, 127) }
-                        else { val n = pick(x, y)?.takeIf { it === first || group.size == 1 } ?: first; vels[n] = v; touched = n }
-                        shown = HashMap(vels)
+                        val v = valAt(y)
+                        if (group.size > 1) { val d = v - first.prop(prop); for (n in group) vals[n] = (n.prop(prop) + d).coerceIn(def.lo, def.hi) }
+                        else { val n = pick(x, y)?.takeIf { it === first || group.size == 1 } ?: first; vals[n] = v; touched = n }
+                        shown = HashMap(vals)
                     }
                     touched = first; move(down.position.x, down.position.y)
                     while (true) {
@@ -516,19 +542,21 @@ private fun VelocityPane(track: TrackM, ppb: Float, totalW: androidx.compose.ui.
                         if (!c.pressed) break
                         move(c.position.x, c.position.y)
                     }
-                    val result = HashMap(vels); shown = emptyMap(); touched = null
-                    onCommit(result)
+                    val result = HashMap(vals); shown = emptyMap(); touched = null
+                    onCommit(prop, result)
                 }
             }) {
-                val pw = ppb * density.density; val top = padTop.toPx(); val bottom = padBottom.toPx()
+                val pw = ppb * density.density; val top = padTop.toPx(); val bottom = padBottom.toPx(); val span = (def.hi - def.lo).toFloat()
+                fun yOf(v: Int) = size.height - bottom - (v - def.lo) / span * (size.height - top - bottom)
                 var b = 0
                 while (b <= totalW.toPx() / pw) { drawLine(if (b % 4 == 0) Zk.dim.copy(alpha = .5f) else Zk.line.copy(alpha = .5f), Offset(gridLineX(b * pw), 0f), Offset(gridLineX(b * pw), size.height), 1f); b++ }
-                for (y in listOf(1f, 64f, 127f)) { val yy = size.height - bottom - (y - 1) / 126f * (size.height - top - bottom); drawLine(Zk.line.copy(alpha = .6f), Offset(0f, yy), Offset(size.width, yy), 1f) }
+                val ref = if (bipolar) listOf(def.lo, 0, def.hi) else listOf(1, 64, 127)
+                for (r in ref) { val yy = yOf(r); drawLine(if (bipolar && r == 0) Zk.dim.copy(alpha = .8f) else Zk.line.copy(alpha = .6f), Offset(0f, yy), Offset(size.width, yy), if (bipolar && r == 0) 2f else 1f) }
+                val baseY = if (bipolar) yOf(0) else size.height - bottom
                 for (n in track.notes) {
-                    val v = shown[n] ?: n.velocity; val x = n.start * pw
-                    val y = size.height - bottom - (v - 1) / 126f * (size.height - top - bottom)
+                    val v = shown[n] ?: n.prop(prop); val x = n.start * pw; val y = yOf(v)
                     val sel = n in selected; val active = n === touched || (shown.isNotEmpty() && n in shown)
-                    drawLine(track.color.copy(alpha = if (sel || active) 1f else .75f), Offset(x, size.height - bottom), Offset(x, y), 3.dp.toPx())
+                    drawLine(track.color.copy(alpha = if (sel || active) 1f else .75f), Offset(x, baseY), Offset(x, y), 3.dp.toPx())
                     drawCircle(if (sel) Color.White else track.color, 6.dp.toPx(), Offset(x, y))
                     if (sel) drawCircle(track.color, 3.dp.toPx(), Offset(x, y))
                 }

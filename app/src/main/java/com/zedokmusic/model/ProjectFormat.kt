@@ -16,8 +16,8 @@ import org.json.JSONObject
  * A file written by a *newer* app is refused ([TooNew]) instead of being half read and then overwritten by the next autosave.
  */
 object ProjectFormat {
-    /** The format written by this version. 2 = first numbered migration; defaults made explicit (scale, stereo width, view, per-track lists). */
-    const val CURRENT = 2
+    /** The format written by this version. 2 = first numbered migration (defaults made explicit: scale, stereo width, view, per-track lists). 3 = a note may carry five more numbers after its velocity (pan, cutoff, resonance, fine pitch, release). */
+    const val CURRENT = 3
 
     class TooNew(val found: Int) : Exception("This project was saved by a newer version of ZedokMusic (project format $found; this version reads up to $CURRENT). Update the app to open it.")
 
@@ -43,6 +43,7 @@ object ProjectFormat {
                 if (!t.has("fx")) t.put("fx", JSONArray())
             }
         },
+        { _ -> },   // 2 -> 3: nothing to rewrite: notes saved before this are [pitch, start, length, velocity], the loader reads the five optional numbers when there are some
     )
 
     init { check(steps.size == CURRENT - 1) { "ProjectFormat.CURRENT ($CURRENT) needs ${CURRENT - 1} migration steps, found ${steps.size}" } }

@@ -266,7 +266,7 @@ private:
         float lfoPh[3] = {}, lfoVal[3] = {}, lfoSh[3] = {}, lfoSm[3] = {}, lfoT[3] = {};
         SVF f1[2], f1b[2], f2[2]; Ladder ladder[2]; DelayLine comb[2];
         float f1Cut = 1000.f, f2Cut = 1000.f; bool primed = false;
-        float rel = 0.f;
+        float rel = 0.f; NoteMod mod;   // per-note properties of the note that started this voice
         Voice() { comb[0].init(2048); comb[1].init(2048); }
     };
 
@@ -324,8 +324,8 @@ private:
         L = l; R = r;
     }
 
-    void noteOnVoice(Voice& v, int note, int vel, bool retrigger) {
-        const bool wasActive = v.active;
+    void noteOnVoice(Voice& v, int note, int vel, bool retrigger, const NoteMod& mod = NoteMod()) {
+        const bool wasActive = v.active; v.mod = mod;
         v.active = true; v.gate = true; v.note = note; v.vel = vel / 127.f; v.age = ++age_;
         const float target = (float)note;
         v.curNote = (P_.glide > 0.5f && lastNote_ >= 0.f) ? lastNote_ : target;
@@ -353,24 +353,24 @@ private:
         return best;
     }
 
-    void doNoteOn(int note, int vel) {
+    void doNoteOn(int note, int vel, const NoteMod& mod = NoteMod()) {
         if (P_.mono != 0) {   // mono / legato
             monoStack_.erase(std::remove(monoStack_.begin(), monoStack_.end(), note), monoStack_.end()); monoStack_.push_back(note);
             Voice& v = voices_[0];
             const bool legato = P_.mono == 2 && v.active && v.gate;
             for (int i = 1; i < kMaxVoices; i++) if (voices_[i].active) { voices_[i].gate = false; for (auto& e : voices_[i].env) e.gate(false); }
-            noteOnVoice(v, note, vel, !legato);
+            noteOnVoice(v, note, vel, !legato, mod);
             return;
         }
         // same note already sounding: retrigger that voice
-        for (auto& v : voices_) if (v.active && v.gate && v.note == note) { noteOnVoice(v, note, vel, true); return; }
-        if (Voice* v = allocVoice()) { v->env[0].kill(); noteOnVoice(*v, note, vel, true); }
+        for (auto& v : voices_) if (v.active && v.gate && v.note == note) { noteOnVoice(v, note, vel, true, mod); return; }
+        if (Voice* v = allocVoice()) { v->env[0].kill(); noteOnVoice(*v, note, vel, true, mod); }
     }
     void doNoteOff(int note) {
         if (P_.mono != 0) {
             monoStack_.erase(std::remove(monoStack_.begin(), monoStack_.end(), note), monoStack_.end());
             Voice& v = voices_[0];
-            if (!monoStack_.empty()) { if (v.note == note) { const int prev = monoStack_.back(); noteOnVoice(v, prev, (int)(v.vel * 127), P_.mono != 2); } return; }
+            if (!monoStack_.empty()) { if (v.note == note) { const int prev = monoStack_.back(); noteOnVoice(v, prev, (int)(v.vel * 127), P_.mono != 2, v.mod); } return; }
             if (v.active && v.note == note) { v.gate = false; for (auto& e : v.env) e.gate(false); }
             return;
         }
@@ -391,7 +391,7 @@ private:
             }
             return;
         }
-        if (e.type == ZK_NOTE_ON) { if (e.velocity == 0) doNoteOff(e.pitch); else doNoteOn(e.pitch, e.velocity); }
+        if (e.type == ZK_NOTE_ON) { if (e.velocity == 0) doNoteOff(e.pitch); else doNoteOn(e.pitch, e.velocity, NoteMod::from(e)); }
         else if (e.type == ZK_NOTE_OFF) doNoteOff(e.pitch);
     }
 
@@ -459,7 +459,7 @@ private:
     void renderVoice(Voice& v, int pos, int len) {
         const Params& p = P_;
         // ---- modulation sources
-        for (int e = 0; e < 3; e++) { v.env[e].set(sr_, p.env[e].a, p.env[e].d, p.env[e].s, p.env[e].r); }
+        for (int e = 0; e < 3; e++) { v.env[e].set(sr_, p.env[e].a, p.env[e].d, p.env[e].s, p.env[e].r * v.mod.relScale); }
         float srcv[kNumSrc] = {};
         const float dtBlock = len / (float)sr_;
         for (int l = 0; l < 3; l++) {
@@ -477,6 +477,7 @@ private:
         srcv[SrcEnv2] = v.envVal[1]; srcv[SrcEnv3] = v.envVal[2]; srcv[SrcVelocity] = v.vel; srcv[SrcKey] = (v.curNote - 60.f) / 60.f; srcv[SrcWheel] = p.wheel; srcv[SrcRandom] = v.rnd;
         float dst[kNumDst] = {};
         for (int m = 0; m < kSlots; m++) if (p.slot[m].src && p.slot[m].dst) dst[p.slot[m].dst] += srcv[p.slot[m].src] * p.slot[m].amt;
+        dst[DstCutoff1] += v.mod.cutoff * 0.6f; dst[DstRes1] += v.mod.res; dst[DstPan] += v.mod.pan;   // per-note properties: cutoff +-3 octaves, resonance +-0.5, pan
         // glide
         if (p.glide > 0.5f) { const float a = 1.f - std::exp(-dtBlock * 1000.f / std::max(p.glide, 1.f) * 3.f); v.curNote += ((float)v.note - v.curNote) * a; } else v.curNote = (float)v.note;
 
@@ -486,7 +487,7 @@ private:
         const float bendSemi = p.bend * p.bendRange;
         for (int o = 0; o < 2; o++) {
             const OscP& q = p.osc[o];
-            const float semis = v.curNote + bendSemi + q.oct * 12.f + q.semi + q.fine * 0.01f + dst[DstPitch] * 12.f + dst[o == 0 ? DstAPitch : DstBPitch] * 12.f;
+            const float semis = v.curNote + bendSemi + q.oct * 12.f + q.semi + q.fine * 0.01f + v.mod.fine * 0.01f + dst[DstPitch] * 12.f + dst[o == 0 ? DstAPitch : DstBPitch] * 12.f;
             const float f0 = midiToHz(semis);
             nu[o] = q.uni;
             const float det = q.det * (1.f + dst[DstDetune]);
@@ -510,7 +511,7 @@ private:
         }
         // sub / noise
         const float subRatio = p.subOct == 0 ? 0.5f : 0.25f;
-        const float subF = midiToHz(v.curNote + bendSemi) * subRatio; const float subDt = subF / (float)sr_;
+        const float subF = midiToHz(v.curNote + bendSemi + v.mod.fine * 0.01f) * subRatio; const float subDt = subF / (float)sr_;
         const float subL = clampf(p.subLevel + dst[DstSub], 0.f, 1.f), noiL = clampf(p.noiseLevel + dst[DstNoise], 0.f, 1.f);
         // ---- filter setup (per block)
         const float keyOct = (v.curNote - 60.f) / 12.f;

@@ -673,7 +673,7 @@ void Engine::windowEvents(const Project& p, const TrackState& t, int64_t pos, in
             if (end >= pos && end < pos + seg && end > nt.start && n < ZK_MAX_EVENTS) ev[n++] = ZkEvent{(uint32_t)(done + (end - pos)), ZK_NOTE_OFF, nt.channel, nt.pitch, 0};
         }
         for (auto& nt : t.notes)
-            if (nt.start >= pos && nt.start < pos + seg && n < ZK_MAX_EVENTS) ev[n++] = ZkEvent{(uint32_t)(done + (nt.start - pos)), ZK_NOTE_ON, nt.channel, nt.pitch, nt.velocity};
+            if (nt.start >= pos && nt.start < pos + seg && n < ZK_MAX_EVENTS) ev[n++] = ZkEvent{(uint32_t)(done + (nt.start - pos)), ZK_NOTE_ON, nt.channel, nt.pitch, nt.velocity, nt.pan, nt.cutoff, nt.res, nt.fine, nt.release};
         done += seg; pos += seg;
         if (p.loop && pos >= p.loopEnd) { pos = p.loopStart; if (done < frames) ev[n++] = ZkEvent{(uint32_t)done, ZK_ALL_NOTES_OFF, 0, 0, 0}; }
     }

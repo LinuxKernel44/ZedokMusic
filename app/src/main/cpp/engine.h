@@ -33,6 +33,7 @@ struct Clip {
 struct Note {
     int64_t start = 0, length = 0;  // timeline frames
     uint8_t pitch = 60, velocity = 100, channel = 0;
+    int8_t pan = 0, cutoff = 0, res = 0, fine = 0, release = 0;   // per-note properties, see ZkEvent
 };
 
 constexpr int kMaxPlugins = 64;   // instruments and effects share these slots (one Wine process each)

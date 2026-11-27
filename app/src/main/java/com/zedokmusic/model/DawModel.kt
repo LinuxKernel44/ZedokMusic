@@ -11,7 +11,17 @@ import androidx.compose.ui.graphics.Color
 enum class TrackKind { Instrument, Audio, Effect }  // Effect: an insert effect (not a mixer track of its own; it lives in TrackM.fx or VM.masterFx)
 
 /** A MIDI note. Positions are in beats (quarter notes) so the arrangement survives tempo changes. */
-class NoteM(val pitch: Int, val start: Float, val length: Float, val velocity: Int = 100)
+/**
+ * A note. [pan], [cutoff], [res], [fine] and [release] are per-note properties (like FL Studio's): each is -127..127 with 0 = no change.
+ * pan -127 left .. +127 right; cutoff / res: offset of the instrument's filter; fine: -127..127 = -100..+100 cents; release: scales the release time (x1/4 .. x4).
+ */
+class NoteM(val pitch: Int, val start: Float, val length: Float, val velocity: Int = 100,
+            val pan: Int = 0, val cutoff: Int = 0, val res: Int = 0, val fine: Int = 0, val release: Int = 0) {
+    fun copy(pitch: Int = this.pitch, start: Float = this.start, length: Float = this.length, velocity: Int = this.velocity,
+             pan: Int = this.pan, cutoff: Int = this.cutoff, res: Int = this.res, fine: Int = this.fine, release: Int = this.release) =
+        NoteM(pitch, start, length, velocity, pan, cutoff, res, fine, release)
+    val hasProps get() = pan != 0 || cutoff != 0 || res != 0 || fine != 0 || release != 0
+}
 
 class ClipM(val engineId: Int, path: String, val name: String, start: Float, val lengthFrames: Long) {
     var start by mutableFloatStateOf(start)  // beats

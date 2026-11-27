@@ -3,7 +3,7 @@
 #pragma once
 #include <stdint.h>
 #define ZK_MAGIC 0x5A4B4252u  // 'ZKBR'
-#define ZK_VERSION 4
+#define ZK_VERSION 5
 #define ZK_MAX_FRAMES 2048
 #define ZK_MAX_EVENTS 512
 #define ZK_MAX_PARAMS 2048
@@ -18,7 +18,8 @@ enum ZkGuiState : uint32_t { ZK_GUI_CLOSED = 0, ZK_GUI_OPENED = 1, ZK_GUI_FAILED
 #pragma pack(push, 4)
 struct ZkParamInfo { uint32_t id; float default_norm; uint32_t step_count; uint32_t flags; char name[48]; char units[16]; };  // flags: VST3 ParameterInfo flags
 struct ZkParamChange { uint32_t index; float value; };  // index into ZkBridge::params, value normalized 0..1
-struct ZkEvent { uint32_t offset; uint8_t type, channel, pitch, velocity; };  // offset = sample offset in the block
+// offset = sample offset in the block. pan / cutoff / res / fine / release are the per-note properties of a Note On (-127..127, 0 = unchanged); other events leave them 0.
+struct ZkEvent { uint32_t offset; uint8_t type, channel, pitch, velocity; int8_t pan, cutoff, res, fine, release; uint8_t _pad[3]; };
 
 struct ZkBridge {
     uint32_t magic, version;

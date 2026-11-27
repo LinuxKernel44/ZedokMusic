@@ -74,7 +74,9 @@ public:
                 }
                 if (e.type != ZK_NOTE_ON) continue;
                 const int p = (int)e.pitch - kFirstNote; if (p < 0 || p >= kPads) continue;
-                trigger(p, e.velocity / 127.f, model[p], tune[p], decay[p], tone[p], punch[p], drive[p], level[p], pan[p], choke[p], velSens);
+                // per-note properties: fine pitch (+-1 semitone), pan, cutoff -> tone (the pad's filter-like control), release -> decay length
+                const NoteMod nm = NoteMod::from(e);
+                trigger(p, e.velocity / 127.f, model[p], tune[p] + nm.fine * 0.01f, decay[p] * nm.relScale, clampf(tone[p] + nm.cutoff * 0.5f, 0.f, 1.f), punch[p], drive[p], level[p], clampf(pan[p] + nm.pan, -1.f, 1.f), choke[p], velSens);
             }
             float l = 0.f, r = 0.f;
             for (auto& v : voices_) if (v.active) {

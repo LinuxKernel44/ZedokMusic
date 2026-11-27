@@ -247,6 +247,7 @@ private:
     struct Voice {
         bool active = false, gate = false, sustained = false, releasing = false, noise = false;
         int note = 60, nLayers = 0; float vel = 1.f; uint64_t age = 0; Layer L[2]; float env = 1.f, relCoef = 1.f; float cents = 0.f;
+        float pl = 1.f, pr = 1.f, relScale = 1.f;   // per-note properties: pan gains, release time scale (fine pitch is in `cents`)
     };
     Voice voices_[kMaxVoices]; uint64_t age_ = 0; bool pedalDown_ = false; bool held_[88] = {}; float keyLevel_[88] = {};
     std::vector<float> mixL_, mixR_; Reverb reverb_; Rng rng_{99u}; int noiseLeft_ = 0;
@@ -294,6 +295,7 @@ private:
         float t = P_.release * std::exp2((60.f - (float)v.note) / 12.f * P_.relKey * 1.2f);
         if (P_.pedal > 0.01f && P_.pedal < 0.5f) t *= 1.f + 10.f * P_.pedal;   // half pedal: the dampers only touch the strings
         if (v.note >= kNoDamperKey) t = std::max(t, 4.0f);                      // no dampers at the top of the keyboard
+        t *= v.relScale;
         t = std::max(t, 0.02f);
         v.relCoef = std::pow(10.f, -3.f / (t * (float)sr_));
         if (P_.keyOff > -69.f && v.note < kNoDamperKey && (!byPedal || noiseLeft_ > 0)) {
@@ -310,7 +312,7 @@ private:
         if (!best) for (auto& v : voices_) if (v.active && (!best || v.age < best->age)) best = &v;
         return best;
     }
-    void doNoteOn(int note, int vel) {
+    void doNoteOn(int note, int vel, const NoteMod& mod = NoteMod()) {
         if (!ready_.load(std::memory_order_acquire)) return;
         const int key = std::min(kHighKey, std::max(kLowKey, note + (int)P_.transpose));
         // a struck string cuts the previous sound of the same note
@@ -320,7 +322,8 @@ private:
         pickLayers(vv, a, b, wa, wb);
         // the nearest sampled key (minor thirds, starting at A0)
         int center = 21 + 3 * (int)std::lround((key - 21) / 3.0); center = std::min(kHighKey, std::max(kLowKey, center));
-        *v = Voice(); v->active = true; v->gate = true; v->note = note; v->vel = vel / 127.f; v->age = ++age_; v->cents = keyCents(key) + (P_.human > 0.f ? rng_.bi() * 3.f * P_.human : 0.f);
+        *v = Voice(); v->active = true; v->gate = true; v->note = note; v->vel = vel / 127.f; v->age = ++age_; v->cents = keyCents(key) + (P_.human > 0.f ? rng_.bi() * 3.f * P_.human : 0.f) + mod.fine;
+        v->relScale = mod.relScale; if (mod.pan != 0.f) { const float a = (mod.pan * 0.5f + 0.5f) * 1.5707963f; v->pl = std::cos(a) * 1.4142f; v->pr = std::sin(a) * 1.4142f; }
         const double semis = (key - center) + v->cents / 100.0 + 12.0 * std::log2(P_.a4 / 440.0);
         v->nLayers = (a == b) ? 1 : 2;
         const int ls[2] = {a, b}; const float ws[2] = {wa, wb};
@@ -344,7 +347,7 @@ private:
             for (auto& v : voices_) if (v.active) { v.sustained = false; v.gate = false; if (e.pitch == 1) { v.releasing = true; v.relCoef = std::pow(10.f, -3.f / (0.004f * (float)sr_)); } else if (!v.releasing) startRelease(v, true); }
             for (auto& k : held_) k = false; return;
         }
-        if (e.type == ZK_NOTE_ON) { if (e.velocity == 0) doNoteOff(e.pitch); else doNoteOn(e.pitch, e.velocity); } else if (e.type == ZK_NOTE_OFF) doNoteOff(e.pitch);
+        if (e.type == ZK_NOTE_ON) { if (e.velocity == 0) doNoteOff(e.pitch); else doNoteOn(e.pitch, e.velocity, NoteMod::from(e)); } else if (e.type == ZK_NOTE_OFF) doNoteOff(e.pitch);
     }
 
     void renderBlock(int pos, int len) { for (auto& v : voices_) if (v.active) renderVoice(v, pos, len); }
@@ -377,7 +380,7 @@ private:
                 l += sl * L.gain; r += sr2 * L.gain; L.pos += L.ratio;
             }
             if (v.releasing) { v.env *= v.relCoef; if (v.env < 1e-4f) { v.active = false; return; } }
-            mixL_[pos + k] += l * v.env; mixR_[pos + k] += r * v.env;
+            mixL_[pos + k] += l * v.env * v.pl; mixR_[pos + k] += r * v.env * v.pr;
         }
     }
 

@@ -107,14 +107,17 @@ J(jstring, extractTarZst, jint fd, jlong offset, jlong length, jstring dest) {
 }
 J(jlong, extractProgress) { return g_extractProgress.load(); }
 
-// data = 4 longs per note: startFrame, lengthFrames, pitch, velocity
+// data = 9 longs per note: startFrame, lengthFrames, pitch, velocity, pan, cutoff, res, fine, release (the last five -127..127, 0 = unchanged)
 J(void, setNotes, jint track, jlongArray data) {
-    jsize n = env->GetArrayLength(data) / 4; std::vector<jlong> raw(n * 4);
-    env->GetLongArrayRegion(data, 0, n * 4, raw.data());
+    jsize n = env->GetArrayLength(data) / 9; std::vector<jlong> raw(n * 9);
+    env->GetLongArrayRegion(data, 0, n * 9, raw.data());
     std::vector<Note> notes(n);
     for (jsize i = 0; i < n; i++) {
-        notes[i].start = raw[i * 4]; notes[i].length = std::max<jlong>(1, raw[i * 4 + 1]);
-        notes[i].pitch = (uint8_t)std::clamp<jlong>(raw[i * 4 + 2], 0, 127); notes[i].velocity = (uint8_t)std::clamp<jlong>(raw[i * 4 + 3], 1, 127);
+        const jlong* r = &raw[i * 9];
+        notes[i].start = r[0]; notes[i].length = std::max<jlong>(1, r[1]);
+        notes[i].pitch = (uint8_t)std::clamp<jlong>(r[2], 0, 127); notes[i].velocity = (uint8_t)std::clamp<jlong>(r[3], 1, 127);
+        notes[i].pan = (int8_t)std::clamp<jlong>(r[4], -127, 127); notes[i].cutoff = (int8_t)std::clamp<jlong>(r[5], -127, 127); notes[i].res = (int8_t)std::clamp<jlong>(r[6], -127, 127);
+        notes[i].fine = (int8_t)std::clamp<jlong>(r[7], -127, 127); notes[i].release = (int8_t)std::clamp<jlong>(r[8], -127, 127);
     }
     eng().setNotes(track, std::move(notes));
 }

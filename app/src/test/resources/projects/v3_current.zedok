@@ -1,0 +1,8 @@
+{
+ "version": 3,
+ "bpm": 130, "master": 1, "masterStereo": 0, "loopBars": 4, "loop": false,
+ "scale": {"root": 0, "type": 2},
+ "tracks": [{"name": "Lead", "kind": "Instrument", "gain": 1, "pan": 0, "stereo": 0, "mute": false, "solo": false, "plugin": "zedok:hybrid",
+   "notes": [[60, 0, 1, 100], [64, 1, 1, 90, -64, 20, 0, 12, 30]], "clips": [], "fx": []}],
+ "masterFx": []
+}

@@ -165,6 +165,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var rollRowScale by mutableFloatStateOf(1f)
     /** The velocity lane under the piano roll is shown. */
     var velocityPane by mutableStateOf(true)
+    /** What the lane under the piano roll shows: 0 velocity, 1 pan, 2 cutoff, 3 resonance, 4 fine pitch, 5 release. */
+    var noteLane by mutableIntStateOf(0)
     private var ppbValue by mutableFloatStateOf(44f)
     var ppb: Float get() = ppbValue; set(v) { if (v != ppbValue) { ppbValue = v; viewDirty = true } }
     var arrangeX = 0; var arrangeY = 0; var rollX = 0; var rollY = -1   // -1: the piano roll's own default (around C5)
@@ -511,7 +513,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun cloneNotes(t: TrackM, sel: List<NoteM>): List<NoteM> {
         if (sel.isEmpty()) return emptyList()
         val span = sel.maxOf { it.start + it.length } - sel.minOf { it.start }
-        val copies = sel.map { NoteM(it.pitch, it.start + span, it.length, it.velocity) }
+        val copies = sel.map { it.copy(start = it.start + span) }
         addNotes(t, copies); return copies
     }
     /** The notes last copied or cut (any track); Paste puts them back. */
@@ -522,13 +524,15 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun pasteNotes(t: TrackM, at: Float): List<NoteM> {
         val clip = noteClip; if (clip.isEmpty()) return emptyList()
         val lo = clip.minOf { it.start }
-        val copies = clip.map { NoteM(it.pitch, (it.start - lo + at).coerceAtLeast(0f), it.length, it.velocity) }
+        val copies = clip.map { it.copy(start = (it.start - lo + at).coerceAtLeast(0f)) }
         addNotes(t, copies); return copies
     }
     private fun syncNotes(t: TrackM) {
-        val d = LongArray(t.notes.size * 4)
+        val d = LongArray(t.notes.size * 9)   // per note: start, length, pitch, velocity, pan, cutoff, res, fine, release
         t.notes.forEachIndexed { i, n ->
-            d[i * 4] = (n.start * fpb).toLong(); d[i * 4 + 1] = (n.length * fpb).toLong(); d[i * 4 + 2] = n.pitch.toLong(); d[i * 4 + 3] = n.velocity.toLong()
+            val o = i * 9
+            d[o] = (n.start * fpb).toLong(); d[o + 1] = (n.length * fpb).toLong(); d[o + 2] = n.pitch.toLong(); d[o + 3] = n.velocity.toLong()
+            d[o + 4] = n.pan.toLong(); d[o + 5] = n.cutoff.toLong(); d[o + 6] = n.res.toLong(); d[o + 7] = n.fine.toLong(); d[o + 8] = n.release.toLong()
         }
         e.setNotes(t.id, d)
     }
@@ -957,7 +961,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
-            .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity)) } })
+            .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity).also { r -> if (n.hasProps) r.put(n.pan).put(n.cutoff).put(n.res).put(n.fine).put(n.release) }) } })
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
                 .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
@@ -1285,7 +1289,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 t.mute = o.optBoolean("mute"); t.solo = o.optBoolean("solo")
                 e.setTrackGain(t.id, t.gain); e.setTrackPan(t.id, t.pan); e.setTrackMute(t.id, t.mute); e.setTrackSolo(t.id, t.solo)
                 val na = o.getJSONArray("notes")
-                for (k in 0 until na.length()) { val n = na.getJSONArray(k); t.notes.add(NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3))) }
+                for (k in 0 until na.length()) { val n = na.getJSONArray(k); t.notes.add(NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3), n.optInt(4, 0), n.optInt(5, 0), n.optInt(6, 0), n.optInt(7, 0), n.optInt(8, 0))) }
                 syncNotes(t)
                 readPluginState(t, o)
                 loadFx(t, o.optJSONArray("fx"))
