@@ -194,7 +194,7 @@ private:
     struct Voice {
         bool active = false, gate = false, killing = false; int note = 60, slice = -1; float vel = 1.f; uint64_t age = 0; float curNote = 60.f;
         double u = 0.0; int dir = 1; double ap = 0.0; SGrain g[3]; int spawn = 0; double headFrame = 0.0; float killGain = 1.f;
-        EnvS env[3]; float lfoPh = 0.f, lfoSh = 0.f, lfoSm = 0.f, lfoT = 0.f; float envF = 0.f, envP = 0.f; SVF f[2], f2[2]; NoteMod mod;
+        EnvS env[3]; float lfoPh = 0.f, lfoSh = 0.f, lfoSm = 0.f, lfoT = 0.f; float envF = 0.f, envP = 0.f; SVF f[2], f2[2]; NoteMod mod; bool sliding = false;
     };
     Voice voices_[kMaxVoices];
     std::vector<int> monoStack_; float lastNote_ = -1.f; uint64_t age_ = 0; float freeLfo_ = 0.f; Rng rng_{4242u};
@@ -215,7 +215,7 @@ private:
         if (P_.slices > 0) { slice = note - (int)(P_.root + 0.5f); if (slice < 0 || slice >= P_.slices) return false; }
         const bool was = v.active; v.active = true; v.gate = true; v.killing = false; v.killGain = 1.f; v.note = note; v.slice = slice; v.vel = vel / 127.f; v.age = ++age_;
         v.curNote = (P_.glide > 0.5f && lastNote_ >= 0.f) ? lastNote_ : (float)note;
-        v.mod = mod; for (auto& e : v.env) e.invRel = 1.f / mod.relScale;
+        v.mod = mod; v.sliding = false; for (auto& e : v.env) e.invRel = 1.f / mod.relScale;
         if (retrigger || !was) {
             v.u = 0.0; v.dir = 1; v.ap = 0.0; v.spawn = 0; for (auto& g : v.g) g.on = false;
             for (int e = 0; e < 3; e++) { if (!was) v.env[e].kill(); v.env[e].on(); }
@@ -232,7 +232,12 @@ private:
         Voice* best = nullptr; float bl = 1e9f; for (auto& v : voices_) if (v.active && !v.gate && v.env[0].v < bl) { bl = v.env[0].v; best = &v; } if (best) return best;
         for (auto& v : voices_) if (v.active && (!best || v.age < best->age)) best = &v; return best;
     }
+    bool supportsSlide() const override { return true; }
     void doNoteOn(int note, int vel, const NoteMod& mod = NoteMod()) {
+        if (mod.slide) {   // slide: the most recently started held voice glides to the new pitch (no retrigger)
+            Voice* best = nullptr; for (auto& v : voices_) if (v.active && v.gate && (!best || v.age > best->age)) best = &v;
+            if (best) { best->note = note; best->sliding = true; lastNote_ = (float)note; return; }
+        }
         if (P_.mono != 0) {
             monoStack_.erase(std::remove(monoStack_.begin(), monoStack_.end(), note), monoStack_.end()); monoStack_.push_back(note);
             Voice& v = voices_[0]; const bool legato = P_.mono == 2 && v.active && v.gate;
@@ -294,7 +299,8 @@ private:
         const double xf = std::min((double)p.loopFade * b->rate, (le - ls) * 0.5);
         const bool rev = p.reverse;
         // glide
-        if (p.glide > 0.5f) { const float c = 1.f - std::exp(-dtb / std::max(0.0005f, p.glide * 0.001f * 0.35f)); v.curNote += ((float)v.note - v.curNote) * c; } else v.curNote = (float)v.note;
+        const float glideMs = v.sliding ? std::max(p.glide, 70.f) : p.glide;   // a slide glides in the Glide time, at least 70 ms
+        if (glideMs > 0.5f) { const float c = 1.f - std::exp(-dtb / std::max(0.0005f, glideMs * 0.001f * 0.35f)); v.curNote += ((float)v.note - v.curNote) * c; } else v.curNote = (float)v.note;
         // lfo
         const float hz = lfoHz(); const float prevPh = v.lfoPh; v.lfoPh += hz * dtb; const bool wrapped = v.lfoPh >= 1.f; v.lfoPh -= std::floor(v.lfoPh); (void)prevPh; v.lfoT += dtb;
         const float lfoFade = p.lfoDelay > 0.001f ? std::min(1.f, v.lfoT / p.lfoDelay) : 1.f;

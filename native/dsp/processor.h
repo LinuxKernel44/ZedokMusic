@@ -81,6 +81,7 @@ struct NoteMod {
     float res = 0.f;       // -1 .. +1: filter resonance offset
     float fine = 0.f;      // cents (-100 .. +100)
     float relScale = 1.f;  // multiplier of the release time (1/4 .. 4)
+    bool slide = false;    // glide from the sounding note instead of starting a new voice (only plugins that supportsSlide())
     static NoteMod from(const ZkEvent& e) {
         NoteMod m;
         if (e.pan) m.pan = e.pan / 127.f;
@@ -88,6 +89,7 @@ struct NoteMod {
         if (e.res) m.res = e.res / 127.f;
         if (e.fine) m.fine = e.fine / 127.f * 100.f;
         if (e.release) m.relScale = std::exp2(e.release / 127.f * 2.f);
+        m.slide = (e.flags & 1) != 0;
         return m;
     }
 };
@@ -103,6 +105,8 @@ public:
     virtual void process(const ProcessCtx& c, const float* v) = 0;
     // Latency the plugin adds, in samples (reported so the host could compensate; 0 for most).
     virtual int latency() const { return 0; }
+    // True for instruments that handle slide notes (ZkEvent flags bit 0): the engine then lets the previous note ring on and sends the slide as a pitch change.
+    virtual bool supportsSlide() const { return false; }
     // Values for the plugin's own display (spectrum, gain reduction, waveform...). Returns how many floats were written.
     virtual int telemetry(int what, float* out, int cap) { (void)what; (void)out; (void)cap; return 0; }
     // Non-parameter state, stored in presets and projects as text (sample path, ...). Returns false for an unknown key.

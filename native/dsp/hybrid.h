@@ -266,7 +266,7 @@ private:
         float lfoPh[3] = {}, lfoVal[3] = {}, lfoSh[3] = {}, lfoSm[3] = {}, lfoT[3] = {};
         SVF f1[2], f1b[2], f2[2]; Ladder ladder[2]; DelayLine comb[2];
         float f1Cut = 1000.f, f2Cut = 1000.f; bool primed = false;
-        float rel = 0.f; NoteMod mod;   // per-note properties of the note that started this voice
+        bool sliding = false; float rel = 0.f; NoteMod mod;   // per-note properties of the note that started this voice
         Voice() { comb[0].init(2048); comb[1].init(2048); }
     };
 
@@ -328,7 +328,7 @@ private:
         const bool wasActive = v.active; v.mod = mod;
         v.active = true; v.gate = true; v.note = note; v.vel = vel / 127.f; v.age = ++age_;
         const float target = (float)note;
-        v.curNote = (P_.glide > 0.5f && lastNote_ >= 0.f) ? lastNote_ : target;
+        v.curNote = (P_.glide > 0.5f && lastNote_ >= 0.f) ? lastNote_ : target; v.sliding = false;
         if (retrigger || !wasActive) {
             v.rnd = rng_.bi();
             for (int e = 0; e < 3; e++) v.env[e].gate(true);
@@ -353,7 +353,12 @@ private:
         return best;
     }
 
+    bool supportsSlide() const override { return true; }
     void doNoteOn(int note, int vel, const NoteMod& mod = NoteMod()) {
+        if (mod.slide) {   // slide: the most recently started held voice glides to the new pitch (no retrigger); without one it is an ordinary note
+            Voice* best = nullptr; for (auto& v : voices_) if (v.active && v.gate && (!best || v.age > best->age)) best = &v;
+            if (best) { best->note = note; best->sliding = true; lastNote_ = (float)note; return; }
+        }
         if (P_.mono != 0) {   // mono / legato
             monoStack_.erase(std::remove(monoStack_.begin(), monoStack_.end(), note), monoStack_.end()); monoStack_.push_back(note);
             Voice& v = voices_[0];
@@ -479,7 +484,8 @@ private:
         for (int m = 0; m < kSlots; m++) if (p.slot[m].src && p.slot[m].dst) dst[p.slot[m].dst] += srcv[p.slot[m].src] * p.slot[m].amt;
         dst[DstCutoff1] += v.mod.cutoff * 0.6f; dst[DstRes1] += v.mod.res; dst[DstPan] += v.mod.pan;   // per-note properties: cutoff +-3 octaves, resonance +-0.5, pan
         // glide
-        if (p.glide > 0.5f) { const float a = 1.f - std::exp(-dtBlock * 1000.f / std::max(p.glide, 1.f) * 3.f); v.curNote += ((float)v.note - v.curNote) * a; } else v.curNote = (float)v.note;
+        const float glideMs = v.sliding ? std::max(p.glide, 70.f) : p.glide;   // a slide glides in the Glide time, at least 70 ms
+        if (glideMs > 0.5f) { const float a = 1.f - std::exp(-dtBlock * 1000.f / std::max(glideMs, 1.f) * 3.f); v.curNote += ((float)v.note - v.curNote) * a; } else v.curNote = (float)v.note;
 
         // ---- oscillator setup
         Uni* uni[2] = {&v.a, &v.b};

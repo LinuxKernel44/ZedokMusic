@@ -663,17 +663,35 @@ void Engine::liveNote(int track, bool on, int pitch, int velocity) {
 }
 
 // Notes whose on/off fall inside the window [pos, pos+frames), following loop wraps. Offs are emitted before ons.
+// Slide notes: a slide note S glides from the latest-starting note P that is still sounding (or just ending) when S starts. P is not released at its own end;
+// S's own Note Off ends the voice (the plugin retargets the voice to S's pitch).
+static bool hasSlideSource(const TrackState& t, const Note& s) {
+    for (auto& p : t.notes) if (&p != &s && p.start < s.start && p.start + p.length >= s.start) return true;
+    return false;
+}
+static bool slidesInto(const TrackState& t, const Note& p) {
+    const int64_t end = p.start + p.length;
+    for (auto& s : t.notes) {
+        if (!s.slide || &s == &p || !(p.start < s.start) || end < s.start) continue;
+        // p is the source of s when no other note starts later than p and still covers s's start
+        bool latest = true; for (auto& q : t.notes) if (&q != &s && &q != &p && q.start < s.start && q.start > p.start && q.start + q.length >= s.start) { latest = false; break; }
+        if (latest) return true;
+    }
+    return false;
+}
 void Engine::windowEvents(const Project& p, const TrackState& t, int64_t pos, int frames, ZkEvent* ev, int& n) {
     int done = 0;
     while (done < frames && n < ZK_MAX_EVENTS - 2) {
         int seg = frames - done;
         if (p.loop && pos < p.loopEnd) seg = (int)std::min<int64_t>(seg, p.loopEnd - pos);
+        const bool slides = t.plugin && t.plugin->supportsSlide();
         for (auto& nt : t.notes) {
             int64_t end = nt.start + nt.length;
+            if (slides && slidesInto(t, nt)) continue;   // a slide note takes over this note's voice: it must not be released at its end
             if (end >= pos && end < pos + seg && end > nt.start && n < ZK_MAX_EVENTS) ev[n++] = ZkEvent{(uint32_t)(done + (end - pos)), ZK_NOTE_OFF, nt.channel, nt.pitch, 0};
         }
         for (auto& nt : t.notes)
-            if (nt.start >= pos && nt.start < pos + seg && n < ZK_MAX_EVENTS) ev[n++] = ZkEvent{(uint32_t)(done + (nt.start - pos)), ZK_NOTE_ON, nt.channel, nt.pitch, nt.velocity, nt.pan, nt.cutoff, nt.res, nt.fine, nt.release};
+            if (nt.start >= pos && nt.start < pos + seg && n < ZK_MAX_EVENTS) ev[n++] = ZkEvent{(uint32_t)(done + (nt.start - pos)), ZK_NOTE_ON, nt.channel, nt.pitch, nt.velocity, nt.pan, nt.cutoff, nt.res, nt.fine, nt.release, (uint8_t)(slides && nt.slide && hasSlideSource(t, nt) ? 1 : 0)};
         done += seg; pos += seg;
         if (p.loop && pos >= p.loopEnd) { pos = p.loopStart; if (done < frames) ev[n++] = ZkEvent{(uint32_t)done, ZK_ALL_NOTES_OFF, 0, 0, 0}; }
     }

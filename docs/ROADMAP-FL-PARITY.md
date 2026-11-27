@@ -58,10 +58,10 @@ But : gains visibles rapides, sans changer le modèle de projet (sauf champs de 
 - [x] **1.3 Ghost notes** (0.52.0, vérifié S10) : voir les notes des autres pistes (atténuées), option par piste.
 - [x] **1.4 Quantize avancé** (0.52.0 : grille, début/fin, force, swing, fenêtre ; tests unitaires) : force (%), fenêtre, quantize des débuts / fins, swing, grille irrégulière.
 - [x] **1.5 Humanize** (0.52.0) : décalage temporel, vélocité, longueur (aléatoire graduée, graine fixe pour reproductibilité).
-- [ ] **1.6 Strum / « aiguiser »** : étaler un accord sur une durée, sens montant/descendant, courbe de tension.
+- [x] **1.6 Strum / « aiguiser »** (0.52.0) : étaler un accord sur une durée, sens montant/descendant, courbe de tension.
 - [x] **1.7 Arpégiateur d'édition** (0.52.0) (transformation, pas temps réel) : motifs, octaves, gate, swing ; applique sur la sélection.
 - [x] **1.8 Chord stamps et détection d'accords** (0.52.0) : bibliothèque d'accords (selon la gamme du projet), tampon d'accord sur un tap, nom de l'accord affiché pour la sélection.
-- [ ] **1.9 Slide notes et portamento** : note « slide » qui glisse en hauteur vers la suivante ; paramètre de portamento par note ; support dans les instruments natifs (Hybrid, Piano exclus s'il n'y a pas de sens).
+- [x] **1.9 Slide notes et portamento** (0.53.0 : Hybrid + Sampler ; le temps du portamento = paramètre Glide, au moins 70 ms ; mesuré hors ligne) : note « slide » qui glisse en hauteur vers la suivante ; paramètre de portamento par note ; support dans les instruments natifs (Hybrid, Piano exclus s'il n'y a pas de sens).
 - [x] **1.10 Riff machine** (0.52.0) : générateur de motifs basé sur la gamme (rythme + hauteurs), régénérable, avec verrouillage de paramètres.
 - [x] **1.11 LFO d'événements** (0.52.0) (modulation de vélocité/pan/cutoff sur une plage de notes) : outil de génération de courbes.
 - [x] **1.12 Stamp/pinceau** (0.52.0 : pinceau de notes) : poser en continu des notes ou des motifs en glissant.
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.53.0-alpha | 2026-11-27 | Phase 1.9 : slide notes (Hybrid, Sampler). Phase 1 terminée |
 | 0.52.0-alpha | 2026-11-27 | Phase 1 : ghost notes, pinceau, accords, quantize, humanize, strum, arpège, riff, LFO d'événements (menu Tools) |
 | 0.51.0-alpha | 2026-11-27 | Phase 1.2 : propriétés par note (pan, cutoff, résonance, hauteur fine, release), format 3 |
 | 0.50.0-alpha | 2026-11-27 | Phase 1.1 : éditeur de vélocité sous le piano roll |

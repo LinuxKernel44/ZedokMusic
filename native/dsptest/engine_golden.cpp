@@ -197,6 +197,21 @@ static int notePropChecks() {
         const size_t t0 = kProjectRate * 7 / 10, t1 = kProjectRate * 12 / 10;
         check("hybrid: release +127 leaves a longer tail than -127", rms(longRel, 0, t0, t1) > 4.0 * rms(shortRel, 0, t0, t1) + 1e-6, rms(longRel, 0, t0, t1) / std::max(1e-9, rms(shortRel, 0, t0, t1)));
     }
+    {   // slide: the second note glides from the first one's voice (no new attack), and ends up at its own pitch
+        auto twoNotes = [&](bool slide) { return renderWith(2.0, [&](Engine& e) {
+            int t = e.addTrack(); e.createNativePlugin(t, "hybrid");
+            Note p; p.start = 0; p.length = kProjectRate / 2; p.pitch = 57; p.velocity = 110;
+            Note s; s.start = kProjectRate / 2; s.length = kProjectRate; s.pitch = 64; s.velocity = 110; s.slide = slide;
+            e.setNotes(t, {p, s}); }); };
+        const auto sl = twoNotes(true), plain = twoNotes(false);
+        const auto ref = renderWith(2.0, [&](Engine& e) { oneNote(e, "hybrid", 64, 1.0, 0, 0, 0, 0, 0); });
+        const double fs = upCrossHz(sl, 48000 * 11 / 10, 48000 * 14 / 10), fr = upCrossHz(ref, 48000 * 11 / 10, 48000 * 14 / 10);
+        check("slide: the glided note ends at the pitch of its own note", std::fabs(fs / fr - 1.0) < 0.02, fs / fr);
+        const double dipSlide = rms(sl, 0, 48000 * 49 / 100, 48000 * 56 / 100), dipPlain = rms(plain, 0, 48000 * 49 / 100, 48000 * 56 / 100), before = rms(sl, 0, 48000 * 3 / 10, 48000 * 4 / 10);
+        check("slide: no new attack (the level does not dip at the join)", dipSlide > 0.7 * before, dipSlide / std::max(1e-9, before));
+        check("slide: differs from two separate notes", maxDiff(sl, plain) > 0.01, maxDiff(sl, plain));
+        (void)dipPlain;
+    }
     return fails;
 }
 

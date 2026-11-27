@@ -55,6 +55,7 @@ public:
         return true;
     }
     zdsp::Processor* native() const { return native_.get(); }
+    bool supportsSlide() const { return native_ && native_->supportsSlide(); }
     // Transport information for plugins that need tempo (delays, arpeggiators, LFO sync). Audio thread, before submit().
     void setTransport(double bpm, double ppq, bool playing) { bpm_ = bpm; ppq_ = ppq; playingT_ = playing; }
     uint32_t hostState() const { return b_ ? __atomic_load_n(&b_->host_state, __ATOMIC_ACQUIRE) : ZK_HOST_ERROR; }

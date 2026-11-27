@@ -228,6 +228,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                     LabelButton("Copy", false, w = 48.dp, h = 30.dp) { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
                     LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutNotes(track, selNotes); selection.clear() }
                     LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeNotes(track, selNotes); selection.clear() }
+                    val allSlide = selNotes.all { it.slide }
+                    LabelButton("Slide", allSlide, Zk.accent, w = 50.dp, h = 30.dp) { mapSel { it.copy(slide = !allSlide) } }
                     Spacer(Modifier.width(4.dp))
                     fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { it.copy(pitch = it.pitch + d) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
                     for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp, enabled = selNotes.all { it.pitch + d in BOTTOM..TOP }) { transpose(d) }   // greyed when a selected note would leave the keyboard range
@@ -469,6 +471,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             val y = (TOP - shown.pitch) * rowPx
                             val nx = gridPx(shown.start * pw); val w = maxOf(4f, gridPx((shown.start + shown.length) * pw) - nx - 1)
                             drawRoundRect(track.color, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f))
+                            if (n.slide) { val tri = androidx.compose.ui.graphics.Path().apply { moveTo(nx, y + 1); lineTo(nx + 10.dp.toPx(), y + rowPx / 2); lineTo(nx, y + rowPx - 1); close() }; drawPath(tri, Color(0xFF0B0D10)) }   // slide note: a dark arrow at its start
                             if (rowPx >= 14.dp.toPx() && w >= 26.dp.toPx()) drawText(tm.measure(Theory.name(shown.pitch), TextStyle(color = Color(0xFF0B0D10), fontSize = 10.sp)), topLeft = Offset(nx + 4.dp.toPx(), y + (rowPx - 12.dp.toPx()) / 2))
                             if (n in selSet) {
                                 drawRoundRect(Color.White, Offset(nx, y + 1), Size(w, rowPx - 2), CornerRadius(4f), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))

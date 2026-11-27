@@ -19,7 +19,7 @@ enum ZkGuiState : uint32_t { ZK_GUI_CLOSED = 0, ZK_GUI_OPENED = 1, ZK_GUI_FAILED
 struct ZkParamInfo { uint32_t id; float default_norm; uint32_t step_count; uint32_t flags; char name[48]; char units[16]; };  // flags: VST3 ParameterInfo flags
 struct ZkParamChange { uint32_t index; float value; };  // index into ZkBridge::params, value normalized 0..1
 // offset = sample offset in the block. pan / cutoff / res / fine / release are the per-note properties of a Note On (-127..127, 0 = unchanged); other events leave them 0.
-struct ZkEvent { uint32_t offset; uint8_t type, channel, pitch, velocity; int8_t pan, cutoff, res, fine, release; uint8_t _pad[3]; };
+struct ZkEvent { uint32_t offset; uint8_t type, channel, pitch, velocity; int8_t pan, cutoff, res, fine, release; uint8_t flags, _pad[2]; };   // flags bit 0: slide (the note glides from the note that is still sounding instead of starting a new voice)
 
 struct ZkBridge {
     uint32_t magic, version;
