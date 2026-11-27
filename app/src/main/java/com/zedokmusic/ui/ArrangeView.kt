@@ -62,7 +62,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
     FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
     val density = LocalDensity.current
     val ppb = pxPerBeat
-    val totalBeats = remember(vm.tracks.size, vm.bpm) { maxOf(64f, (vm.tracks.maxOfOrNull { it.lengthBeats(vm.bpm) } ?: 0f) + 32f) }
+    val totalBeats = maxOf(64f, vm.songBeats() + 32f)
     val totalW = (totalBeats * ppb).dp
     // Pinch zoom: the beat under the fingers stays under them (the scroll position is corrected once the new width is laid out).
     var anchor by remember { mutableStateOf<Pair<Float, Float>?>(null) }
@@ -92,9 +92,10 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
     val short = LocalShort.current
     val rowHpx = with(density) { ((if (short) RowHShort else RowHTall) * vm.rowScale).coerceAtLeast(54.dp).toPx() }
     val padPx = with(density) { 8.dp.toPx() }
+    val patPx = with(density) { (PatRowH * patternRows(vm)).toPx() }   // the pattern lane above the track rows
     fun clipBounds(c: ClipM, trackIndex: Int): androidx.compose.ui.geometry.Rect {
         val pw = ppb * density.density; val len = c.lengthFrames / 48000f * vm.bpm / 60f
-        return androidx.compose.ui.geometry.Rect(c.start * pw, trackIndex * rowHpx + padPx, maxOf((c.start + len) * pw, c.start * pw + 12.dp.value * density.density), (trackIndex + 1) * rowHpx - padPx)
+        return androidx.compose.ui.geometry.Rect(c.start * pw, patPx + trackIndex * rowHpx + padPx, maxOf((c.start + len) * pw, c.start * pw + 12.dp.value * density.density), patPx + (trackIndex + 1) * rowHpx - padPx)
     }
     fun clipAt(p: Offset): ClipM? { for ((i, t) in vm.tracks.withIndex()) for (c in t.clips) if (clipBounds(c, i).contains(p)) return c; return null }
     fun updateRect() {
@@ -161,7 +162,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                 } while (ev.changes.any { it.pressed })
             }
         }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
-            Column(Modifier.width(HeaderW)) { vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint(); if (dnd.payload != null) Spacer(Modifier.height(rowH() * 0.8f)) }
+            Column(Modifier.width(HeaderW)) { PatternHeader(vm); vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint(); if (dnd.payload != null) Spacer(Modifier.height(rowH() * 0.8f)) }
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
                 Box(Modifier.width(totalW).pointerInput(ppb, vm.tracks.size, rowHpx) {
                     val lp = viewConfiguration.longPressTimeoutMillis; val slop = viewConfiguration.touchSlop
@@ -191,6 +192,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                     }
                 }) {
                     Column {
+                        PatternTimeline(vm, totalBeats, ppb)
                         vm.tracks.forEach { t -> TimelineRow(vm, t, totalBeats, ppb, onEdit) }
                         if (dnd.payload != null) NewTrackZone(dnd)
                     }
@@ -309,18 +311,31 @@ private fun TimelineRow(vm: DawViewModel, t: TrackM, totalBeats: Float, ppb: Flo
             while (b <= totalBeats) { val gx = gridLineX(b * pw); drawLine(if (b % 4 == 0) Zk.line else Zk.line.copy(alpha = .35f), Offset(gx, 0f), Offset(gx, size.height), 1f); b++ }
         }
         if (t.kind == TrackKind.Instrument) {
-            val len = t.lengthBeats(vm.bpm)
-            Box(Modifier.padding(vertical = 8.dp).width((len * ppb).dp).fillMaxHeight().clip(RoundedCornerShape(8.dp))
-                .background(t.color.copy(alpha = .28f)).border(1.dp, t.color.copy(alpha = .8f), RoundedCornerShape(8.dp))
-                .clickable { vm.selected = t; onEdit(t) }) {
-                // No horizontal padding: a note at beat n sits exactly on beat line n of the ruler and the grid.
-                Canvas(Modifier.matchParentSize().padding(vertical = 6.dp)) {
-                    if (t.notes.isEmpty()) return@Canvas
-                    val lo = t.notes.minOf { it.pitch }; val hi = t.notes.maxOf { it.pitch }; val span = maxOf(1, hi - lo)
-                    val ph = size.height / (span + 1); val pw = ppb * density.density
-                    for (n in t.notes) { val x0 = gridPx(n.start * pw); val x1 = gridPx((n.start + n.length) * pw); drawRoundRect(t.color, Offset(x0, (hi - n.pitch) * ph), Size(maxOf(2f, x1 - x0), maxOf(2f, ph * .8f)), CornerRadius(2f)) }
+            // The notes the playlist puts on this track (every placement of every pattern), drawn over faint blocks that mark the placements.
+            // Tapping inside a placement opens the piano roll on that placement's pattern.
+            val placed = vm.playlist.toList(); val cur = vm.currentPattern
+            val shown = remember(placed.map { Triple(it.pattern, it.start, it.length) }, t.notes.toList(), cur, vm.bpm) { vm.notesOnTimeline(t) }
+            Box(Modifier.matchParentSize().pointerInput(t, ppb, placed.size) {
+                detectTapGestures { off ->
+                    val beat = off.x / (ppb * density.density)
+                    placed.firstOrNull { beat >= it.start && beat < it.start + vm.clipLength(it) }?.let { vm.selectPattern(it.pattern); vm.selectedPatternClip = it }
+                    vm.selected = t; onEdit(t)
                 }
-                if (t.notes.isEmpty()) Text("Tap to write notes", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.align(Alignment.Center))
+            }) {
+                Canvas(Modifier.matchParentSize()) {
+                    val pw = ppb * density.density
+                    for (c in placed) {
+                        val x0 = gridPx(c.start * pw); val x1 = gridPx((c.start + vm.clipLength(c)) * pw)
+                        drawRoundRect(t.color.copy(alpha = if (c.pattern === cur) .26f else .14f), Offset(x0, 8.dp.toPx()), Size(x1 - x0, size.height - 16.dp.toPx()), CornerRadius(8.dp.toPx()))
+                        drawRoundRect(t.color.copy(alpha = .7f), Offset(x0, 8.dp.toPx()), Size(x1 - x0, size.height - 16.dp.toPx()), CornerRadius(8.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                    }
+                    if (shown.isNotEmpty()) {
+                        val lo = shown.minOf { it.pitch }; val hi = shown.maxOf { it.pitch }; val span = maxOf(1, hi - lo)
+                        val top = 14.dp.toPx(); val ph = (size.height - 28.dp.toPx()) / (span + 1)
+                        for (n in shown) { val x0 = gridPx(n.start * pw); val x1 = gridPx((n.start + n.length) * pw); drawRoundRect(t.color, Offset(x0, top + (hi - n.pitch) * ph), Size(maxOf(2f, x1 - x0), maxOf(2f, ph * .8f)), CornerRadius(2f)) }
+                    }
+                }
+                if (shown.isEmpty() && t.notes.isEmpty()) Text("Tap to write notes", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterStart).padding(start = 12.dp))
             }
         }
         for (c in t.clips) ClipBlock(vm, t, c, ppb)

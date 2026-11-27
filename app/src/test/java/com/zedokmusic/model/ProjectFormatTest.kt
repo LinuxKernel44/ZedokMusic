@@ -13,7 +13,7 @@ class ProjectFormatTest {
         val r = ProjectFormat.migrate(witness("v1_minimal.zedok"))
         assertEquals(ProjectFormat.CURRENT, r.getInt("version"))
         assertEquals(128.0, r.getDouble("bpm"), 0.0)                       // what was there is untouched
-        assertEquals(src.getJSONArray("tracks").getJSONObject(0).getJSONArray("notes").toString(), r.getJSONArray("tracks").getJSONObject(0).getJSONArray("notes").toString())
+        assertEquals(src.getJSONArray("tracks").getJSONObject(0).getJSONArray("notes").toString(), r.getJSONArray("patterns").getJSONObject(0).getJSONObject("tracks").getJSONArray("0").toString())   // the notes moved into Pattern 1
         assertEquals(0.0, r.getDouble("masterStereo"), 0.0)               // what the loader used to assume is now written down
         assertEquals(0, r.getJSONObject("scale").getInt("type"))
         val t = r.getJSONArray("tracks").getJSONObject(0)
@@ -28,16 +28,16 @@ class ProjectFormatTest {
         for (k in listOf("bpm", "master", "loopBars", "loop", "scale", "view", "masterFx")) assertEquals(k, src.get(k).toString(), r.get(k).toString())
         for (i in 0 until src.getJSONArray("tracks").length()) {
             val a = src.getJSONArray("tracks").getJSONObject(i); val b = r.getJSONArray("tracks").getJSONObject(i)
-            for (k in a.keys()) assertEquals("track $i $k", a.get(k).toString(), b.get(k).toString())
+            for (k in a.keys()) { if (k == "notes") { val moved = r.getJSONArray("patterns").getJSONObject(0).getJSONObject("tracks"); if (a.getJSONArray(k).length() > 0) assertEquals(a.get(k).toString(), moved.getJSONArray(i.toString()).toString()); continue }; assertEquals("track $i $k", a.get(k).toString(), b.get(k).toString()) }
         }
         assertEquals(0.0, r.getJSONArray("tracks").getJSONObject(0).getDouble("stereo"), 0.0)   // the only keys added are defaults
         assertEquals(0.0, r.getDouble("masterStereo"), 0.0)
     }
 
     @Test fun currentFormatIsLeftAsItIs() {
-        val src = witness("v2_current.zedok")
-        val r = ProjectFormat.migrate(witness("v2_current.zedok"))
-        assertEquals(src.put("version", 3).toString(), r.toString())   // an older file only gets its number raised
+        val src = witness("v4_current.zedok")
+        val r = ProjectFormat.migrate(witness("v4_current.zedok"))
+        assertEquals(src.toString(), r.toString())
     }
 
     @Test fun migrationIsIdempotent() {
@@ -65,10 +65,10 @@ class ProjectFormatTest {
     }
 
     @Test fun notesWithPropertiesAreKeptAsTheyAre() {
-        val src = witness("v3_current.zedok")
         val r = ProjectFormat.migrate(witness("v3_current.zedok"))
-        assertEquals(src.toString(), r.toString())
-        assertEquals(9, r.getJSONArray("tracks").getJSONObject(0).getJSONArray("notes").getJSONArray(1).length())   // a note with its five properties
-        assertEquals(3, ProjectFormat.CURRENT)
+        val notes = r.getJSONArray("patterns").getJSONObject(0).getJSONObject("tracks").getJSONArray("0")
+        assertEquals(2, notes.length()); assertEquals(9, notes.getJSONArray(1).length())   // a note with its five properties survives the move into the pattern
+        assertEquals(1, r.getJSONArray("playlist").length()); assertEquals(1, r.getInt("currentPattern"))
+        assertEquals(4, ProjectFormat.CURRENT)
     }
 }

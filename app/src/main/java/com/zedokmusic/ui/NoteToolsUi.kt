@@ -123,7 +123,7 @@ fun NoteToolDialog(vm: DawViewModel, tool: NoteTool, src: List<NoteM>, gridStep:
                 NoteTool.Strum -> onApply(src, NoteTools.strum(src, spread, fromTop, tension), "Strum")
                 NoteTool.Arpeggiate -> onApply(src, NoteTools.arpeggiate(src, pattern, step, octaves, gate, seed), "Arpeggiate")
                 NoteTool.Riff -> {
-                    val start = kotlin.math.floor(vm.playhead / 4f) * 4f
+                    val start = kotlin.math.floor(maxOf(0f, vm.patternPlayhead()) / 4f) * 4f
                     val made = NoteTools.riff({ Theory.inScale(it, vm.scaleRoot, vm.scaleType) }, lo.roundToInt(), hi.roundToInt(), start, bars, step, density, leap, seed)
                     val gone = if (replace) src.filter { it.start < start + bars * 4f && it.start + it.length > start } else emptyList()
                     onApply(gone, made, "Riff")

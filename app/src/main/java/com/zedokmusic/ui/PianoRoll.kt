@@ -64,7 +64,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     var seenView by remember { mutableIntStateOf(vm.viewRevision) }
     LaunchedEffect(vm.viewRevision) { if (vm.viewRevision != seenView) { seenView = vm.viewRevision; hs.scrollTo(vm.rollX); if (vm.rollY >= 0) vs.scrollTo(vm.rollY) } }
     var viewportPx by remember { mutableIntStateOf(0) }
-    FollowPlayhead(vm, hs, pxPerBeat, viewportPx)
+    val rollHead = vm.patternPlayhead()   // where the playhead is inside this pattern (-1 while no placement of it plays)
+    FollowPlayhead(vm, hs, pxPerBeat, viewportPx, rollHead)
     val density = LocalDensity.current
     val ppb = pxPerBeat
     val RowPx = 18.dp * vm.rollRowScale   // vertical zoom (shadows the base row height above)
@@ -176,14 +177,14 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             // One box for the ruler and the buttons: the ruler spans the same width as the grid below, so the two scroll over exactly the same range and never drift apart.
             Box(Modifier.weight(1f).fillMaxHeight()) {
             Box(Modifier.fillMaxSize().onSizeChanged { viewportPx = it.width }.horizontalScroll(hs)) {
-                Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekBeat(it) }) {
+                Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekPatternBeat(it) }) {
                     val pw = ppb * density.density; var b = 0
                     while (b <= beats) {
                         val x = gridLineX(b * pw); val bar = b % 4 == 0
                         drawLine(if (bar) Zk.dim else Zk.line, Offset(x, if (bar) 10.dp.toPx() else 20.dp.toPx()), Offset(x, size.height), 1f)
                         if (bar) drawText(tm.measure("${b / 4 + 1}", TextStyle(color = Zk.dim, fontSize = 10.sp)), topLeft = Offset(x + 4.dp.toPx(), 2.dp.toPx())); b++
                     }
-                    drawPlayhead(vm.playhead * pw, Zk.accent, head = true)
+                    if (rollHead >= 0f) drawPlayhead(rollHead * pw, Zk.accent, head = true)
                 }
             }
             Row(Modifier.align(Alignment.CenterEnd).background(Zk.panel).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -219,7 +220,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 // The actions of the selection (and Paste) sit under the scale bar, only while there is something to act on. The grid is scrolled by the bar's height when it comes or goes, so the cells stay under the finger.
                 Row(Modifier.fillMaxWidth().height(40.dp).background(Zk.panel2).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     if (selNotes.isEmpty()) {
-                        LabelButton("Paste ${vm.noteClip.size}", false, w = 78.dp, h = 30.dp) { val at = (vm.playhead / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
+                        LabelButton("Paste ${vm.noteClip.size}", false, w = 78.dp, h = 30.dp) { val at = (maxOf(0f, rollHead) / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
                         Text("at the playhead", color = Zk.dim, fontSize = 11.sp)
                         LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
                     } else {
@@ -483,8 +484,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                         }
                         rectSel?.let { r -> drawRect(Zk.accent.copy(alpha = .14f), r.topLeft, r.size); drawRect(Zk.accent, r.topLeft, r.size, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx())) }
                     }
-                    val x = with(density) { (vm.playhead * ppb).dp.roundToPx() }
-                    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(x, 0) }.width(2.dp).fillMaxHeight().background(Zk.accent))
+                    val x = with(density) { (maxOf(0f, rollHead) * ppb).dp.roundToPx() }
+                    if (rollHead >= 0f) Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(x, 0) }.width(2.dp).fillMaxHeight().background(Zk.accent))
                     // ---- floating bars: over the selection (Clone, Copy, Cut, Delete) / Paste at the playhead when nothing is selected
                     val barH = 36.dp
                     if (barVisible && selNotes.isNotEmpty() && dragPrev == null && rectSel == null) {
@@ -507,7 +508,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         }
-        if (vm.velocityPane) VelocityPane(track, ppb, totalW, hs, selSet, vm.playhead, vm.noteLane, { vm.noteLane = it }) { prop, changes -> applyNoteProp(prop, changes) }
+        if (vm.velocityPane) VelocityPane(track, ppb, totalW, hs, selSet, rollHead, vm.noteLane, { vm.noteLane = it }) { prop, changes -> applyNoteProp(prop, changes) }
         }
     }
 }
@@ -622,7 +623,7 @@ private fun VelocityPane(track: TrackM, ppb: Float, totalW: androidx.compose.ui.
                     drawCircle(if (sel) Color.White else track.color, 6.dp.toPx(), Offset(x, y))
                     if (sel) drawCircle(track.color, 3.dp.toPx(), Offset(x, y))
                 }
-                drawLine(Zk.accent, Offset(playhead * pw, 0f), Offset(playhead * pw, size.height), 2f)
+                if (playhead >= 0f) drawLine(Zk.accent, Offset(playhead * pw, 0f), Offset(playhead * pw, size.height), 2f)
             }
         }
     }

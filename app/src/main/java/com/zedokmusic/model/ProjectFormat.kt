@@ -16,8 +16,8 @@ import org.json.JSONObject
  * A file written by a *newer* app is refused ([TooNew]) instead of being half read and then overwritten by the next autosave.
  */
 object ProjectFormat {
-    /** The format written by this version. 2 = first numbered migration (defaults made explicit: scale, stereo width, view, per-track lists). 3 = a note may carry five more numbers after its velocity (pan, cutoff, resonance, fine pitch, release). */
-    const val CURRENT = 3
+    /** The format written by this version. 2 = first numbered migration (defaults made explicit: scale, stereo width, view, per-track lists). 3 = a note may carry five more numbers after its velocity (pan, cutoff, resonance, fine pitch, release; a sixth 0/1 for slide). 4 = patterns: the notes of the tracks move into `patterns` (one set of notes per track per pattern) and a `playlist` places them. */
+    const val CURRENT = 4
 
     class TooNew(val found: Int) : Exception("This project was saved by a newer version of ZedokMusic (project format $found; this version reads up to $CURRENT). Update the app to open it.")
 
@@ -44,6 +44,21 @@ object ProjectFormat {
             }
         },
         { _ -> },   // 2 -> 3: nothing to rewrite: notes saved before this are [pitch, start, length, velocity], the loader reads the five optional numbers when there are some
+        { r ->   // 3 -> 4: the notes of every track become "Pattern 1", placed once at the start of the playlist (the song plays exactly as before)
+            if (!r.has("patterns")) {
+                val tracks = r.optJSONArray("tracks") ?: JSONArray()
+                val perTrack = JSONObject()
+                for (i in 0 until tracks.length()) {
+                    val t = tracks.optJSONObject(i) ?: continue
+                    val notes = t.optJSONArray("notes")
+                    if (notes != null && notes.length() > 0) perTrack.put(i.toString(), notes)
+                    t.remove("notes")
+                }
+                r.put("patterns", JSONArray().put(JSONObject().put("id", 1).put("name", "Pattern 1").put("color", 0).put("tracks", perTrack)))
+                r.put("playlist", JSONArray().put(JSONObject().put("pattern", 1).put("start", 0.0).put("row", 0)))
+                r.put("currentPattern", 1)
+            }
+        },
     )
 
     init { check(steps.size == CURRENT - 1) { "ProjectFormat.CURRENT ($CURRENT) needs ${CURRENT - 1} migration steps, found ${steps.size}" } }

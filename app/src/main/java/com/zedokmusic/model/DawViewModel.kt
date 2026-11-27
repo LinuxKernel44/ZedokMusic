@@ -45,6 +45,16 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun undo() { val n = hist.undo() ?: return; historyRev++; dirty = true; message = "Undo: $n" }
     fun redo() { val n = hist.redo() ?: return; historyRev++; dirty = true; message = "Redo: $n" }
     private fun clearHistory() { hist.clear(); historyRev++ }
+
+    // ---------- patterns and the playlist (declared before the init block: load() runs from the constructor) ----------
+    val patterns = androidx.compose.runtime.mutableStateListOf<PatternM>()
+    val playlist = androidx.compose.runtime.mutableStateListOf<PatternClipM>()
+    /** The pattern the piano roll edits (its notes are the instrument tracks' [TrackM.notes]). */
+    var currentPattern by mutableStateOf<PatternM?>(null); private set
+    /** The placement picked in the playlist's pattern lane. */
+    var selectedPatternClip by mutableStateOf<PatternClipM?>(null)
+    private var patternCounter = 0
+    private var lastPatLen = 0f
     private val projectFile get() = store?.file(projectName)
     fun projectDir(): File? = store?.dir(projectName)
     /** Samples that belong to this project: imports and recordings are stored here, not in a shared library. */
@@ -488,8 +498,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // Every edit of the notes of a track first stores the notes as they were (undo / redo, 50 steps per track).
     /** Records the notes of [t] as they are now; call it just before changing them. What the notes become is read back when the action is undone. */
     private fun snapshot(t: TrackM, name: String = "Edit notes") {
-        val before = t.notes.toList(); var after: List<NoteM> = before
-        record(name, undo = { after = t.notes.toList(); restoreNotes(t, before) }, redo = { restoreNotes(t, after) })
+        val before = t.notes.toList(); var after: List<NoteM> = before; val pat = currentPattern
+        record(name, undo = { pat?.let { ensurePattern(it) }; after = t.notes.toList(); restoreNotes(t, before) }, redo = { pat?.let { ensurePattern(it) }; restoreNotes(t, after) })
     }
     private fun restoreNotes(t: TrackM, notes: List<NoteM>) { if (e.isPlaying()) e.panic(t.id); t.notes.clear(); t.notes.addAll(notes); syncNotes(t); dirty = true }
 
@@ -535,14 +545,135 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val copies = clip.map { it.copy(start = (it.start - lo + at).coerceAtLeast(0f)) }
         addNotes(t, copies); return copies
     }
+    /** Sends the notes the playlist puts on [t]'s timeline to the engine (and those of the other tracks when the current pattern changed length). */
     private fun syncNotes(t: TrackM) {
-        val d = LongArray(t.notes.size * 10)   // per note: start, length, pitch, velocity, pan, cutoff, res, fine, release, slide
-        t.notes.forEachIndexed { i, n ->
+        pushNotes(t)
+        val len = currentPattern?.let { patternLength(it) } ?: 0f
+        if (len != lastPatLen) { lastPatLen = len; for (o in tracks) if (o !== t && o.kind == TrackKind.Instrument) pushNotes(o) }
+    }
+    private fun syncAllNotes() { lastPatLen = currentPattern?.let { patternLength(it) } ?: 0f; for (t in tracks) if (t.kind == TrackKind.Instrument) pushNotes(t) }
+    private fun pushNotes(t: TrackM) {
+        val list = derivedNotes(t)
+        val d = LongArray(list.size * 10)   // per note: start, length, pitch, velocity, pan, cutoff, res, fine, release, slide
+        list.forEachIndexed { i, n ->
             val o = i * 10
             d[o] = (n.start * fpb).toLong(); d[o + 1] = (n.length * fpb).toLong(); d[o + 2] = n.pitch.toLong(); d[o + 3] = n.velocity.toLong()
             d[o + 4] = n.pan.toLong(); d[o + 5] = n.cutoff.toLong(); d[o + 6] = n.res.toLong(); d[o + 7] = n.fine.toLong(); d[o + 8] = n.release.toLong(); d[o + 9] = if (n.slide) 1L else 0L
         }
         e.setNotes(t.id, d)
+    }
+
+    // ---------- patterns ----------
+    /** The notes of pattern [p] on track [t]: the live list for the pattern being edited, the stored one for the others. */
+    fun notesOf(p: PatternM, t: TrackM): List<NoteM> = if (p === currentPattern) t.notes.toList() else p.stored[t.id] ?: emptyList()
+    fun patternLength(p: PatternM): Float = PatternMath.length(tracks.flatMap { notesOf(p, it) }, p.fixedLength)
+    fun clipLength(c: PatternClipM): Float = c.length ?: patternLength(c.pattern)
+    /** What the arrangement draws on a track's row: the notes of every placement on the timeline. */
+    fun notesOnTimeline(t: TrackM): List<NoteM> = derivedNotes(t)
+    private fun derivedNotes(t: TrackM): List<NoteM> {
+        if (t.kind != TrackKind.Instrument) return emptyList()
+        val out = ArrayList<NoteM>()
+        for (c in playlist) out += PatternMath.place(notesOf(c.pattern, t), patternLength(c.pattern), c.start, clipLength(c))
+        return out
+    }
+    /** End of the song in beats: the last pattern clip or audio clip, whole bars, at least one bar. */
+    fun songBeats(): Float {
+        var end = 0f
+        for (c in playlist) end = maxOf(end, c.start + clipLength(c))
+        for (t in tracks) for (c in t.clips) end = maxOf(end, c.start + c.lengthFrames / 48000f * bpm / 60f)
+        return maxOf(4f, kotlin.math.ceil(end / 4f) * 4f)
+    }
+    /** The position of the playhead inside the current pattern (while a placement of it plays), else -1. */
+    fun patternPlayhead(): Float {
+        val cur = currentPattern ?: return -1f
+        val c = playlist.firstOrNull { it.pattern === cur && playhead >= it.start && playhead < it.start + clipLength(it) } ?: return -1f
+        return (playhead - c.start) % patternLength(cur)
+    }
+    /** Seeks to [beat] of the current pattern, in the placement the playhead is in, or in the first placement. */
+    fun seekPatternBeat(beat: Float) {
+        val cur = currentPattern
+        val c = playlist.firstOrNull { it.pattern === cur && playhead >= it.start && playhead < it.start + clipLength(it) } ?: playlist.filter { it.pattern === cur }.minByOrNull { it.start }
+        seekBeat((c?.start ?: 0f) + beat)
+    }
+    /** Makes [p] the pattern the piano roll edits: every instrument track's notes list becomes the notes of that pattern. */
+    fun selectPattern(p: PatternM) {
+        val cur = currentPattern; if (cur === p) return
+        if (cur != null) for (t in tracks) if (t.kind == TrackKind.Instrument) cur.stored[t.id] = t.notes.toList()
+        for (t in tracks) if (t.kind == TrackKind.Instrument) { t.notes.clear(); t.notes.addAll(p.stored[t.id] ?: emptyList()); p.stored.remove(t.id) }
+        currentPattern = p; lastPatLen = patternLength(p)
+    }
+    private fun ensurePattern(p: PatternM) { if (currentPattern !== p && p in patterns) selectPattern(p) }
+    private fun resetPatterns() {
+        patterns.clear(); playlist.clear(); patternCounter = 0; selectedPatternClip = null
+        val p = PatternM(++patternCounter, "Pattern 1", TrackColors[0]); patterns.add(p); currentPattern = p
+        playlist.add(PatternClipM(p, 0f, null, 0)); lastPatLen = 0f
+    }
+    fun newPattern(): PatternM {
+        val id = ++patternCounter; val p = PatternM(id, "Pattern $id", TrackColors[(id - 1) % TrackColors.size])
+        val prev = currentPattern
+        patterns.add(p); selectPattern(p); dirty = true
+        record("New pattern", undo = { prev?.let { ensurePattern(it) }; patterns.remove(p) }, redo = { patterns.add(p); selectPattern(p) })
+        return p
+    }
+    fun duplicatePattern(src: PatternM): PatternM {
+        val id = ++patternCounter; val p = PatternM(id, src.name + " copy", src.color); p.fixedLength = src.fixedLength
+        for (t in tracks) if (t.kind == TrackKind.Instrument) p.stored[t.id] = notesOf(src, t)
+        val prev = currentPattern
+        patterns.add(p); selectPattern(p); dirty = true
+        record("Duplicate pattern", undo = { prev?.let { ensurePattern(it) }; patterns.remove(p) }, redo = { patterns.add(p); selectPattern(p) })
+        return p
+    }
+    fun renamePattern(p: PatternM, name: String) {
+        val n = name.trim().take(40); val o = p.name; if (n.isEmpty() || n == o) return
+        p.name = n; dirty = true; record("Rename pattern", undo = { p.name = o; dirty = true }, redo = { p.name = n; dirty = true })
+    }
+    fun setPatternLength(p: PatternM, beats: Float?) {
+        val o = p.fixedLength; p.fixedLength = beats; syncAllNotes(); dirty = true
+        record("Pattern length", undo = { p.fixedLength = o; syncAllNotes(); dirty = true }, redo = { p.fixedLength = beats; syncAllNotes(); dirty = true })
+    }
+    fun deletePattern(p: PatternM): Boolean {
+        if (patterns.size <= 1 || p !in patterns) { message = "A project keeps at least one pattern."; return false }
+        val index = patterns.indexOf(p); val gone = playlist.filter { it.pattern === p }; val goneAt = gone.map { playlist.indexOf(it) }
+        val wasCurrent = currentPattern === p
+        if (wasCurrent) { for (t in tracks) if (t.kind == TrackKind.Instrument) p.stored[t.id] = t.notes.toList(); selectPattern(patterns.first { it !== p }) }   // its notes stay in `stored` so an undo brings them back
+        playlist.removeAll(gone.toSet()); patterns.remove(p); syncAllNotes(); dirty = true
+        record("Delete pattern", undo = { patterns.add(index.coerceAtMost(patterns.size), p); gone.forEachIndexed { k, c -> playlist.add(goneAt[k].coerceIn(0, playlist.size), c) }; if (wasCurrent) selectPattern(p); syncAllNotes(); dirty = true },
+            redo = { if (currentPattern === p) selectPattern(patterns.first { it !== p }); playlist.removeAll(gone.toSet()); patterns.remove(p); syncAllNotes(); dirty = true })
+        return true
+    }
+
+    // ---------- the playlist ----------
+    fun addPatternClip(p: PatternM, start: Float, row: Int, length: Float? = null): PatternClipM {
+        val c = PatternClipM(p, start.coerceAtLeast(0f), length, row.coerceAtLeast(0)); playlist.add(c); syncAllNotes(); dirty = true
+        record("Place pattern", undo = { playlist.remove(c); syncAllNotes(); dirty = true }, redo = { playlist.add(c); syncAllNotes(); dirty = true })
+        return c
+    }
+    fun movePatternClip(c: PatternClipM, start: Float, row: Int) {
+        val os = c.start; val or = c.row; val ns = start.coerceAtLeast(0f); val nr = row.coerceAtLeast(0)
+        if (os == ns && or == nr) return
+        c.start = ns; c.row = nr; syncAllNotes(); dirty = true
+        record("Move pattern clip", undo = { c.start = os; c.row = or; syncAllNotes(); dirty = true }, redo = { c.start = ns; c.row = nr; syncAllNotes(); dirty = true })
+    }
+    /** [length] null = back to the pattern's own length. */
+    fun resizePatternClip(c: PatternClipM, length: Float?) {
+        val o = c.length; val n = length?.coerceAtLeast(0.25f); if (o == n) return
+        c.length = n; syncAllNotes(); dirty = true
+        record("Resize pattern clip", undo = { c.length = o; syncAllNotes(); dirty = true }, redo = { c.length = n; syncAllNotes(); dirty = true })
+    }
+    fun removePatternClip(c: PatternClipM) {
+        val at = playlist.indexOf(c); if (at < 0) return
+        playlist.remove(c); syncAllNotes(); dirty = true
+        record("Delete pattern clip", undo = { playlist.add(at.coerceAtMost(playlist.size), c); syncAllNotes(); dirty = true }, redo = { playlist.remove(c); syncAllNotes(); dirty = true })
+    }
+    /** Gives the clip its own copy of the pattern, so editing it no longer changes the other placements. Returns the copy. */
+    fun makeClipUnique(c: PatternClipM): PatternM? {
+        val at = playlist.indexOf(c); if (at < 0) return null
+        val src = c.pattern; val id = ++patternCounter; val p = PatternM(id, src.name + " (unique)", src.color); p.fixedLength = src.fixedLength
+        for (t in tracks) if (t.kind == TrackKind.Instrument) p.stored[t.id] = notesOf(src, t)
+        val nc = PatternClipM(p, c.start, c.length, c.row)
+        patterns.add(p); playlist[at] = nc; syncAllNotes(); dirty = true
+        record("Make unique", undo = { playlist[playlist.indexOf(nc).coerceAtLeast(0)] = c; patterns.remove(p); syncAllNotes(); dirty = true }, redo = { patterns.add(p); playlist[playlist.indexOf(c).coerceAtLeast(0)] = nc; syncAllNotes(); dirty = true })
+        return p
     }
     fun liveNote(t: TrackM, on: Boolean, pitch: Int) = keyEvent(t, on, pitch, 105)
 
@@ -969,14 +1100,24 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
-            .put("notes", JSONArray().also { a -> t.notes.forEach { n -> a.put(JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity).also { r -> if (n.hasProps) r.put(n.pan).put(n.cutoff).put(n.res).put(n.fine).put(n.release).put(if (n.slide) 1 else 0) }) } })
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
                 .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
         root.put("tracks", arr).put("masterFx", fxJson(masterFx))
+        val pats = JSONArray()
+        for (pt in patterns) {
+            val per = JSONObject()
+            tracks.forEachIndexed { i, t -> if (t.kind == TrackKind.Instrument) { val ns = notesOf(pt, t); if (ns.isNotEmpty()) per.put(i.toString(), JSONArray().also { a -> ns.forEach { n -> a.put(noteJson(n)) } }) } }
+            pats.put(JSONObject().put("id", pt.id).put("name", pt.name).put("color", TrackColors.indexOf(pt.color).coerceAtLeast(0)).also { o -> pt.fixedLength?.let { o.put("length", it.toDouble()) } }.put("tracks", per))
+        }
+        root.put("patterns", pats).put("currentPattern", currentPattern?.id ?: 1)
+            .put("playlist", JSONArray().also { a -> playlist.forEach { c -> a.put(JSONObject().put("pattern", c.pattern.id).put("start", c.start.toDouble()).put("row", c.row).also { o -> c.length?.let { o.put("length", it.toDouble()) } }) } })
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
     }
 
+    /** A note as saved: [pitch, start, length, velocity] and, when it has properties, pan, cutoff, res, fine, release, slide. */
+    private fun noteJson(n: NoteM) = JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity).also { r -> if (n.hasProps) r.put(n.pan).put(n.cutoff).put(n.res).put(n.fine).put(n.release).put(if (n.slide) 1 else 0) }
+    private fun noteFrom(n: JSONArray) = NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3), n.optInt(4, 0), n.optInt(5, 0), n.optInt(6, 0), n.optInt(7, 0), n.optInt(8, 0), n.optInt(9, 0) != 0)
     private fun paramsJson(t: TrackM) = JSONArray().also { a -> t.paramOverrides.forEach { (i, v) -> t.paramNames[i]?.let { nm -> a.put(JSONArray().put(nm).put(v.toDouble())) } } }
     private fun lanesJson(t: TrackM) = JSONArray().also { a -> t.lanes.forEach { l -> a.put(JSONObject().put("param", l.paramName).put("points", JSONArray().also { pa -> l.points.forEach { p -> pa.put(JSONArray().put(p.beat.toDouble()).put(p.value.toDouble()).put(p.shape)) } })) } }
     private fun fxJson(list: List<TrackM>) = JSONArray().also { a -> list.forEach { f -> a.put(JSONObject().put("plugin", f.pluginPath).put("name", f.name).put("bypass", f.bypass).put("params", paramsJson(f)).put("lanes", lanesJson(f)).put("preset", f.presetName).put("nstate", JSONObject(f.states.toMap()))) } }
@@ -1020,6 +1161,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     private fun closeCurrent() {
         formatLocked = false
+        resetPatterns()
         tracks.toList().forEach { removeTrack(it) }
         masterFx.toList().forEach { removeEffect(null, it) }
         pluginTarget = null; panelExpanded = false
@@ -1269,6 +1411,30 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Reads the patterns and the playlist; the notes of the current pattern go into the tracks' note lists, the others stay stored in their pattern. */
+    private fun loadPatterns(root: JSONObject) {
+        patterns.clear(); playlist.clear(); currentPattern = null
+        val arr = root.optJSONArray("patterns") ?: JSONArray()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i); val id = o.optInt("id", i + 1); patternCounter = maxOf(patternCounter, id)
+            val p = PatternM(id, o.optString("name", "Pattern $id"), TrackColors[o.optInt("color", 0).coerceIn(0, TrackColors.size - 1)])
+            if (o.has("length")) p.fixedLength = o.getDouble("length").toFloat()
+            val per = o.optJSONObject("tracks")
+            if (per != null) for (key in per.keys()) { val t = tracks.getOrNull(key.toIntOrNull() ?: -1) ?: continue; val na = per.getJSONArray(key); p.stored[t.id] = (0 until na.length()).map { noteFrom(na.getJSONArray(it)) } }
+            patterns.add(p)
+        }
+        if (patterns.isEmpty()) patterns.add(PatternM(++patternCounter, "Pattern 1", TrackColors[0]))
+        val cur = patterns.firstOrNull { it.id == root.optInt("currentPattern", 1) } ?: patterns.first()
+        val pl = root.optJSONArray("playlist") ?: JSONArray()
+        for (i in 0 until pl.length()) {
+            val o = pl.getJSONObject(i); val p = patterns.firstOrNull { it.id == o.optInt("pattern") } ?: continue
+            playlist.add(PatternClipM(p, o.optDouble("start", 0.0).toFloat(), if (o.has("length")) o.getDouble("length").toFloat() else null, o.optInt("row", 0)))
+        }
+        for (t in tracks) if (t.kind == TrackKind.Instrument) { t.notes.clear(); t.notes.addAll(cur.stored[t.id] ?: emptyList()); cur.stored.remove(t.id) }
+        currentPattern = cur
+        syncAllNotes()
+    }
+
     private fun load() {
         formatLocked = false
         clearHistory()
@@ -1296,9 +1462,6 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 t.gain = o.optDouble("gain", 1.0).toFloat(); t.pan = o.optDouble("pan", 0.0).toFloat(); t.stereo = o.optDouble("stereo", 0.0).toFloat(); e.setTrackWidth(t.id, widthOf(t.stereo))
                 t.mute = o.optBoolean("mute"); t.solo = o.optBoolean("solo")
                 e.setTrackGain(t.id, t.gain); e.setTrackPan(t.id, t.pan); e.setTrackMute(t.id, t.mute); e.setTrackSolo(t.id, t.solo)
-                val na = o.getJSONArray("notes")
-                for (k in 0 until na.length()) { val n = na.getJSONArray(k); t.notes.add(NoteM(n.getInt(0), n.getDouble(1).toFloat(), n.getDouble(2).toFloat(), n.getInt(3), n.optInt(4, 0), n.optInt(5, 0), n.optInt(6, 0), n.optInt(7, 0), n.optInt(8, 0), n.optInt(9, 0) != 0)) }
-                syncNotes(t)
                 readPluginState(t, o)
                 loadFx(t, o.optJSONArray("fx"))
                 val ca = o.getJSONArray("clips")
@@ -1310,6 +1473,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                     } }
             }
             loadFx(null, root.optJSONArray("masterFx"))
+            loadPatterns(root)
             selected = tracks.firstOrNull()
         } catch (ex: Exception) { message = "Could not open the saved project: ${ex.message}" }
         dirty = false
