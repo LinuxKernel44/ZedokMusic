@@ -59,10 +59,19 @@ fun GlyphIcon(g: Glyph, color: Color, size: Dp = 20.dp) {
             Glyph.Minus -> drawRect(color, Offset(w * .12f, h * .44f), Size(w * .76f, h * .12f))
             Glyph.Close -> { val st = Stroke(width = w * .12f); drawLine(color, Offset(w * .2f, h * .2f), Offset(w * .8f, h * .8f), st.width); drawLine(color, Offset(w * .8f, h * .2f), Offset(w * .2f, h * .8f), st.width) }
             Glyph.Gear -> {
-                val st = Stroke(width = w * .1f); val cx = w / 2; val cy = h / 2
-                drawCircle(color, w * .2f, Offset(cx, cy), style = st)
-                for (i in 0 until 8) { val a = Math.PI / 4 * i; val dx = Math.cos(a).toFloat(); val dy = Math.sin(a).toFloat()
-                    drawLine(color, Offset(cx + dx * w * .3f, cy + dy * h * .3f), Offset(cx + dx * w * .44f, cy + dy * h * .44f), w * .14f) }
+                // A cog wheel drawn from scratch: a round body with 8 trapezoid teeth and a hole in the middle.
+                val cx = w / 2; val cy = h / 2; val rOut = w * .46f; val rRoot = w * .34f; val rHole = w * .15f
+                val teeth = 8; val step = 2 * Math.PI / teeth
+                val path = androidx.compose.ui.graphics.Path()
+                for (i in 0 until teeth) {
+                    val c = step * i - Math.PI / 2
+                    val pts = listOf(c - step * .28 to rRoot, c - step * .17 to rOut, c + step * .17 to rOut, c + step * .28 to rRoot)
+                    for ((k, pt) in pts.withIndex()) { val x = cx + (Math.cos(pt.first) * pt.second).toFloat(); val y = cy + (Math.sin(pt.first) * pt.second).toFloat(); if (i == 0 && k == 0) path.moveTo(x, y) else path.lineTo(x, y) }
+                }
+                path.close()
+                path.addOval(androidx.compose.ui.geometry.Rect(cx - rHole, cy - rHole, cx + rHole, cy + rHole))
+                path.fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+                drawPath(path, color)
             }
             Glyph.Keys -> { drawRect(color, Offset(w * .08f, h * .2f), Size(w * .84f, h * .6f), style = Stroke(w * .08f)); for (i in 1..3) drawRect(color, Offset(w * (.08f + .21f * i) - w * .015f, h * .2f), Size(w * .03f, h * .6f)) }
         }
@@ -157,10 +166,13 @@ fun Modifier.scrubRuler(pxPerBeat: Float, onSeek: (Float) -> Unit): Modifier =
     this.pointerInput(pxPerBeat) {
         awaitEachGesture {
             val down = awaitFirstDown()
+            var last = down.position.x
             onSeek(down.position.x / density / pxPerBeat)
             do {
                 val e = awaitPointerEvent()
-                e.changes.firstOrNull()?.let { c -> if (c.pressed) { onSeek(c.position.x / density / pxPerBeat); c.consume() } }
+                // A touch screen reports pressure and size changes of a finger that does not move: seek only when it did, otherwise
+                // playback would restart from the same spot over and over (silence, and a cursor that seems frozen).
+                e.changes.firstOrNull()?.let { c -> if (c.pressed) { if (c.position.x != last) { last = c.position.x; onSeek(c.position.x / density / pxPerBeat) }; c.consume() } }
             } while (e.changes.any { it.pressed })
         }
     }

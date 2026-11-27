@@ -224,7 +224,13 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- transport ----------
     fun togglePlay() { if (e.isPlaying()) e.pause() else e.play(); playing = e.isPlaying() }
     fun stop() { e.pause(); e.seek(0); playing = false; playhead = 0f }
-    fun seekBeat(beat: Float) { e.seek((beat.coerceAtLeast(0f) * fpb).toLong()); playhead = beat.coerceAtLeast(0f) }
+    private var lastSeekFrame = -1L
+    /** Moves the play cursor. The same place asked twice in a row (a finger resting on the ruler) is only sent once while playing: every seek restarts the audio block. */
+    fun seekBeat(beat: Float) {
+        val b = beat.coerceAtLeast(0f); val f = (b * fpb).toLong()
+        if (playing && f == lastSeekFrame) return
+        lastSeekFrame = f; e.seek(f); playhead = b
+    }
     fun toggleLoop() { loop = !loop; applyLoop() }
     fun changeLoopBars(b: Int) { loopBars = b.coerceIn(1, 512); applyLoop() }
     /** Makes the loop region cover everything, from the start to the end of the last note or clip (whole bars), and turns looping on. */
