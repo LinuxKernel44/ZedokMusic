@@ -49,7 +49,7 @@ fun PianoScreen(ps: PluginState) {
                         Section("Pedals", PI2) { Knobs { PK(ps, "Sustain Pedal", PI2, "Sustain pedal"); PK(ps, "Una Corda", PI2, "Una corda"); PK(ps, "Pedal Noise", PI2, "Pedal noise") } }
                     })
                     Section("Release and resonance", PI3) {
-                        Knobs { PK(ps, "Release", PI3, "Release"); PK(ps, "Release Key Track", PI3, "Key track"); PK(ps, "Key Off Noise", PI3, "Key-off noise"); PK(ps, "String Resonance", PI3, "Resonance"); PK(ps, "Resonance Decay", PI3, "Res. decay") }
+                        Knobs { PK(ps, "Release", PI3, "Release"); PK(ps, "Release Key Track", PI3, "Key track"); PK(ps, "Key Off Noise", PI3, "Key-off noise (dB)"); PK(ps, "String Resonance", PI3, "Resonance"); PK(ps, "Resonance Decay", PI3, "Res. decay") }
                     }
                     Text("The sustain pedal is a parameter (draw it in Auto): above 50 % the dampers are lifted, below it a partial pedal lengthens the release. Soft pedal (Una corda) lowers and darkens the sound.", color = Zk.dim, fontSize = 11.sp)
                 }

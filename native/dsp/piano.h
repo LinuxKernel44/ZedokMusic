@@ -55,7 +55,7 @@ public:
         ix.una = add(lin("Pedal", "Una Corda", 0.f, 1.f, 0.f));
         ix.release = add(pw("Release", "Release", 20.f, 4000.f, 220.f, 2.5f, "ms", 0));
         ix.relKey = add(lin("Release", "Release Key Track", 0.f, 1.f, 0.5f));
-        ix.keyOff = add(lin("Release", "Key Off Noise", 0.f, 1.f, 0.6f));
+        ix.keyOff = add(lin("Release", "Key Off Noise", -70.f, -20.f, -40.f, "dB", 0));   // the release noise of the recording sits 37 dB below the notes; -70 = off
         ix.lowTone = add(lin("Tone", "Low Tone", -9.f, 9.f, 0.f, "dB", 1));
         ix.presence = add(lin("Tone", "Presence", -6.f, 6.f, 0.f, "dB", 1));
         ix.highTone = add(lin("Tone", "High Tone", -12.f, 9.f, 0.f, "dB", 1));
@@ -141,7 +141,7 @@ private:
         p.volume = real(v, ix.volume); p.pan = real(v, ix.pan); p.width = real(v, ix.width); p.transpose = std::round(real(v, ix.transpose));
         { static const int po[] = {8, 16, 32, 48, 64}; p.poly = po[idx(v, ix.poly)]; } p.hq = idx(v, ix.quality) == 1;
         p.curve = real(v, ix.curve); p.touch = real(v, ix.touch); p.human = real(v, ix.human); p.pedal = real(v, ix.pedal); p.pedalNoise = real(v, ix.pedalNoise); p.una = real(v, ix.una);
-        p.release = real(v, ix.release) * 0.001f; p.relKey = real(v, ix.relKey); p.keyOff = real(v, ix.keyOff);
+        p.release = real(v, ix.release) * 0.001f; p.relKey = real(v, ix.relKey); p.keyOff = real(v, ix.keyOff); /* dB */
         p.lowTone = real(v, ix.lowTone); p.presence = real(v, ix.presence); p.highTone = real(v, ix.highTone); p.lid = real(v, ix.lid);
         p.resonance = real(v, ix.resonance); p.resDecay = real(v, ix.resDecay);
         p.a4 = real(v, ix.a4); p.fine = real(v, ix.fine); p.temper = idx(v, ix.temper); p.temperKey = idx(v, ix.temperKey); p.stretch = real(v, ix.stretch);
@@ -279,7 +279,7 @@ private:
 
     void onPedal(bool down) {
         // the pedal noise, then the dampers fall on the notes that were only held by the pedal
-        if (P_.pedalNoise > 0.01f) { const int k = down ? 0 : 1; if (nPedal_[k] > 0) { const int pi = pedalIdx_[k][(int)(rng_.uni() * nPedal_[k]) % nPedal_[k]]; if (pi >= 0 && pi < (int)entries_.size()) startNoise(entries_[pi].get(), 0.5f * P_.pedalNoise, 60); } }
+        if (P_.pedalNoise > 0.01f) { const int k = down ? 0 : 1; if (nPedal_[k] > 0) { const int pi = pedalIdx_[k][(int)(rng_.uni() * nPedal_[k]) % nPedal_[k]]; if (pi >= 0 && pi < (int)entries_.size()) startNoise(entries_[pi].get(), 0.2f * P_.pedalNoise, 60); /* the pedal noises of the recording are meant to be 20 dB down */ } }
         if (!down) { noiseLeft_ = 4; for (auto& v : voices_) if (v.active && v.sustained && !v.noise) { v.sustained = false; startRelease(v, true); } }
     }
     void startNoise(const Entry* e, float gain, int note) {
@@ -296,10 +296,10 @@ private:
         if (v.note >= kNoDamperKey) t = std::max(t, 4.0f);                      // no dampers at the top of the keyboard
         t = std::max(t, 0.02f);
         v.relCoef = std::pow(10.f, -3.f / (t * (float)sr_));
-        if (P_.keyOff > 0.01f && v.note < kNoDamperKey && (!byPedal || noiseLeft_ > 0)) {
+        if (P_.keyOff > -69.f && v.note < kNoDamperKey && (!byPedal || noiseLeft_ > 0)) {
             if (byPedal) noiseLeft_--;
             const int k = std::min(kHighKey, std::max(kLowKey, v.note + (int)P_.transpose));
-            if (k < 128 && relIdx_[k] >= 0) startNoise(entries_[relIdx_[k]].get(), P_.keyOff * (byPedal ? 0.4f : 1.f) * (0.35f + 0.65f * v.vel), v.note);
+            if (k < 128 && relIdx_[k] >= 0) startNoise(entries_[relIdx_[k]].get(), dbToLin(P_.keyOff) * (byPedal ? 0.4f : 1.f) * (0.35f + 0.65f * v.vel), v.note);
         }
     }
     Voice* allocVoice(bool noise) {

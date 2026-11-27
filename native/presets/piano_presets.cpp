@@ -5,7 +5,8 @@ static VV operator+(VV a, const VV& b) { a.insert(a.end(), b.begin(), b.end()); 
 static VV tone(double low, double pres, double high, double lid = 1.0) { return {V("Low Tone", low), V("Presence", pres), V("High Tone", high), V("Lid", lid)}; }
 static VV room(const char* type, double mix, double size, double decay, double damp = 0.5) { return {V("Reverb Type", type), V("Reverb Mix", mix), V("Reverb Size", size), V("Reverb Decay", decay), V("Reverb Damping", damp)}; }
 static VV touch(double curve, double touchAmt = 0, double human = 0) { return {V("Velocity Curve", curve), V("Touch", touchAmt), V("Humanize", human)}; }
-static VV rel(double ms, double key, double noise) { return {V("Release", ms), V("Release Key Track", key), V("Key Off Noise", noise)}; }
+// noise 0..1 (how present the release noise is) -> dB: 0 = off, 0.5 about -41 dB
+static VV rel(double ms, double key, double noise) { return {V("Release", ms), V("Release Key Track", key), V("Key Off Noise", noise <= 0 ? -70.0 : -50.0 + noise * 17.0)}; }
 static VV res(double amt, double decay = 3) { return {V("String Resonance", amt), V("Resonance Decay", decay)}; }
 static VV tune(const char* temp, const char* key = "C", double a4 = 440, double stretch = 10) { return {V("Temperament", temp), V("Temperament Key", key), V("A4", a4), V("Stretch", stretch)}; }
 
