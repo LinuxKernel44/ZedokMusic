@@ -27,6 +27,7 @@ fun NativePluginView(vm: DawViewModel, t: TrackM, generic: @Composable () -> Uni
                     "color" -> ColorScreen(ps)
                     "drums" -> DrumsScreen(ps)
                     "grain" -> GrainScreen(ps)
+                    "sampler" -> SamplerScreen(ps)
                     else -> generic()
                 }
             }
@@ -35,6 +36,6 @@ fun NativePluginView(vm: DawViewModel, t: TrackM, generic: @Composable () -> Uni
 }
 
 fun accentOf(id: String): Color = when (id) {
-    "hybrid" -> Color(0xFF3DDCC4); "drums" -> Color(0xFFFF9F43); "eqcomp" -> Color(0xFFFFC857); "space" -> Color(0xFF8E7CFF); "color" -> Color(0xFFFF6B81); "grain" -> Color(0xFF7BE07B)
+    "hybrid" -> Color(0xFF3DDCC4); "drums" -> Color(0xFFFF9F43); "eqcomp" -> Color(0xFFFFC857); "space" -> Color(0xFF8E7CFF); "color" -> Color(0xFFFF6B81); "grain" -> Color(0xFF7BE07B); "sampler" -> Color(0xFF4DA3FF)
     else -> Zk.accent
 }

@@ -10,7 +10,7 @@ using namespace zdsp;
 int main(int argc, char** argv) {
     const int rounds = argc > 1 ? atoi(argv[1]) : 20; int fails = 0;
     for (const auto& d : pluginList()) {
-        std::unique_ptr<Processor> p(createProcessor(d.id)); const int sr = 48000, bs = 128; p->prepare(sr, bs); if (!strcmp(d.id, "grain")) usleep(900000);
+        std::unique_ptr<Processor> p(createProcessor(d.id)); const int sr = 48000, bs = 128; p->prepare(sr, bs); if (!strcmp(d.id, "grain")) usleep(900000); if (!strcmp(d.id, "sampler")) p->setState("sample", "/tmp/zsamp.wav");
         const auto& specs = p->params(); std::mt19937 rng(1234); std::uniform_real_distribution<float> U(0.f, 1.f);
         double worstPeak = 0; double worstBlockUs = 0; double sumUs = 0; long blocks = 0;
         for (int r = 0; r < rounds; r++) {

@@ -25,3 +25,4 @@ PresetList spacePresets();
 PresetList colorPresets();
 PresetList drumsPresets();
 PresetList grainPresets();
+PresetList samplerPresets();

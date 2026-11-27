@@ -244,6 +244,20 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
             }
         }
     }
+    /** Dropped on a Zedok Sampler / Grain track: the first sound becomes the plugin's sample (copied or decoded into the project's Samples folder). */
+    fun loadAsSample(t: TrackM, nodes: List<KitNode>) {
+        val n = nodes.firstOrNull() ?: return
+        val dir = vm.projectSamplesDir()
+        if (dir == null) { vm.message = "There is no project folder."; return }
+        worker.execute {
+            dir.mkdirs()
+            val base = KitImporter.safeName(n.name.substringBeforeLast('.'))
+            var out = File(dir, "$base.wav"); var i = 2
+            while (out.exists()) { if (KitImporter.sameSource(n, out)) break; out = File(dir, "$base ($i).wav"); i++ }
+            val f = if (out.exists()) out else KitImporter.copyOrConvert(n, out)
+            ui { if (f == null) vm.message = "Could not read ${n.name}." else { vm.setPluginState(t, "sample", f.absolutePath); vm.samplesChanged(); vm.message = "${n.name} loaded in ${t.pluginName.ifBlank { t.name }}." } }
+        }
+    }
     /** Dropped on a pad of a Zedok Drums track: one sound per pad from [pad] (0-based) on. */
     fun dropOnPads(t: TrackM, pad: Int, nodes: List<KitNode>) { nodes.forEachIndexed { i, n -> if (pad + i < 16) assignNodes(t, pad + i, listOf(n), append = false) } }
 

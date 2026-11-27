@@ -757,6 +757,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var samplesVersion by mutableIntStateOf(0); private set
     private fun wavs(dir: File?) = dir?.takeIf { it.isDirectory }?.walkTopDown()?.filter { f -> f.isFile && f.extension.equals("wav", true) && !f.path.contains("/.processed/") }?.sortedBy { f -> f.name.lowercase() }?.toList() ?: emptyList()
     /** WAV files of this project (its own Samples folder, recordings included). */
+    fun samplesChanged() { samplesVersion++ }
     fun projectSamples(): List<File> { samplesVersion; return wavs(projectSamplesDir()) }
     /** WAV files of the shared library (workspace/Samples), kept from before samples became per project. */
     fun sharedSamples(): List<File> { samplesVersion; return wavs(workspace?.let { File(it, "Samples") }) }

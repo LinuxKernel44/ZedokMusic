@@ -47,6 +47,7 @@ fun handleDrop(vm: DawViewModel, dnd: DndState, p: DragPayload, h: Hover) {
                 p.plugin != null -> vm.addEffect(t, p.plugin)
                 p.isFolder -> p.folderImport?.invoke(t)
                 t.kind == TrackKind.Audio -> kits.addAsClips(t, p.sounds, h.beat)
+                vm.nativeId(t) == "sampler" || vm.nativeId(t) == "grain" -> kits.loadAsSample(t, p.sounds)
                 else -> { val pad = (0 until 16).firstOrNull { kits.zones(t, it).isEmpty() } ?: 0; kits.dropOnPads(t, pad, p.sounds) }
             }
         }

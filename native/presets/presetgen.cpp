@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
     else if (id == "color") list = colorPresets();
     else if (id == "drums") list = drumsPresets();
     else if (id == "grain") list = grainPresets();
+    else if (id == "sampler") list = samplerPresets();
     else { fprintf(stderr, "no presets for %s\n", id.c_str()); return 1; }
     std::unique_ptr<Processor> p(createProcessor(id)); if (!p) return 1;
     const auto& specs = p->params();
@@ -108,7 +109,7 @@ int main(int argc, char** argv) {
             if (peak > 0.6) { const float cur = specs[vol].toReal(vals[vol]); vals[vol] = specs[vol].toNorm(std::max(specs[vol].lo, cur + (float)(20 * std::log10(0.6 / peak)))); Measure m = render(*p, vals, notes, 2.5, 1.5); peak = m.peak; rms = m.rms; bad = m.bad; }
             (void)volNormBase;
         } else { Measure m = render(*p, vals, {60}, 1.0, 0.5); peak = m.peak; rms = m.rms; bad = m.bad; }
-        if (bad || (peak < 1e-4 && pd.category != "Sample")) { fprintf(stderr, "[%s] PROBLEM: nonfinite=%d peak=%g\n", pd.name.c_str(), bad, peak); problems++; }
+        if (bad || (peak < 1e-4 && id != "sampler")) { fprintf(stderr, "[%s] PROBLEM: nonfinite=%d peak=%g\n", pd.name.c_str(), bad, peak); problems++; }
         if (peak > 0.98) fprintf(stderr, "[%s] warning: peak %.2f\n", pd.name.c_str(), peak);
         if (r) fprintf(r, "%-28s %-10s peak %6.2f dB  rms %6.2f dB\n", pd.name.c_str(), pd.category.c_str(), 20 * std::log10(peak + 1e-9), 20 * std::log10(rms + 1e-9));
         // write only values that differ from the default
