@@ -508,6 +508,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         syncNotes(t); dirty = true
     }
     fun removeNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t, "Delete notes"); if (e.isPlaying()) e.panic(t.id); t.notes.removeAll(list.toSet()); syncNotes(t); dirty = true }
+    /** Removes [remove] and adds [add] in one undo step (the piano roll tools). */
+    fun editNotes(t: TrackM, remove: Collection<NoteM>, add: List<NoteM>, name: String) {
+        if (remove.isEmpty() && add.isEmpty()) return
+        snapshot(t, name); if (e.isPlaying()) e.panic(t.id)
+        t.notes.removeAll(remove.toSet()); t.notes.addAll(add); syncNotes(t); dirty = true
+    }
+    /** The piano roll shows the notes of the other instrument tracks faintly behind its own. */
+    var ghostNotes by mutableStateOf(false)
     fun addNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t, "Add notes"); t.notes.addAll(list); syncNotes(t); dirty = true }
     /** Clone (Ctrl+B in FL Studio): copies [sel] right after its end, shifted by the length of the whole selection. Returns the copies. */
     fun cloneNotes(t: TrackM, sel: List<NoteM>): List<NoteM> {

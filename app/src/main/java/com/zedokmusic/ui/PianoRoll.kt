@@ -79,6 +79,13 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
     var selectMode by remember(track.id) { mutableStateOf(false) }
     val scaleRoot = vm.scaleRoot; val scaleType = vm.scaleType
     var scaleDialog by remember { mutableStateOf(false) }
+    var tool by remember { mutableStateOf<NoteTool?>(null) }
+    var toolsMenu by remember { mutableStateOf(false) }
+    var paintMode by remember(track.id) { mutableStateOf(false) }
+    var chordDialog by remember { mutableStateOf(false) }
+    var stampChord by remember(track.id) { mutableStateOf<NoteTools.ChordType?>(null) }
+    var stampInv by remember(track.id) { mutableIntStateOf(0) }
+    val paintPrev = remember { mutableStateListOf<NoteM>() }   // notes being painted (added when the finger lifts)
     val selNotes = selection.filter { track.notes.contains(it) }
     val selSet = selNotes.toHashSet()
     var dragPrev by remember { mutableStateOf<Map<NoteM, NoteM>?>(null) }   // notes being dragged -> where they would land
@@ -131,6 +138,22 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
         val before = selNotes; vm.replaceNotes(track, ch, "Edit " + NoteProps[prop].name.lowercase()); selection.clear(); selection.addAll(before.map { ch[it] ?: it })
     }
 
+    tool?.let { tl ->
+        val src = if (selNotes.isNotEmpty()) selNotes else track.notes.toList()
+        NoteToolDialog(vm, tl, src, SNAP, { rm, add, name -> vm.editNotes(track, rm, add, name); selection.clear(); selection.addAll(add) }) { tool = null }
+    }
+    if (chordDialog) androidx.compose.material3.AlertDialog(onDismissRequest = { chordDialog = false }, containerColor = Zk.panel, title = { Text("Chord stamp") }, text = {
+        Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+            Text("Pick a chord, then tap in the grid: the tapped row is the root. Switch it off with the chord button of the header.", color = Zk.dim, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (c in NoteTools.CHORDS) Text(c.label, color = if (c === stampChord) Color(0xFF00201B) else Zk.text, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).background(if (c === stampChord) Zk.accent else Zk.panel2).clickable { stampChord = c }.padding(horizontal = 10.dp, vertical = 7.dp))
+            }
+            Spacer(Modifier.height(10.dp)); Text("Inversion", color = Zk.dim, fontSize = 11.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { for (i in 0..3) LabelButton("$i", stampInv == i, w = 40.dp, h = 32.dp) { stampInv = i } }
+        }
+    }, confirmButton = { androidx.compose.material3.TextButton({ chordDialog = false }) { Text("Done") } })
     if (scaleDialog) androidx.compose.material3.AlertDialog(onDismissRequest = { scaleDialog = false }, containerColor = Zk.panel, title = { Text("Project scale") }, text = {
         // The whole content scrolls as one piece: on a landscape phone the dialog is short, and a list with its own height used to be squeezed to one cut-off line.
         Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
@@ -168,6 +191,17 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 LabelButton("↶", false, w = 32.dp, h = 32.dp, enabled = canUndo) { vm.undo() }
                 LabelButton("↷", false, w = 32.dp, h = 32.dp, enabled = canRedo) { vm.redo() }
                 LabelButton(Theory.label(scaleRoot, scaleType), scaleType > 0, Zk.accent, w = 84.dp, h = 32.dp) { scaleDialog = true }
+                Box {
+                    LabelButton("Tools", paintMode || vm.ghostNotes, Zk.accent, w = 56.dp, h = 32.dp) { toolsMenu = true }
+                    androidx.compose.material3.DropdownMenu(toolsMenu, { toolsMenu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text((if (vm.ghostNotes) "✓ " else "") + "Ghost notes (other tracks)") }, onClick = { toolsMenu = false; vm.ghostNotes = !vm.ghostNotes })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text((if (paintMode) "✓ " else "") + "Paint notes (drag in the grid)") }, onClick = { toolsMenu = false; paintMode = !paintMode })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("Chord stamp…") }, onClick = { toolsMenu = false; chordDialog = true })
+                        androidx.compose.material3.HorizontalDivider()
+                        for (t in NoteTool.values()) androidx.compose.material3.DropdownMenuItem(text = { Text(t.label) }, onClick = { toolsMenu = false; tool = t })
+                    }
+                }
+                stampChord?.let { c -> LabelButton("♪ " + c.suffix.ifEmpty { "maj" } + " ✕", true, Zk.accent, w = 64.dp, h = 32.dp) { stampChord = null } }
                 LabelButton("Vel", vm.velocityPane, Zk.accent, w = 44.dp, h = 32.dp) { vm.velocityPane = !vm.velocityPane }
                 LabelButton("Select", selectMode, w = 56.dp, h = 32.dp) { selectMode = !selectMode }
                 if (selNotes.isEmpty()) {
@@ -189,7 +223,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                         Text("at the playhead", color = Zk.dim, fontSize = 11.sp)
                         LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
                     } else {
-                    Text("${selNotes.size} note${if (selNotes.size > 1) "s" else ""}", color = track.color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
+                    Text("${selNotes.size} note${if (selNotes.size > 1) "s" else ""}" + (if (selNotes.size > 1) NoteTools.chordName(selNotes.map { it.pitch })?.let { " · $it" } ?: "" else ""), color = track.color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
                     LabelButton("Clone", false, w = 54.dp, h = 30.dp) { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies) }
                     LabelButton("Copy", false, w = 48.dp, h = 30.dp) { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
                     LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutNotes(track, selNotes); selection.clear() }
@@ -301,7 +335,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                 }
                                 val handleGrab = cur != null && target === cur && mode != 1
                                 // tap, drag, or long press (in empty space)
-                                val t0 = System.currentTimeMillis(); var rect = false; var lastPos = down.position
+                                val t0 = System.currentTimeMillis(); var rect = false; var paint = false; var lastPos = down.position
                                 while (true) {
                                     val waitLong = mode == 0 && !selectMode
                                     val ev = if (waitLong) withTimeoutOrNull(maxOf(1L, lpTime - (System.currentTimeMillis() - t0))) { awaitPointerEvent(PointerEventPass.Final) }
@@ -316,7 +350,10 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                             if (selectMode) selection.clear()
                                             else if (selNow.size > 1) {   // with several notes selected: one tap elsewhere does nothing, a second one deselects them all
                                                 if (now - lastEmptyTapAt < 450) { selection.clear(); lastEmptyTapAt = 0L } else lastEmptyTapAt = now
-                                            } else { val st = floor(x0 / pw / SNAP) * SNAP; vm.addNote(track, pitch0, st, defaultLen); selection.clear(); track.notes.lastOrNull()?.let { selection.add(it) }; preview = pitch0 }
+                                            } else { val st = floor(x0 / pw / SNAP) * SNAP
+                                                val sc = stampChord
+                                                if (sc != null) { val ps = NoteTools.stamp(pitch0, sc, stampInv).filter { it in BOTTOM..TOP }; val made = ps.map { NoteM(it, st, defaultLen, 100) }; vm.editNotes(track, emptyList(), made, "Chord"); selection.clear(); selection.addAll(made); preview = pitch0 }
+                                                else { vm.addNote(track, pitch0, st, defaultLen); selection.clear(); track.notes.lastOrNull()?.let { selection.add(it) }; preview = pitch0 } }
                                         } else if (!handleGrab && lastTapNote === target && now - lastTapAt < 320) {
                                             vm.removeNote(track, target); selection.remove(target); lastTapNote = null
                                         } else {
@@ -329,7 +366,26 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                                     if ((c.position - down.position).getDistance() > slop) {
                                         if (mode != 0) { c.consume(); break }
                                         if (selectMode) { c.consume(); rect = true; break }
+                                        if (paintMode && target == null) { c.consume(); paint = true; break }
                                     }
+                                }
+                                if (paint) {   // painting: a run of notes, one every note length, following the finger's row; added together when the finger lifts
+                                    paintPrev.clear()
+                                    var nextStart = floor(x0 / pw / SNAP) * SNAP
+                                    fun paintTo(x: Float, y: Float) {
+                                        val pit = (TOP - floor(y / rowPx).toInt()).coerceIn(BOTTOM, TOP)
+                                        val at = x / pw
+                                        while (nextStart <= at && paintPrev.size < 256) { paintPrev.add(NoteM(pit, nextStart, defaultLen, 100)); nextStart += defaultLen }
+                                    }
+                                    paintTo(x0, y0); paintTo(lastPos.x, lastPos.y)
+                                    while (true) {
+                                        val ev = awaitPointerEvent(); val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                        if (!c.pressed) break
+                                        c.consume(); paintTo(c.position.x, c.position.y)
+                                    }
+                                    val made = paintPrev.toList(); paintPrev.clear()
+                                    if (made.isNotEmpty()) { vm.editNotes(track, emptyList(), made, "Paint notes"); selection.clear(); selection.addAll(made) }
+                                    return@awaitEachGesture
                                 }
                                 if (rect) {   // rectangle selection: every note it touches (replaces the selection); near an edge the grid scrolls
                                     rectAnchor = Offset(x0, y0); rectFinger = Offset(x0 - hs.value, y0 - vs.value); updateRect()
@@ -404,6 +460,9 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             val col = if (b % 4f == 0f) Zk.dim.copy(alpha = .5f) else if (b % 1f == 0f) Zk.line else if (b % 0.5f == 0f) Zk.line.copy(alpha = .4f) else if (b % 0.25f == 0f) Zk.line.copy(alpha = .3f) else if (b % 0.125f == 0f) Zk.line.copy(alpha = .22f) else Zk.line.copy(alpha = .15f)
                             drawLine(col, Offset(gx, 0f), Offset(gx, size.height), 1f); k++
                         }
+                        if (vm.ghostNotes) for (gt in vm.tracks) if (gt !== track && gt.kind == TrackKind.Instrument)
+                            for (gn in gt.notes) drawRoundRect(gt.color.copy(alpha = .3f), Offset(gridPx(gn.start * pw), (TOP - gn.pitch) * rowPx + 2), Size(maxOf(3f, gridPx(gn.length * pw) - 1), rowPx - 4), CornerRadius(3f))
+                        for (pn in paintPrev) drawRoundRect(track.color.copy(alpha = .55f), Offset(gridPx(pn.start * pw), (TOP - pn.pitch) * rowPx + 1), Size(maxOf(4f, gridPx(pn.length * pw) - 1), rowPx - 2), CornerRadius(4f))
                         val prev = dragPrev
                         for (n in track.notes) {
                             val shown = prev?.get(n) ?: n

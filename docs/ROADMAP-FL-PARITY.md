@@ -55,16 +55,16 @@ But : gains visibles rapides, sans changer le modèle de projet (sauf champs de 
 
 - [x] **1.1 Éditeur de vélocité** (0.50.0 ; vérifié sur S10 : glisser une tige, undo. Reste : pan/cutoff… voir 1.2, hauteur réglable) en bas du piano roll (barres par note, glisser pour modifier, tracé à main levée, sélection liée à celle des notes, redimensionnable). Les notes sélectionnées s'éditent ensemble.
 - [x] **1.2 Propriétés par note** (0.51.0 ; format de projet 3, ZkEvent 16 octets / pont version 5 ; Hybrid, Sampler, Drums, Piano ; Grain non. Mesuré hors ligne sur Hybrid et Drums (pan, hauteur, coupure, release) ; Sampler et Piano non mesurés (échantillon / banque nécessaires) ; pas écouté) : pan, cutoff, résonance, accord fin (fine pitch), longueur de release. Les sélecteurs de contrôleur de l'éditeur du bas (vélocité, pan, cutoff…). Transmis aux instruments natifs via de nouveaux champs de `ZkEvent`.
-- [ ] **1.3 Ghost notes** : voir les notes des autres pistes (atténuées), option par piste.
-- [ ] **1.4 Quantize avancé** : force (%), fenêtre, quantize des débuts / fins, swing, grille irrégulière.
-- [ ] **1.5 Humanize** : décalage temporel, vélocité, longueur (aléatoire graduée, graine fixe pour reproductibilité).
+- [x] **1.3 Ghost notes** (0.52.0, vérifié S10) : voir les notes des autres pistes (atténuées), option par piste.
+- [x] **1.4 Quantize avancé** (0.52.0 : grille, début/fin, force, swing, fenêtre ; tests unitaires) : force (%), fenêtre, quantize des débuts / fins, swing, grille irrégulière.
+- [x] **1.5 Humanize** (0.52.0) : décalage temporel, vélocité, longueur (aléatoire graduée, graine fixe pour reproductibilité).
 - [ ] **1.6 Strum / « aiguiser »** : étaler un accord sur une durée, sens montant/descendant, courbe de tension.
-- [ ] **1.7 Arpégiateur d'édition** (transformation, pas temps réel) : motifs, octaves, gate, swing ; applique sur la sélection.
-- [ ] **1.8 Chord stamps et détection d'accords** : bibliothèque d'accords (selon la gamme du projet), tampon d'accord sur un tap, nom de l'accord affiché pour la sélection.
+- [x] **1.7 Arpégiateur d'édition** (0.52.0) (transformation, pas temps réel) : motifs, octaves, gate, swing ; applique sur la sélection.
+- [x] **1.8 Chord stamps et détection d'accords** (0.52.0) : bibliothèque d'accords (selon la gamme du projet), tampon d'accord sur un tap, nom de l'accord affiché pour la sélection.
 - [ ] **1.9 Slide notes et portamento** : note « slide » qui glisse en hauteur vers la suivante ; paramètre de portamento par note ; support dans les instruments natifs (Hybrid, Piano exclus s'il n'y a pas de sens).
-- [ ] **1.10 Riff machine** : générateur de motifs basé sur la gamme (rythme + hauteurs), régénérable, avec verrouillage de paramètres.
-- [ ] **1.11 LFO d'événements** (modulation de vélocité/pan/cutoff sur une plage de notes) : outil de génération de courbes.
-- [ ] **1.12 Stamp/pinceau** : poser en continu des notes ou des motifs en glissant.
+- [x] **1.10 Riff machine** (0.52.0) : générateur de motifs basé sur la gamme (rythme + hauteurs), régénérable, avec verrouillage de paramètres.
+- [x] **1.11 LFO d'événements** (0.52.0) (modulation de vélocité/pan/cutoff sur une plage de notes) : outil de génération de courbes.
+- [x] **1.12 Stamp/pinceau** (0.52.0 : pinceau de notes) : poser en continu des notes ou des motifs en glissant.
 
 Critères : chaque outil a son test hors ligne (ou test unitaire Kotlin) sur l'entrée/sortie des notes ; les outils sont annulables.
 
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.52.0-alpha | 2026-11-27 | Phase 1 : ghost notes, pinceau, accords, quantize, humanize, strum, arpège, riff, LFO d'événements (menu Tools) |
 | 0.51.0-alpha | 2026-11-27 | Phase 1.2 : propriétés par note (pan, cutoff, résonance, hauteur fine, release), format 3 |
 | 0.50.0-alpha | 2026-11-27 | Phase 1.1 : éditeur de vélocité sous le piano roll |
 | 0.49.9-alpha | 2026-11-27 | Phase 0.5 : graphe de routage du moteur (bus), rendu inchangé bit pour bit ; phase 0 terminée |
