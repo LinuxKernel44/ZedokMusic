@@ -169,6 +169,38 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
             }
         }
+            // The actions of the selection (and Paste) sit under the scale bar. The row is always there, so the grid never moves when a selection appears or goes away.
+            Row(Modifier.fillMaxWidth().height(40.dp).background(Zk.panel2).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (selNotes.isEmpty()) {
+                    LabelButton("Paste ${vm.noteClip.size}", false, w = 78.dp, h = 30.dp, enabled = vm.noteClip.isNotEmpty()) { val at = (vm.playhead / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
+                    Text(if (vm.noteClip.isNotEmpty()) "at the playhead" else "Select notes: tap Select, or long press an empty cell and drag a rectangle", color = Zk.dim, fontSize = 11.sp, maxLines = 1, softWrap = false)
+                    LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
+                } else {
+                Text("${selNotes.size} note${if (selNotes.size > 1) "s" else ""}", color = track.color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
+                LabelButton("Clone", false, w = 54.dp, h = 30.dp) { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies) }
+                LabelButton("Copy", false, w = 48.dp, h = 30.dp) { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
+                LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutNotes(track, selNotes); selection.clear() }
+                LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeNotes(track, selNotes); selection.clear() }
+                Spacer(Modifier.width(4.dp))
+                fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { NoteM(it.pitch + d, it.start, it.length, it.velocity) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
+                for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp, enabled = selNotes.all { it.pitch + d in BOTTOM..TOP }) { transpose(d) }   // greyed when a selected note would leave the keyboard range
+                Spacer(Modifier.width(4.dp))
+                val avgVel = selNotes.map { it.velocity }.average().toInt()
+                var velDrag by remember(selNotes.size, avgVel) { mutableFloatStateOf(avgVel.toFloat()) }
+                Text("Vel ${velDrag.toInt()}", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.widthIn(min = 44.dp))
+                androidx.compose.material3.Slider(velDrag, { velDrag = it }, Modifier.width(110.dp), valueRange = 1f..127f, onValueChangeFinished = { val v = velDrag.toInt().coerceIn(1, 127); mapSel { NoteM(it.pitch, it.start, it.length, v) } },
+                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = track.color, activeTrackColor = track.color))
+                Spacer(Modifier.width(4.dp))
+                LabelButton("Quant", false, w = 52.dp, h = 30.dp) { mapSel { NoteM(it.pitch, ((it.start / SNAP).roundToInt() * SNAP).coerceAtLeast(0f), it.length, it.velocity) } }
+                LabelButton("−", false, w = 32.dp, h = 30.dp, enabled = selNotes.any { it.length > SNAP + 1e-4f }) { mapSel { NoteM(it.pitch, it.start, (it.length - SNAP).coerceAtLeast(SNAP), it.velocity) } }
+                Text(if (selNotes.size == 1) beatsLabel(selNotes[0].length) else "len", color = Zk.text, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 34.dp))
+                LabelButton("+", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, it.length + SNAP, it.velocity) } }
+                Spacer(Modifier.width(4.dp))
+                LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
+                LabelButton("Inv", false, w = 38.dp, h = 30.dp) { val keep = track.notes.filter { it !in selSet }; selection.clear(); selection.addAll(keep) }
+                LabelButton("✕", false, w = 32.dp, h = 30.dp) { selection.clear() }
+                }
+            }
         // The bottom padding is part of the scrolled content: the lowest notes can be scrolled up away from the screen edge, where the system's gesture bar is.
         // Pinch: apart / together horizontally = time zoom, vertically = taller / shorter note rows. The point under the fingers stays under them.
         var anchor by remember { mutableStateOf<Triple<Float, Float, Pair<Float, Float>>?>(null) }   // beat, row index, (finger x, finger y)
@@ -385,40 +417,6 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                             BarButton("Del", Zk.danger) { vm.removeNotes(track, selNotes); selection.clear(); barVisible = false }
                         }
                     }
-                }
-            }
-        }
-        if (selNotes.isNotEmpty() || vm.noteClip.isNotEmpty()) {
-            // Everything that works on the selection and does not fit in the floating bar. It floats over the bottom of the grid (the grid must not move while a rectangle is drawn).
-            Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(40.dp).background(Zk.panel2).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                if (selNotes.isEmpty()) {
-                    LabelButton("Paste ${vm.noteClip.size}", false, w = 78.dp, h = 30.dp) { val at = (vm.playhead / SNAP).roundToInt() * SNAP; val pasted = vm.pasteNotes(track, at); selection.clear(); selection.addAll(pasted) }
-                    Text("at the playhead", color = Zk.dim, fontSize = 11.sp)
-                    LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
-                } else {
-                Text("${selNotes.size} note${if (selNotes.size > 1) "s" else ""}", color = track.color, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.widthIn(min = 52.dp))
-                LabelButton("Clone", false, w = 54.dp, h = 30.dp) { val copies = vm.cloneNotes(track, selNotes); selection.clear(); selection.addAll(copies) }
-                LabelButton("Copy", false, w = 48.dp, h = 30.dp) { vm.copyNotes(selNotes); vm.message = "${selNotes.size} note${if (selNotes.size > 1) "s" else ""} copied." }
-                LabelButton("Cut", false, w = 42.dp, h = 30.dp) { vm.cutNotes(track, selNotes); selection.clear() }
-                LabelButton("Del", false, Zk.danger, w = 42.dp, h = 30.dp) { vm.removeNotes(track, selNotes); selection.clear() }
-                Spacer(Modifier.width(4.dp))
-                fun transpose(d: Int) { if (selNotes.all { it.pitch + d in BOTTOM..TOP }) { mapSel { NoteM(it.pitch + d, it.start, it.length, it.velocity) }; preview = (selNotes.firstOrNull()?.pitch ?: 60) + d } }
-                for ((l, d) in listOf("−12" to -12, "−1" to -1, "+1" to 1, "+12" to 12)) LabelButton(l, false, w = 40.dp, h = 30.dp, enabled = selNotes.all { it.pitch + d in BOTTOM..TOP }) { transpose(d) }   // greyed when a selected note would leave the keyboard range
-                Spacer(Modifier.width(4.dp))
-                val avgVel = selNotes.map { it.velocity }.average().toInt()
-                var velDrag by remember(selNotes.size, avgVel) { mutableFloatStateOf(avgVel.toFloat()) }
-                Text("Vel ${velDrag.toInt()}", color = Zk.dim, fontSize = 11.sp, modifier = Modifier.widthIn(min = 44.dp))
-                androidx.compose.material3.Slider(velDrag, { velDrag = it }, Modifier.width(110.dp), valueRange = 1f..127f, onValueChangeFinished = { val v = velDrag.toInt().coerceIn(1, 127); mapSel { NoteM(it.pitch, it.start, it.length, v) } },
-                    colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = track.color, activeTrackColor = track.color))
-                Spacer(Modifier.width(4.dp))
-                LabelButton("Quant", false, w = 52.dp, h = 30.dp) { mapSel { NoteM(it.pitch, ((it.start / SNAP).roundToInt() * SNAP).coerceAtLeast(0f), it.length, it.velocity) } }
-                LabelButton("−", false, w = 32.dp, h = 30.dp, enabled = selNotes.any { it.length > SNAP + 1e-4f }) { mapSel { NoteM(it.pitch, it.start, (it.length - SNAP).coerceAtLeast(SNAP), it.velocity) } }
-                Text(if (selNotes.size == 1) beatsLabel(selNotes[0].length) else "len", color = Zk.text, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 34.dp))
-                LabelButton("+", false, w = 32.dp, h = 30.dp) { mapSel { NoteM(it.pitch, it.start, it.length + SNAP, it.velocity) } }
-                Spacer(Modifier.width(4.dp))
-                LabelButton("All", false, w = 38.dp, h = 30.dp) { selection.clear(); selection.addAll(track.notes) }
-                LabelButton("Inv", false, w = 38.dp, h = 30.dp) { val keep = track.notes.filter { it !in selSet }; selection.clear(); selection.addAll(keep) }
-                LabelButton("✕", false, w = 32.dp, h = 30.dp) { selection.clear() }
                 }
             }
         }
