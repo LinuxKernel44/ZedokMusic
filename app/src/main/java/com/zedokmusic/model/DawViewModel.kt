@@ -499,7 +499,17 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun paramValue(t: TrackM, i: Int) = e.paramValue(t.id, i)
     fun paramText(t: TrackM, i: Int) = e.paramText(t.id, i)
     fun setParam(t: TrackM, i: Int, v: Float) { e.setParam(t.id, i, v); t.paramOverrides[i] = v; dirty = true; recordAutomation(t, i, v) }
-    fun resetParam(t: TrackM, p: ParamM) { e.setParam(t.id, p.index, p.default); t.paramOverrides.remove(p.index); dirty = true }
+    /** The value a control goes back to on a double tap: the one of the loaded preset (which is not always the default), or the default in Init. */
+    fun resetTarget(t: TrackM, p: ParamM): Float {
+        val preset = nativeId(t)?.takeIf { t.presetKey.isNotBlank() }?.let { id -> presetLibrary.all(id).firstOrNull { it.key == t.presetKey } }
+        return preset?.values?.get(p.name) ?: p.default
+    }
+    fun resetParam(t: TrackM, p: ParamM): Float {
+        val v = resetTarget(t, p)
+        e.setParam(t.id, p.index, v)
+        if (Math.abs(v - p.default) > 1e-4f) t.paramOverrides[p.index] = v else t.paramOverrides.remove(p.index)
+        dirty = true; return v
+    }
     // ---------- parameter automation ----------
     var laneSelected by mutableStateOf<AutoLane?>(null)
     private fun paramNameOf(t: TrackM, index: Int): String? {
@@ -1025,11 +1035,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- presets of the built-in plugins ----------
     val presetLibrary = PresetLibrary(app, workspace)
     fun nativeId(t: TrackM): String? = t.pluginPath?.takeIf { PluginHost.isNative(it) }?.removePrefix(PluginHost.NATIVE_PREFIX)
-    /** Applies a preset: every parameter takes the preset's value, or returns to its default when the preset does not list it. */
-    fun applyPreset(t: TrackM, p: Preset) {
-        // a preview started in the last few seconds may still be ringing out: cut it (the sequencer's own notes are never cut)
-        val previewing = System.currentTimeMillis() - lastPreviewAt < 8000
-        if (previewing && nativeId(t) == "hybrid") { presetPreview?.cancel(); e.silence(t.id); lastPreviewAt = 0 }   // the previous preview must not ring on under the new sound
+    /**
+     * Applies a preset: every parameter takes the preset's value, or returns to its default when the preset does not list it.
+     * Instruments are hard-silenced first (a short fade, then every voice and effect tail is forgotten), so the previous sound can never ring on or colour the new one.
+     * [preview] plays a short phrase of the new sound; only the preset browser asks for it, the arrows do not.
+     */
+    fun applyPreset(t: TrackM, p: Preset, preview: Boolean = false) {
+        presetPreview?.cancel()
+        if (isNativeInstrument(t)) { e.silence(t.id); lastPreviewAt = 0 }
         for (pm in loadParams(t)) {
             val target = p.values[pm.name] ?: pm.default
             e.setParam(t.id, pm.index, target)
@@ -1038,18 +1051,41 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         p.state.forEach { (k, x) -> sendPluginState(t, k, x); t.states[k] = x }
         t.presetName = p.name; t.presetKey = p.key
         paramsRevision++; dirty = true
-        if (nativeId(t) == "hybrid") previewPresetNote(t)
+        if (preview) previewPresetNote(t)
     }
+    private fun isNativeInstrument(t: TrackM) = nativeId(t) in setOf("hybrid", "grain", "drums", "sampler", "piano")
     private var presetPreview: kotlinx.coroutines.Job? = null
     private var lastPreviewAt = 0L
-    /** Plays C4 or C5 (Settings -> Plugins) for a moment so the chosen preset can be heard right away. A new preset cuts the previous preview. */
+    /** Stops a preview that is still playing (the preset browser was closed): the notes are released, never cut. */
+    fun stopPreview() { presetPreview?.cancel(); presetPreview = null }
+    /**
+     * Plays a short phrase so the chosen preset can be heard (Settings -> Plugins: C4, C5 or off). One preview at a time: a new preset (or closing the browser) ends the previous one.
+     * Synths and the piano play one note; Zedok Drums a kick, a snare and a hat; the sampler its own root note.
+     */
     private fun previewPresetNote(t: TrackM) {
-        val pitch = when (com.zedokmusic.settings.AppSettings.presetPreviewNote.value) { 0 -> 60; 1 -> 72; else -> return }
-        presetPreview?.cancel(); lastPreviewAt = System.currentTimeMillis()
+        val setting = com.zedokmusic.settings.AppSettings.presetPreviewNote.value
+        val base = when (setting) { 0 -> 60; 1 -> 72; else -> return }
+        val id = nativeId(t) ?: return
+        val notes: List<Pair<Int, Long>>   // pitch, how long it is held (ms)
+        val pitch = if (id == "sampler") (loadParams(t).firstOrNull { it.name == "Root Note" }?.let { paramValue(t, it.index) * 127f }?.toInt() ?: base) else base
+        notes = when (id) {
+            "drums" -> listOf(36 to 120L, 38 to 120L, 42 to 120L)
+            "piano" -> listOf(pitch to 1500L)
+            "grain" -> listOf(pitch to 1500L)
+            else -> listOf(pitch to 900L)
+        }
+        lastPreviewAt = System.currentTimeMillis()
         presetPreview = viewModelScope.launch {
-            kotlinx.coroutines.delay(130)   // let the new values reach the synth (and the old sound fade out) first
-            liveNote(t, true, pitch)
-            try { kotlinx.coroutines.delay(900) } finally { liveNote(t, false, pitch) }
+            kotlinx.coroutines.delay(140)   // the old sound fades out and the new values reach the plugin first
+            var held = -1
+            try {
+                for ((i, n) in notes.withIndex()) {
+                    held = n.first; liveNote(t, true, n.first)
+                    kotlinx.coroutines.delay(n.second)
+                    liveNote(t, false, n.first); held = -1
+                    if (id == "drums" && i < notes.size - 1) kotlinx.coroutines.delay(110)
+                }
+            } finally { if (held >= 0) liveNote(t, false, held) }
         }
     }
     /** True when the user changed the current sound: a control differs from what the selected preset (or the defaults) gives, or something was loaded into the plugin (samples, a kit, ...). */
@@ -1060,6 +1096,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     /** "Init preset": every control back to its default and everything loaded in the plugin removed (samples, kit...). Files stay in the project folder. Sent in small batches (the engine's queue is short). */
     fun initPlugin(t: TrackM) {
+        // a toast: the preset browser is a full-screen dialog that would hide the snackbar
+        android.widget.Toast.makeText(getApplication<Application>(), "Init preset loaded: every control is back to its default.", android.widget.Toast.LENGTH_SHORT).show()
+        if (isNativeInstrument(t)) { presetPreview?.cancel(); e.silence(t.id) }
         for (k in t.states.keys.toList()) sendPluginState(t, k, "")
         t.states.clear(); t.presetName = ""; t.presetKey = ""; t.abStore[0] = null; t.abStore[1] = null; t.abSlot = 0
         val params = loadParams(t)

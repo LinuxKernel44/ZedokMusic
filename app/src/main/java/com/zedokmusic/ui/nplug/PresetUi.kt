@@ -51,12 +51,16 @@ fun PresetBar(vm: DawViewModel, t: TrackM, color: Color, showParams: Boolean, on
     val bh = if (short) 28.dp else 34.dp
     Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = if (short) 2.dp else 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         LabelButton("◀", false, w = 36.dp, h = bh) { step(-1) }
-        Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).clickable { browser = true }.padding(horizontal = 10.dp, vertical = if (short) 3.dp else 4.dp)) {
+        val isFav = remember(revision, t.presetKey) { t.presetKey.isNotBlank() && lib.favorites().contains(t.presetKey) }
+        Row(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Zk.panel2).clickable { browser = true }.padding(horizontal = 10.dp, vertical = if (short) 3.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
             if (short) Text(t.presetName.ifBlank { "Init" } + (list.firstOrNull { it.key == t.presetKey }?.category?.let { "  ·  $it" } ?: ""), color = Zk.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             else {
                 Text(t.presetName.ifBlank { "Init" }, color = Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(list.firstOrNull { it.key == t.presetKey }?.category ?: "Tap to browse presets", color = Zk.dim, fontSize = 10.sp, maxLines = 1)
             }
+        }
+        if (isFav) Text("★", color = Color(0xFFFFD43B), fontSize = 20.sp, modifier = Modifier.padding(start = 6.dp))   // the loaded preset is one of the favourites
         }
         LabelButton("▶", false, w = 36.dp, h = bh) { step(1) }
         LabelButton(if (t.abSlot == 0) "A" else "B", t.abSlot == 1, color, w = 36.dp, h = bh) { vm.toggleAB(t) }
@@ -93,6 +97,7 @@ fun PresetBrowser(vm: DawViewModel, t: TrackM, id: String, color: Color, revisio
             if (p != null) { rev++; changed() }
         }
     }
+    DisposableEffect(Unit) { onDispose { vm.stopPreview() } }   // closing the browser ends a preview that is still playing
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val short = com.zedokmusic.ui.LocalShort.current
         val state = rememberLazyListState()
@@ -127,13 +132,13 @@ fun PresetBrowser(vm: DawViewModel, t: TrackM, id: String, color: Color, revisio
                     }
                     items(shown, key = { it.key }) { p ->
                         val cur = p.key == t.presetKey
-                        Row(Modifier.fillMaxWidth().background(if (cur) color.copy(alpha = .14f) else Color.Transparent).clickable { vm.applyPreset(t, p) }.padding(vertical = if (short) 5.dp else 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().background(if (cur) color.copy(alpha = .14f) else Color.Transparent).clickable { vm.applyPreset(t, p, preview = true) }.padding(vertical = if (short) 5.dp else 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(p.name, color = if (cur) color else Zk.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(p.category + (if (p.tags.isNotEmpty()) " · " + p.tags.joinToString(", ") else "") + if (!p.factory) " · yours" else "", color = Zk.dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             val fav = favs.contains(p.key)
-                            Text(if (fav) "★" else "☆", color = if (fav) Zk.warn else Zk.dim, fontSize = 22.sp, modifier = Modifier.clickable { lib.toggleFavorite(p.key); rev++ }.padding(horizontal = 10.dp))
+                            Text(if (fav) "★" else "☆", color = if (fav) Zk.warn else Zk.dim, fontSize = 22.sp, modifier = Modifier.clickable { lib.toggleFavorite(p.key); rev++; changed() }.padding(horizontal = 10.dp))
                             if (!p.factory) Box { Text("⋮", color = Zk.dim, fontSize = 20.sp, modifier = Modifier.clickable { menu = p }.padding(horizontal = 8.dp)) }
                         }
                         HorizontalDivider(color = Zk.line)

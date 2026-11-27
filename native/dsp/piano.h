@@ -41,7 +41,7 @@ public:
 
     Piano() {
         if (dataDir().empty()) if (const char* d = std::getenv("ZEDOK_DATA")) dataDir() = d;   // desktop test tools
-        ix.volume = add(lin("Main", "Volume", -24.f, 6.f, 0.f, "dB", 1));
+        ix.volume = add(lin("Main", "Volume", -24.f, 6.f, -9.f, "dB", 1));   // the samples are recorded loud: -9 dB keeps chords from saturating in Init
         ix.pan = add(lin("Main", "Pan", -1.f, 1.f, 0.f));
         ix.width = add(lin("Main", "Width", 0.f, 2.f, 1.15f));
         ix.transpose = add(lin("Main", "Transpose", -24.f, 24.f, 0.f, "st", 0));

@@ -97,7 +97,13 @@ public:
             for (int i = 0; i < nch; i++) if (ch[i].index < ZK_MAX_PARAMS && (int)ch[i].index < paramCount()) b_->values[ch[i].index] = ch[i].value;
             const int f = frames > ZK_MAX_FRAMES ? ZK_MAX_FRAMES : frames;
             zdsp::ProcessCtx c{ev, n, b_->in[0], b_->in[1], b_->out[0], b_->out[1], f, bpm_, ppq_, playingT_};
+            bool hard = false; for (int i = 0; i < n; i++) if (ev[i].type == ZK_ALL_NOTES_OFF && ev[i].pitch == 1) hard = true;
             native_->process(c, b_->values);
+            if (hard) {   // "silence" (a new preset is about to be heard): the old sound fades out over this block, then every voice, filter and effect tail is forgotten, so nothing of it can colour the next sound
+                float* L = b_->out[0]; float* R = b_->out[1];
+                for (int i = 0; i < f; i++) { const float g = 1.f - (float)(i + 1) / (float)f; L[i] *= g; R[i] *= g; }
+                native_->reset();
+            }
             seq_++; __atomic_store_n(&b_->ack_seq, seq_, __ATOMIC_RELEASE); pending_ = true;
             return;
         }

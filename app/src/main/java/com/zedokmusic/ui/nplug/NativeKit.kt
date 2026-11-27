@@ -60,7 +60,7 @@ class PluginState(val vm: DawViewModel, val t: TrackM) {
         vm.setParam(t, p.index, nv); values[p.index] = nv; texts[p.index] = vm.paramText(t, p.index)
     }
     fun setChoice(name: String, i: Int) { val p = byName[name] ?: return; set(name, i / p.steps.coerceAtLeast(1).toFloat()) }
-    fun reset(name: String) { val p = byName[name] ?: return; vm.resetParam(t, p); values[p.index] = p.default; texts[p.index] = vm.paramText(t, p.index) }
+    fun reset(name: String) { val p = byName[name] ?: return; val v = vm.resetParam(t, p); values[p.index] = v; texts[p.index] = vm.paramText(t, p.index) }
     fun refresh() {
         for (p in params) {
             val nv = vm.paramValue(t, p.index)

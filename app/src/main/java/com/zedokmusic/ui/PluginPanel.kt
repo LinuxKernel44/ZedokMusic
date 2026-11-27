@@ -97,12 +97,12 @@ private fun ParamRow(vm: DawViewModel, t: TrackM, p: ParamM) {
     LaunchedEffect(value) { delay(60); text = vm.paramText(t, p.index) }  // the host refreshes the text one block after the change
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(p.name, color = if (changed) Zk.accent else Zk.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { vm.resetParam(t, p); value = p.default; text = vm.paramText(t, p.index) })
+            Text(p.name, color = if (changed) Zk.accent else Zk.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { value = vm.resetParam(t, p); text = vm.paramText(t, p.index) })
             Text((text + " " + p.units).trim(), color = Zk.dim, fontSize = 12.sp, maxLines = 1)
         }
         Slider(value, { v ->
             val nv = if (p.steps > 0) Math.round(v * p.steps) / p.steps.toFloat() else v
             value = nv; vm.setParam(t, p.index, nv); text = vm.paramText(t, p.index)
-        }, modifier = Modifier.height(30.dp).doubleTapReset { vm.resetParam(t, p); value = p.default; text = vm.paramText(t, p.index) }, colors = SliderDefaults.colors(thumbColor = if (changed) Zk.accent else Zk.dim, activeTrackColor = if (changed) Zk.accent else Zk.line, inactiveTrackColor = Zk.line))
+        }, modifier = Modifier.height(30.dp).doubleTapReset { value = vm.resetParam(t, p); text = vm.paramText(t, p.index) }, colors = SliderDefaults.colors(thumbColor = if (changed) Zk.accent else Zk.dim, activeTrackColor = if (changed) Zk.accent else Zk.line, inactiveTrackColor = Zk.line))
     }
 }
