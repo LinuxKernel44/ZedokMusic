@@ -41,7 +41,7 @@ But : ne pas construire sur du sable. Tout ce qui suit change le modèle de donn
 - [x] **0.1 Tempo réel passé aux plugins** (0.49.6, mesuré sur S10 avec un plugin VST2 sonde, voir `native/testfx/vst2test.cpp` ; chemin VST3 modifié mais non mesuré). Le README dit « fixé à 120 BPM » : tout plugin synchronisé au tempo (delay, LFO, arpégiateur VST) est faux. Passer le BPM du projet (et plus tard la carte de tempo) dans le `ProcessData` VST3/VST2 et aux processeurs natifs (`zdsp::Processor`). *Critère : un delay VST calé sur 1/4 tombe sur le temps à 90 et à 170 BPM (mesure hors ligne, rendu comparé à l'analyse des pics).*
 - [~] **0.2 Signature et position musicale transmises aux plugins** (0.49.6 : position en quarts, début de mesure, lecture/arrêt, signature 4/4 fixe ; la signature variable attend la phase 3) (numérateur/dénominateur, position en quarts, début de mesure, état lecture/boucle). Prépare la phase 3.
 - [x] **0.3 Versionnage du format de projet** (0.49.7 : `ProjectFormat.kt`, format 2, migrations ordonnées, fichier d'un format plus récent refusé et jamais écrasé, 7 tests + 4 projets témoins ; vérifié sur S10 : un projet v1 s'ouvre et se réenregistre en v2 avec sa sauvegarde, un projet « v99 » reste intact). Champ `format` dans le `.zedok`, migrations ordonnées, tests de chargement de projets d'anciennes versions (garder 3 fichiers témoins dans `app/src/test/resources`). Toute phase qui change le modèle ajoute une migration.
-- [ ] **0.4 Historique d'annulation unifié** (undo/redo global, pas seulement piano roll), avec une pile d'actions nommées. Nécessaire avant patterns/routage, qui multiplient les actions.
+- [~] **0.4 Historique d'annulation unifié** (0.49.8 : `History.kt` + 8 tests ; notes, clips audio, mixer, tempo, gamme, renommage, automation ; vérifié sur S10 : mute, ajout de note, import / suppression de clip avec undo et redo en chaîne. Reste : ajout/suppression de pistes et d'effets, paramètres de plugin, presets.) (undo/redo global, pas seulement piano roll), avec une pile d'actions nommées. Nécessaire avant patterns/routage, qui multiplient les actions.
 - [ ] **0.5 Moteur : graphe de rendu explicite.** Aujourd'hui `mixTracks` somme les pistes. Introduire une structure « nœuds → connexions » (source, piste, bus, master) en C++ *sans changer le comportement*, avec tests hors ligne comparant le rendu avant/après (bit-exact). Prérequis des phases 4 et 5.
 - [ ] **0.6 Banc de tests hors ligne étendu** (`native/dsptest`) : rendu d'un projet de référence, sommes de contrôle, mesure de pics/RMS pour détecter les régressions audio sans oreille.
 
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.49.8-alpha | 2026-11-27 | Phase 0.4 : undo/redo unique pour tout le projet (File → Undo/Redo, pile nommée de 100 actions) |
 | 0.49.7-alpha | 2026-11-27 | Phase 0.3 : format de projet versionné (migrations, refus des fichiers plus récents, tests avec projets témoins) |
 | 0.49.6-alpha | 2026-11-27 | Phase 0.1/0.2 : tempo, position, début de mesure et état de lecture transmis aux plugins Windows (VST2 mesuré, VST3 non mesuré) |
 

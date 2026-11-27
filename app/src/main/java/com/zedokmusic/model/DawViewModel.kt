@@ -36,6 +36,15 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var projectBusy by mutableStateOf(false); private set
     /** True when the open project was written by a newer app: it is shown empty and never saved, so the newer file is not overwritten. */
     private var formatLocked = false
+    /** Project-wide undo / redo (see [History]). Declared before the init block because load() runs from the constructor. */
+    private val hist = History()
+    var historyRev by mutableIntStateOf(0); private set
+    val undoLabel: String? get() { historyRev; return hist.undoName }
+    val redoLabel: String? get() { historyRev; return hist.redoName }
+    private fun record(name: String, key: String? = null, undo: () -> Unit, redo: () -> Unit) { hist.record(name, key, undo, redo); historyRev++ }
+    fun undo() { val n = hist.undo() ?: return; historyRev++; dirty = true; message = "Undo: $n" }
+    fun redo() { val n = hist.redo() ?: return; historyRev++; dirty = true; message = "Redo: $n" }
+    private fun clearHistory() { hist.clear(); historyRev++ }
     private val projectFile get() = store?.file(projectName)
     fun projectDir(): File? = store?.dir(projectName)
     /** Samples that belong to this project: imports and recordings are stored here, not in a shared library. */
@@ -49,7 +58,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** The project's scale: root (0 = C ... 11 = B) and type (index in Theory.SCALES, 0 = none). Shown in the piano roll grid and saved with the project. */
     var scaleRoot by mutableIntStateOf(0); private set        // every project keeps its own scale; a new project starts in C minor
     var scaleType by mutableIntStateOf(2); private set
-    fun setScale(root: Int, type: Int) { scaleRoot = root.coerceIn(0, 11); scaleType = type.coerceIn(0, Theory.SCALES.size - 1); dirty = true }
+    fun setScale(root: Int, type: Int) {
+        val or = scaleRoot; val ot = scaleType
+        scaleRoot = root.coerceIn(0, 11); scaleType = type.coerceIn(0, Theory.SCALES.size - 1); dirty = true
+        val nr = scaleRoot; val nt = scaleType
+        if (or != nr || ot != nt) record("Change scale", undo = { scaleRoot = or; scaleType = ot }, redo = { scaleRoot = nr; scaleType = nt })
+    }
     var loop by mutableStateOf(false); private set
     /** The timelines scroll along with the play cursor. */
     var followPlayhead: Boolean get() = AppSettings.follow.on; set(v) { AppSettings.follow.set(v) }
@@ -246,6 +260,10 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     private fun applyLoop() = e.setLoop(loop, 0, (loopBars * 4 * fpb).toLong())
     fun changeBpm(v: Float) {
+        val old = bpm; applyBpm(v); val now = bpm
+        if (old != now) record("Change tempo", "tempo", undo = { applyBpm(old) }, redo = { applyBpm(now) })
+    }
+    private fun applyBpm(v: Float) {
         val old = bpm; bpm = v.coerceIn(30f, 300f)
         e.setTempo(bpm.toDouble())
         if (old == bpm) return
@@ -269,8 +287,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val t = TrackM(id, "Audio ${tracks.count { it.kind == TrackKind.Audio } + 1}", TrackKind.Audio, newColor(), null)
         tracks.add(t); selected = t; dirty = true; return t
     }
-    fun renameTrack(t: TrackM, name: String) { val n = name.trim().take(40); if (n.isNotEmpty() && n != t.name) { t.name = n; dirty = true } }
+    fun renameTrack(t: TrackM, name: String) {
+        val n = name.trim().take(40); val o = t.name
+        if (n.isNotEmpty() && n != o) { t.name = n; dirty = true; record("Rename track", undo = { t.name = o; dirty = true }, redo = { t.name = n; dirty = true }) }
+    }
     fun removeTrack(t: TrackM) {
+        clearHistory()   // removing a track cannot be undone yet, and older actions may refer to it
         t.fx.toList().forEach { removeEffect(t, it) }
         if (t.pluginPath != null) { closeEditor(t); host.stop(t.id) }
         e.removeTrack(t.id); tracks.remove(t); if (selected == t) selected = tracks.firstOrNull(); dirty = true
@@ -298,22 +320,51 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         n.src = c.src; n.semis = c.semis; n.speed = c.speed; n.mode = c.mode; n.srcBpm = c.srcBpm
         setClipGainDb(n, c.gainDb); return n
     }
+    /** The clip that stands for [c] now: clip objects are replaced when a clip is edited or put back by an undo, and old history entries still name the old object. */
+    private fun live(c: ClipM): ClipM { var x = c; while (true) x = x.replacedBy ?: return x }
+    private fun reAdd(t: TrackM, c: ClipM) { val l = live(c); val n = addClipLike(t, l, l.start) ?: return; l.replacedBy = n }
+    private fun drop(c: ClipM) { val l = live(c); trackOf(l)?.let { removeClip(it, l) }; clipSelection.remove(l) }
+    private fun recordAdded(name: String, made: List<ClipM>) {
+        val owned = made.mapNotNull { c -> trackOf(c)?.let { it to c } }
+        if (owned.isEmpty()) return
+        record(name, undo = { owned.forEach { (_, c) -> drop(c) } }, redo = { owned.forEach { (t, c) -> reAdd(t, c) } })
+    }
+    /** Imports several WAV files as clips of [t] (one undo step). */
+    fun importClips(t: TrackM, files: List<Pair<File, Float>>, name: String = "Add clips"): List<ClipM> {
+        val made = files.mapNotNull { (f, b) -> importClip(t, f, b) }
+        recordAdded(name, made); return made
+    }
     fun moveClips(list: List<ClipM>, delta: Float) {
         if (list.isEmpty()) return
+        val olds = list.map { it to it.start }
         val d = maxOf(delta, -(list.minOf { it.start })); for (c in list) moveClip(c, c.start + d)
+        val news = list.map { it to it.start }
+        if (olds != news) record("Move clips", undo = { olds.forEach { (c, s) -> moveClip(live(c), s) } }, redo = { news.forEach { (c, s) -> moveClip(live(c), s) } })
     }
-    fun removeClips(list: List<ClipM>) { for (c in list) trackOf(c)?.let { removeClip(it, c) }; clipSelection.removeAll(list.toSet()) }
+    fun removeClips(list: List<ClipM>, name: String = "Delete clips") {
+        val owned = list.mapNotNull { c -> trackOf(c)?.let { it to c } }
+        for ((t, c) in owned) removeClip(t, c)
+        clipSelection.removeAll(list.toSet())
+        if (owned.isNotEmpty()) record(name, undo = { owned.forEach { (t, c) -> reAdd(t, c) } }, redo = { owned.forEach { (_, c) -> drop(c) } })
+    }
+    /** Sets the gain of every clip of [list] (a slider drag is one undo step). */
+    fun setClipsGain(list: List<ClipM>, db: Float) {
+        val olds = list.map { it to it.gainDb }
+        for (c in list) setClipGainDb(c, db)
+        val news = list.map { it to it.gainDb }
+        if (olds != news) record("Clip gain", "cgain" + list.joinToString(",") { it.engineId.toString() }, undo = { olds.forEach { (c, g) -> setClipGainDb(live(c), g) } }, redo = { news.forEach { (c, g) -> setClipGainDb(live(c), g) } })
+    }
     /** Clone (Ctrl+B in FL Studio): copies the selection right after its end. Returns the copies, which become the selection. */
     fun cloneClips(sel: List<ClipM>): List<ClipM> {
         if (sel.isEmpty()) return emptyList()
         val span = sel.maxOf { it.start + it.lengthFrames / 48000f * bpm / 60f } - sel.minOf { it.start }
-        return sel.mapNotNull { c -> trackOf(c)?.let { addClipLike(it, c, c.start + span) } }
+        return sel.mapNotNull { c -> trackOf(c)?.let { addClipLike(it, c, c.start + span) } }.also { recordAdded("Clone clips", it) }
     }
     class ClipCopy(val track: TrackM, val src: ClipM, val rel: Float)
     var clipClip by mutableStateOf<List<ClipCopy>>(emptyList()); private set
     fun copyClips(sel: List<ClipM>) { if (sel.isEmpty()) return; val lo = sel.minOf { it.start }; clipClip = sel.mapNotNull { c -> trackOf(c)?.let { ClipCopy(it, c, c.start - lo) } } }
-    fun cutClips(sel: List<ClipM>) { copyClips(sel); removeClips(sel) }
-    fun pasteClips(at: Float): List<ClipM> = clipClip.mapNotNull { cc -> (if (cc.track in tracks) cc.track else tracks.firstOrNull { it.kind == TrackKind.Audio })?.let { addClipLike(it, cc.src, at + cc.rel) } }
+    fun cutClips(sel: List<ClipM>) { copyClips(sel); removeClips(sel, "Cut clips") }
+    fun pasteClips(at: Float): List<ClipM> = clipClip.mapNotNull { cc -> (if (cc.track in tracks) cc.track else tracks.firstOrNull { it.kind == TrackKind.Audio })?.let { addClipLike(it, cc.src, at + cc.rel) } }.also { recordAdded("Paste clips", it) }
     /** Edits (pitch, speed) of the whole selection. */
     fun applyClipEdits(list: List<ClipM>, semis: Float, speed: Float, mode: Int, srcBpm: Float) { for (c in list) trackOf(c)?.let { applyClipEdit(it, c, semis, speed, mode, srcBpm) } }
 
@@ -325,8 +376,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun setClipGainDb(c: ClipM, db: Float) { c.gainDb = db.coerceIn(-48f, 24f); e.setClipGain(c.engineId, Math.pow(10.0, c.gainDb / 20.0).toFloat()); dirty = true }
 
     /** Renders [c] with the pitch / speed / mode given (from its original file) and puts the result in its place. Runs in the background. */
-    fun applyClipEdit(t: TrackM, c: ClipM, semis: Float, speed: Float, mode: Int, srcBpm: Float) {
+    fun applyClipEdit(t: TrackM, c: ClipM, semis: Float, speed: Float, mode: Int, srcBpm: Float, recordIt: Boolean = true) {
         if (c.busy) return
+        val oSemis = c.semis; val oSpeed = c.speed; val oMode = c.mode; val oBpm = c.srcBpm
         val sp = speed.coerceIn(0.25f, 4f); val se = semis.coerceIn(-48f, 48f)
         c.busy = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
@@ -361,7 +413,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 val n = ClipM(r[0].toInt(), f.absolutePath, c.name, c.start, r[1])
                 n.src = c.src; n.gainDb = c.gainDb; n.semis = se; n.speed = sp; n.mode = mode; n.srcBpm = srcBpm
                 e.setClipGain(n.engineId, Math.pow(10.0, n.gainDb / 20.0).toFloat())
-                t.clips[i] = n; dirty = true
+                t.clips[i] = n; dirty = true; c.replacedBy = n
+                if (recordIt) record("Edit clip", undo = { applyClipEdit(t, live(n), oSemis, oSpeed, oMode, oBpm, false) }, redo = { applyClipEdit(t, live(n), se, sp, mode, srcBpm, false) })
                 val si = clipSelection.indexOf(c); if (si >= 0) clipSelection[si] = n
                 if (clipClip.any { it.src === c }) clipClip = clipClip.map { if (it.src === c) ClipCopy(it.track, n, it.rel) else it }
             }
@@ -372,15 +425,22 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun removeClip(t: TrackM, c: ClipM) { e.removeClip(c.engineId); t.clips.remove(c); dirty = true }
 
-    fun setGain(t: TrackM, g: Float) { t.gain = g; e.setTrackGain(t.id, g); dirty = true }
-    fun setPan(t: TrackM, p: Float) { t.pan = p; e.setTrackPan(t.id, p); dirty = true }
+    private fun applyGain(t: TrackM, g: Float) { t.gain = g; e.setTrackGain(t.id, g); dirty = true }
+    fun setGain(t: TrackM, g: Float) { val o = t.gain; applyGain(t, g); if (o != g) record("Track volume", "gain${t.id}", undo = { applyGain(t, o) }, redo = { applyGain(t, g) }) }
+    private fun applyPan(t: TrackM, p: Float) { t.pan = p; e.setTrackPan(t.id, p); dirty = true }
+    fun setPan(t: TrackM, p: Float) { val o = t.pan; applyPan(t, p); if (o != p) record("Pan", "pan${t.id}", undo = { applyPan(t, o) }, redo = { applyPan(t, p) }) }
     /** The wheel value (-1 wide .. +1 mono) as the width factor of the engine (2 .. 0). */
     private fun widthOf(s: Float) = 1f - s
-    fun setStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
-    fun applyMasterStereo(s: Float) { masterStereo = s.coerceIn(-1f, 1f); e.setMasterWidth(widthOf(masterStereo)); dirty = true }
-    fun setMute(t: TrackM, m: Boolean) { t.mute = m; e.setTrackMute(t.id, m); dirty = true }
-    fun setSolo(t: TrackM, s: Boolean) { t.solo = s; e.setTrackSolo(t.id, s); dirty = true }
-    fun setMaster(g: Float) { masterGain = g; e.setMasterGain(g); dirty = true }
+    private fun putStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
+    fun setStereo(t: TrackM, s: Float) { val o = t.stereo; putStereo(t, s); val n = t.stereo; if (o != n) record("Stereo width", "stereo${t.id}", undo = { putStereo(t, o) }, redo = { putStereo(t, n) }) }
+    private fun putMasterStereo(s: Float) { masterStereo = s.coerceIn(-1f, 1f); e.setMasterWidth(widthOf(masterStereo)); dirty = true }
+    fun applyMasterStereo(s: Float) { val o = masterStereo; putMasterStereo(s); val n = masterStereo; if (o != n) record("Master stereo width", "mstereo", undo = { putMasterStereo(o) }, redo = { putMasterStereo(n) }) }
+    private fun putMute(t: TrackM, m: Boolean) { t.mute = m; e.setTrackMute(t.id, m); dirty = true }
+    fun setMute(t: TrackM, m: Boolean) { val o = t.mute; putMute(t, m); if (o != m) record(if (m) "Mute" else "Unmute", undo = { putMute(t, o) }, redo = { putMute(t, m) }) }
+    private fun putSolo(t: TrackM, s: Boolean) { t.solo = s; e.setTrackSolo(t.id, s); dirty = true }
+    fun setSolo(t: TrackM, s: Boolean) { val o = t.solo; putSolo(t, s); if (o != s) record(if (s) "Solo" else "Unsolo", undo = { putSolo(t, o) }, redo = { putSolo(t, s) }) }
+    private fun putMaster(g: Float) { masterGain = g; e.setMasterGain(g); dirty = true }
+    fun setMaster(g: Float) { val o = masterGain; putMaster(g); if (o != g) record("Master volume", "master", undo = { putMaster(o) }, redo = { putMaster(g) }) }
 
     // ---------- insert effects ----------
     /** Every plugin of the project: instruments, then each track's effects, then the master's. */
@@ -422,24 +482,17 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- notes ----------
     // Every edit of the notes of a track first stores the notes as they were (undo / redo, 50 steps per track).
-    private val undoS = HashMap<Int, ArrayList<List<NoteM>>>(); private val redoS = HashMap<Int, ArrayList<List<NoteM>>>()
-    private var historyReady = true   // false (the JVM default) while the constructor runs: load() is called from it before the fields above exist
-    /** Bumped whenever an undo history changes, so the buttons can follow. */
-    var noteHistoryRev by mutableIntStateOf(0); private set
-    private fun snapshot(t: TrackM) {
-        val u = undoS.getOrPut(t.id) { ArrayList() }; u.add(t.notes.toList()); if (u.size > 50) u.removeAt(0)
-        redoS[t.id]?.clear(); noteHistoryRev++
+    /** Records the notes of [t] as they are now; call it just before changing them. What the notes become is read back when the action is undone. */
+    private fun snapshot(t: TrackM, name: String = "Edit notes") {
+        val before = t.notes.toList(); var after: List<NoteM> = before
+        record(name, undo = { after = t.notes.toList(); restoreNotes(t, before) }, redo = { restoreNotes(t, after) })
     }
-    fun canUndoNotes(t: TrackM): Boolean { noteHistoryRev; return undoS[t.id]?.isNotEmpty() == true }
-    fun canRedoNotes(t: TrackM): Boolean { noteHistoryRev; return redoS[t.id]?.isNotEmpty() == true }
-    private fun restoreNotes(t: TrackM, notes: List<NoteM>) { if (e.isPlaying()) e.panic(t.id); t.notes.clear(); t.notes.addAll(notes); syncNotes(t); dirty = true; noteHistoryRev++ }
-    fun undoNotes(t: TrackM) { val u = undoS[t.id]?.takeIf { it.isNotEmpty() } ?: return; redoS.getOrPut(t.id) { ArrayList() }.add(t.notes.toList()); restoreNotes(t, u.removeAt(u.size - 1)) }
-    fun redoNotes(t: TrackM) { val r = redoS[t.id]?.takeIf { it.isNotEmpty() } ?: return; undoS.getOrPut(t.id) { ArrayList() }.add(t.notes.toList()); restoreNotes(t, r.removeAt(r.size - 1)) }
+    private fun restoreNotes(t: TrackM, notes: List<NoteM>) { if (e.isPlaying()) e.panic(t.id); t.notes.clear(); t.notes.addAll(notes); syncNotes(t); dirty = true }
 
-    fun addNote(t: TrackM, pitch: Int, start: Float, length: Float, velocity: Int = 100) { snapshot(t); t.notes.add(NoteM(pitch, start, length, velocity)); syncNotes(t); dirty = true }
+    fun addNote(t: TrackM, pitch: Int, start: Float, length: Float, velocity: Int = 100) { snapshot(t, "Add note"); t.notes.add(NoteM(pitch, start, length, velocity)); syncNotes(t); dirty = true }
     /** A note that is sounding right now loses its Note Off when it is deleted or changed: release the track's notes so it cannot hang. */
     private fun releaseIfSounding(t: TrackM, n: NoteM) { if (e.isPlaying() && playhead >= n.start && playhead <= n.start + n.length) e.panic(t.id) }
-    fun removeNote(t: TrackM, n: NoteM) { snapshot(t); releaseIfSounding(t, n); t.notes.remove(n); syncNotes(t); dirty = true }
+    fun removeNote(t: TrackM, n: NoteM) { snapshot(t, "Delete note"); releaseIfSounding(t, n); t.notes.remove(n); syncNotes(t); dirty = true }
     fun replaceNote(t: TrackM, old: NoteM, new: NoteM) { val i = t.notes.indexOf(old); if (i >= 0) { snapshot(t); releaseIfSounding(t, old); t.notes[i] = new; syncNotes(t); dirty = true } }
 
     // ---- several notes at once (one undo step each)
@@ -450,8 +503,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         for ((o, n) in changes) { val i = t.notes.indexOf(o); if (i >= 0) t.notes[i] = n }
         syncNotes(t); dirty = true
     }
-    fun removeNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t); if (e.isPlaying()) e.panic(t.id); t.notes.removeAll(list.toSet()); syncNotes(t); dirty = true }
-    fun addNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t); t.notes.addAll(list); syncNotes(t); dirty = true }
+    fun removeNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t, "Delete notes"); if (e.isPlaying()) e.panic(t.id); t.notes.removeAll(list.toSet()); syncNotes(t); dirty = true }
+    fun addNotes(t: TrackM, list: List<NoteM>) { if (list.isEmpty()) return; snapshot(t, "Add notes"); t.notes.addAll(list); syncNotes(t); dirty = true }
     /** Clone (Ctrl+B in FL Studio): copies [sel] right after its end, shifted by the length of the whole selection. Returns the copies. */
     fun cloneNotes(t: TrackM, sel: List<NoteM>): List<NoteM> {
         if (sel.isEmpty()) return emptyList()
@@ -530,12 +583,21 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         t.lanes.firstOrNull { it.paramIndex == index }?.let { return it }
         if (t.lanes.size >= 32) { message = "At most 32 automation lanes per track."; return null }
         val l = AutoLane(name, index); l.points.add(AutoPoint(0f, e.paramValue(t.id, index)))
-        t.lanes.add(l); syncLanes(t); dirty = true; return l
+        t.lanes.add(l); syncLanes(t); dirty = true
+        record("Add automation lane", undo = { t.lanes.remove(l); if (laneSelected == l) laneSelected = null; syncLanes(t); dirty = true }, redo = { t.lanes.add(l); syncLanes(t); dirty = true })
+        return l
     }
-    fun removeLane(t: TrackM, l: AutoLane) { t.lanes.remove(l); if (laneSelected == l) laneSelected = null; syncLanes(t); dirty = true }
+    fun removeLane(t: TrackM, l: AutoLane) {
+        val at = t.lanes.indexOf(l); if (at < 0) return
+        t.lanes.remove(l); if (laneSelected == l) laneSelected = null; syncLanes(t); dirty = true
+        record("Delete automation lane", undo = { t.lanes.add(at.coerceAtMost(t.lanes.size), l); syncLanes(t); dirty = true },
+            redo = { t.lanes.remove(l); if (laneSelected == l) laneSelected = null; syncLanes(t); dirty = true })
+    }
+    private fun putLanePoints(t: TrackM, l: AutoLane, pts: List<AutoPoint>) { l.points.clear(); l.points.addAll(pts); syncLanes(t); dirty = true }
     fun setLanePoints(t: TrackM, l: AutoLane, pts: List<AutoPoint>) {
-        val sorted = pts.sortedBy { it.beat }
-        l.points.clear(); l.points.addAll(sorted); syncLanes(t); dirty = true
+        val before = l.points.toList(); val after = pts.sortedBy { it.beat }
+        putLanePoints(t, l, after)
+        if (before != after) record("Edit automation", "lane${System.identityHashCode(l)}", undo = { putLanePoints(t, l, before) }, redo = { putLanePoints(t, l, after) })
     }
     private fun syncLanes(t: TrackM) {
         val lanes = t.lanes.filter { it.points.isNotEmpty() }
@@ -1195,7 +1257,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun load() {
         formatLocked = false
-        if (historyReady) { undoS.clear(); redoS.clear() }
+        clearHistory()
         val f = projectFile ?: return
         if (!f.exists()) return
         try {

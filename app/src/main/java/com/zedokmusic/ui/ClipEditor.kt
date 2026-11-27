@@ -54,9 +54,9 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Section("Gain")
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Slider(c.gainDb, { g -> for (x in group) vm.setClipGainDb(x, g) }, Modifier.weight(1f), valueRange = -24f..12f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Slider(c.gainDb, { g -> vm.setClipsGain(group, g) }, Modifier.weight(1f), valueRange = -24f..12f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
                 Text("%+.1f dB".format(c.gainDb), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(64.dp))
-                Chip("0", false) { for (x in group) vm.setClipGainDb(x, 0f) }
+                Chip("0", false) { vm.setClipsGain(group, 0f) }
             }
             Section("Pitch")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -101,7 +101,7 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
     }, confirmButton = {
         TextButton({ if (group.size > 1) vm.applyClipEdits(group, semis, speed, mode, srcBpm) else vm.applyClipEdit(t, c, semis, speed, mode, srcBpm); onDismiss() }, enabled = group.none { it.busy }) { Text("Apply") }
     }, dismissButton = {
-        Row { TextButton({ semis = 0f; speed = 1f; for (x in group) vm.setClipGainDb(x, 0f); vm.applyClipEdits(group, 0f, 1f, mode, srcBpm); onDismiss() }) { Text("Reset", color = Zk.danger) }; TextButton(onDismiss) { Text("Cancel") } }
+        Row { TextButton({ semis = 0f; speed = 1f; vm.setClipsGain(group, 0f); vm.applyClipEdits(group, 0f, 1f, mode, srcBpm); onDismiss() }) { Text("Reset", color = Zk.danger) }; TextButton(onDismiss) { Text("Cancel") } }
     })
 }
 

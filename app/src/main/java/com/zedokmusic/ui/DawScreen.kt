@@ -130,7 +130,7 @@ fun DawScreen(vm: DawViewModel) {
     when (dialog) {
         "plugins" -> PluginPickerDialog(plugins.filter { it.kind != 2 }, vm.pluginDir()?.path ?: "", { plugins = vm.scanPlugins() }, { vm.addInstrument(it); dialog = null }, { dialog = null })
         "samples" -> SamplePickerDialog(vm.projectSamples(), vm.sharedSamples(), vm.projectSamplesDir()?.path ?: "", { samplePicker.launch(arrayOf("audio/*", "application/octet-stream")) }, { f ->
-            val t = vm.selected?.takeIf { it.kind == TrackKind.Audio } ?: vm.addAudioTrack(); if (t != null) vm.importClip(t, f, vm.playhead.let { Math.floor(it.toDouble()).toFloat() }); dialog = null }, { dialog = null })
+            val t = vm.selected?.takeIf { it.kind == TrackKind.Audio } ?: vm.addAudioTrack(); if (t != null) vm.importClips(t, listOf(f to vm.playhead.let { Math.floor(it.toDouble()).toFloat() }), "Add clip"); dialog = null }, { dialog = null })
         "midi" -> MidiDialog(vm.midi, { onScan() }, { dialog = null })
         "tempo" -> TempoDialog(vm.bpm, { vm.changeBpm(it) }, { dialog = null })
         "exports" -> ExportsDialog(vm) { dialog = null }
@@ -216,6 +216,9 @@ private fun Transport(vm: DawViewModel, compact: Boolean, oneRow: Boolean, keys:
         Box {
             Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Zk.panel2).clickable { fileMenu = true }.padding(horizontal = 12.dp, vertical = 9.dp)) { Text("File", color = Zk.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
             DropdownMenu(fileMenu, { fileMenu = false }) {
+                DropdownMenuItem(text = { Text(vm.undoLabel?.let { "Undo: $it" } ?: "Undo") }, enabled = vm.undoLabel != null, onClick = { fileMenu = false; vm.undo() })
+                DropdownMenuItem(text = { Text(vm.redoLabel?.let { "Redo: $it" } ?: "Redo") }, enabled = vm.redoLabel != null, onClick = { fileMenu = false; vm.redo() })
+                HorizontalDivider()
                 DropdownMenuItem(text = { Text("New project…") }, onClick = { fileMenu = false; onProject("new") })
                 DropdownMenuItem(text = { Text("Open project…") }, onClick = { fileMenu = false; onProject("open") })
                 HorizontalDivider()

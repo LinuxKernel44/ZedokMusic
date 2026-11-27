@@ -157,9 +157,9 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 }
             }
             Row(Modifier.align(Alignment.CenterEnd).background(Zk.panel).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                val canUndo = vm.canUndoNotes(track); val canRedo = vm.canRedoNotes(track)
-                LabelButton("↶", false, w = 32.dp, h = 32.dp, enabled = canUndo) { vm.undoNotes(track) }
-                LabelButton("↷", false, w = 32.dp, h = 32.dp, enabled = canRedo) { vm.redoNotes(track) }
+                val canUndo = vm.undoLabel != null; val canRedo = vm.redoLabel != null
+                LabelButton("↶", false, w = 32.dp, h = 32.dp, enabled = canUndo) { vm.undo() }
+                LabelButton("↷", false, w = 32.dp, h = 32.dp, enabled = canRedo) { vm.redo() }
                 LabelButton(Theory.label(scaleRoot, scaleType), scaleType > 0, Zk.accent, w = 84.dp, h = 32.dp) { scaleDialog = true }
                 LabelButton("Select", selectMode, w = 56.dp, h = 32.dp) { selectMode = !selectMode }
                 if (selNotes.isEmpty()) {

@@ -240,7 +240,7 @@ class KitManager(private val vm: DawViewModel, private val ctx: Context) {
             }
             ui {
                 if (placed.isEmpty()) vm.message = "Could not read ${if (nodes.size == 1) nodes[0].name else "those sounds"}."
-                else { placed.forEach { (f, b) -> vm.importClip(t, f, b) }; vm.message = "${placed.size} clip${if (placed.size > 1) "s" else ""} added on ${t.name}, copied into the project." }
+                else { vm.importClips(t, placed, "Add sounds"); vm.message = "${placed.size} clip${if (placed.size > 1) "s" else ""} added on ${t.name}, copied into the project." }
             }
         }
     }
