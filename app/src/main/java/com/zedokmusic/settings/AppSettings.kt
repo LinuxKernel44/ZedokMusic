@@ -42,7 +42,7 @@ object AppSettings {
     // Height of the on-screen keyboard in dp (0 = the default for the screen); set by dragging its handle
     val keysHeight = s("keys.height", 0)
     // Hybrid presets: the note played when a preset is chosen (0 = C4, 1 = C5, 2 = nothing)
-    val presetPreviewNote = s("plugin.presetpreview", 0)
+    val presetPreviewNote = s("plugin.previewnote", 1)   // 0 C3, 1 C4, 2 C5, 3 off
     // Sound browser (Tracks view): docked beside the tracks (1) or a drawer over them (0)
     val browserDocked = b("browser.docked", true)
     // MIDI

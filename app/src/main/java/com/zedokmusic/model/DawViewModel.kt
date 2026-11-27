@@ -776,6 +776,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun wavs(dir: File?) = dir?.takeIf { it.isDirectory }?.walkTopDown()?.filter { f -> f.isFile && f.extension.equals("wav", true) && !f.path.contains("/.processed/") }?.sortedBy { f -> f.name.lowercase() }?.toList() ?: emptyList()
     /** WAV files of this project (its own Samples folder, recordings included). */
     fun samplesChanged() { samplesVersion++ }
+    /** Where the sound pack of Zedok Piano is on the phone (the app copies it there at the first start). */
+    fun pianoPackPath(): String = java.io.File(getApplication<Application>().filesDir, "plugin-data/piano.zpk").path
     fun projectSamples(): List<File> { samplesVersion; return wavs(projectSamplesDir()) }
     /** WAV files of the shared library (workspace/Samples), kept from before samples became per project. */
     fun sharedSamples(): List<File> { samplesVersion; return wavs(workspace?.let { File(it, "Samples") }) }
@@ -1064,7 +1066,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun previewPresetNote(t: TrackM) {
         val setting = com.zedokmusic.settings.AppSettings.presetPreviewNote.value
-        val base = when (setting) { 0 -> 60; 1 -> 72; else -> return }
+        val base = when (setting) { 0 -> 48; 1 -> 60; 2 -> 72; else -> return }
         val id = nativeId(t) ?: return
         val notes: List<Pair<Int, Long>>   // pitch, how long it is held (ms)
         val pitch = if (id == "sampler") (loadParams(t).firstOrNull { it.name == "Root Note" }?.let { paramValue(t, it.index) * 127f }?.toInt() ?: base) else base

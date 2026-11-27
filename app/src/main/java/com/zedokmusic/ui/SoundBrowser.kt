@@ -90,7 +90,7 @@ fun SoundBrowser(vm: DawViewModel, modifier: Modifier, canSwitch: Boolean, onPic
                 tab == BTab.Kits && kits.libraryUri() == null -> Hint("Choose your drum kit folder once in Settings → Storage → Drum kit folder. Its sounds then show here.")
                 tab == BTab.Kits && kits.libraryScanning && items.isEmpty() -> Hint("Scanning your drum kit folder (done once)…")
                 rows.isEmpty() -> Hint(if (favOnly) "No favourite yet. Tap the star of a sound." else if (tab == BTab.Project) "No sound in this project yet." else "No sound found.")
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 36.dp)) {   // room under the last row, so it can always be scrolled fully into view
                     items(rows, key = { r -> when (r) { is TreeRow.D -> "d:" + r.dir.path; is TreeRow.F -> "f:" + r.node.ref } }) { r ->
                         when (r) {
                             is TreeRow.D -> FolderRow(r, color, dnd, onPick == null, onToggle = { setOpen(r.dir.path, !r.open) }, payload = {

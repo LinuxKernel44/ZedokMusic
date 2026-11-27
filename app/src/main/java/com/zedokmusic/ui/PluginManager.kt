@@ -51,7 +51,11 @@ fun PluginManagerDialog(vm: DawViewModel, onDismiss: () -> Unit) {
                     item { Text("BUILT-IN (ZEDOK)", color = Zk.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)) }
                     items(builtIn, key = { it.path }) { p ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) { Text(p.name, color = Zk.text, fontSize = 14.sp); Text(p.blurb, color = Zk.dim, fontSize = 11.sp) }
+                            Column(Modifier.weight(1f)) {
+                                Text(p.name, color = Zk.text, fontSize = 14.sp); Text(p.blurb, color = Zk.dim, fontSize = 11.sp)
+                                // built-in plugins are code inside the app: there is no plugin file; the piano's sounds are a pack the app copies to its data folder
+                                androidx.compose.foundation.text.selection.SelectionContainer { Text("Built into the app (libzedokaudio.so, ${p.path})" + if (p.path.endsWith(":piano")) "\nSounds: ${vm.pianoPackPath()}" else "", color = Zk.dim, fontSize = 10.sp, lineHeight = 13.sp) }
+                            }
                             Text(kindLabel(p.kind), color = Zk.dim, fontSize = 12.sp)
                         }
                         HorizontalDivider(color = Zk.line)
@@ -71,6 +75,8 @@ private fun PluginRow(vm: DawViewModel, p: PluginInfo) {
             Column(Modifier.weight(1f)) {
                 Text(p.name, color = if (p.hidden) Zk.dim else Zk.text, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("Reports: ${kindLabel(p.detected)}" + if (p.hidden) " · hidden" else "", color = Zk.dim, fontSize = 11.sp)
+                // the exact file the plugin is loaded from (long press to select and copy it)
+                androidx.compose.foundation.text.selection.SelectionContainer { Text(p.path, color = Zk.dim, fontSize = 10.sp, lineHeight = 13.sp) }
             }
         }
         Spacer(Modifier.height(6.dp))
