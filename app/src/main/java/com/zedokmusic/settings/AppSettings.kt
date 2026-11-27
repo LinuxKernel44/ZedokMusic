@@ -31,7 +31,7 @@ object AppSettings {
     // Project
     val autosave = b("project.autosave", true)
     val follow = b("project.follow", true)
-    val snap = s("roll.snap", 1)                   // index into [SNAP_BEATS]
+    val snap = s("roll.snap2", 0)                  // index into [SNAP_LABELS]: 0 = Auto (follows the zoom), then fixed steps
     val noteLength = s("roll.length", 2)           // index into [NOTE_BEATS]
     val exportFormat = s("export.format", 1)       // same codes as the export dialog
     // Plugins
@@ -60,14 +60,27 @@ object AppSettings {
     val cornerMargin = s("display.corners", 0)   // side margin for rounded screen corners: 0 automatic (from the phone), 1 none, 2 small, 3 medium, 4 large
     val ignoreCutout = b("display.cutout", true)  // draw under the notch / camera cutout
 
-    val SNAP_BEATS = floatArrayOf(0.125f, 0.25f, 0.5f, 1f)
-    val SNAP_LABELS = listOf("1/32", "1/16", "1/8", "1/4")
+    /** Index 0 is Auto: the grid follows the zoom (finer steps appear as you zoom in, down to 1/64, and go away as you zoom out). The rest are fixed steps. */
+    val SNAP_BEATS = floatArrayOf(0f, 0.0625f, 0.125f, 0.25f, 0.5f, 1f)
+    val SNAP_LABELS = listOf("Auto", "1/64", "1/32", "1/16", "1/8", "1/4")
+    /** The steps Auto picks from (beats), coarse to fine, and the least room (dp) a step needs between two grid lines. */
+    private val AUTO_STEPS = floatArrayOf(1f, 0.5f, 0.25f, 0.125f, 0.0625f)
+    const val AUTO_MIN_DP = 14f
     val NOTE_BEATS = floatArrayOf(0.25f, 0.5f, 1f, 2f)
     val NOTE_LABELS = listOf("¼ beat", "½ beat", "1 beat", "2 beats")
     /** AAudio buffer size in bursts for each latency choice. */
     val BUFFER_BURSTS = intArrayOf(2, 3, 5)
 
-    val snapBeats get() = SNAP_BEATS[snap.value.coerceIn(0, SNAP_BEATS.size - 1)]
+    /** The snap step (beats) for a view that shows [dpPerBeat] dp per beat. Auto uses the finest step that still has [AUTO_MIN_DP] dp between its lines. */
+    fun snapFor(dpPerBeat: Float): Float {
+        val i = snap.value.coerceIn(0, SNAP_BEATS.size - 1)
+        if (i > 0) return SNAP_BEATS[i]
+        var best = AUTO_STEPS[0]
+        for (st in AUTO_STEPS) if (st * dpPerBeat >= AUTO_MIN_DP) best = st
+        return best
+    }
+    /** Snap step for views that have no zoom of their own (arrangement, drops): Auto means 1/16. */
+    val snapBeats get() = SNAP_BEATS[snap.value.coerceIn(0, SNAP_BEATS.size - 1)].takeIf { it > 0f } ?: 0.25f
     val noteLengthBeats get() = NOTE_BEATS[noteLength.value.coerceIn(0, NOTE_BEATS.size - 1)]
     val bufferBursts get() = BUFFER_BURSTS[latency.value.coerceIn(0, BUFFER_BURSTS.size - 1)]
 

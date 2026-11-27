@@ -208,7 +208,7 @@ private fun devices(ctx: Context, output: Boolean): List<Dev> {
 @Composable private fun ProjectSection() {
     SwitchRow("Autosave", "Saves the project a moment after each change when the transport is stopped. Off: use Add → Save project.", AppSettings.autosave)
     SwitchRow("Follow the play cursor", "Timelines scroll along with the cursor while playing.", AppSettings.follow)
-    ChoiceRow("Piano roll grid", "Notes snap to this step (as a note value) when you add or move them.", AppSettings.SNAP_LABELS, AppSettings.snap.value) { AppSettings.snap.set(it) }
+    ChoiceRow("Piano roll grid", "Notes snap to this step (as a note value) when you add or move them. Auto follows the zoom: finer lines (down to 1/64) appear as you zoom in and disappear as you zoom out; notes already placed keep their exact position.", AppSettings.SNAP_LABELS, AppSettings.snap.value) { AppSettings.snap.set(it) }
     ChoiceRow("Default note length", "Length of a note added with a tap in the piano roll.", AppSettings.NOTE_LABELS, AppSettings.noteLength.value) { AppSettings.noteLength.set(it) }
     ChoiceRow("Default export format", "Preselected in Export audio.", listOf("WAV 16", "WAV 24", "WAV float", "FLAC 16", "FLAC 24", "MP3 320", "MP3 192", "AAC"),
         listOf(0, 1, 2, 4, 5, 6, 7, 3).indexOf(AppSettings.exportFormat.value).coerceAtLeast(0)) { AppSettings.exportFormat.set(listOf(0, 1, 2, 4, 5, 6, 7, 3)[it]) }

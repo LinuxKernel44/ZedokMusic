@@ -43,7 +43,8 @@ private const val TOP = 96
 private const val BOTTOM = 36
 private val RowPx = 18.dp
 private val KeysW = 54.dp
-private val SNAP get() = com.zedokmusic.settings.AppSettings.snapBeats
+/** The snap step of the piano roll: fixed, or (Auto) the finest step the current zoom can show. Reads the zoom each time, so finer steps appear when zooming in and notes already placed on a finer step keep their exact position. */
+private val SNAP get() = com.zedokmusic.settings.AppSettings.snapFor(DawViewModel.current?.ppb ?: 44f)
 private val NoteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 private fun beatsLabel(b: Float) = "%.3f".format(b).trimEnd('0').trimEnd('.')
 private fun isBlack(p: Int) = (p % 12) in intArrayOf(1, 3, 6, 8, 10)
@@ -340,7 +341,12 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                         var step = SNAP; while (step * pw < 9.dp.toPx() && step < 1f) step *= 2f
                         if (step >= 1f) step = 1f
                         var k = 0
-                        while (k * step <= beats) { val b = k * step; val gx = gridLineX(b * pw); drawLine(if (b % 4f == 0f) Zk.dim.copy(alpha = .5f) else if (b % 1f == 0f) Zk.line else Zk.line.copy(alpha = .35f), Offset(gx, 0f), Offset(gx, size.height), 1f); k++ }
+                        while (k * step <= beats) {
+                            val b = k * step; val gx = gridLineX(b * pw)
+                            // the coarser the position (bar, beat, 1/8, 1/16...), the stronger the line: finer lines fade in as you zoom
+                            val col = if (b % 4f == 0f) Zk.dim.copy(alpha = .5f) else if (b % 1f == 0f) Zk.line else if (b % 0.5f == 0f) Zk.line.copy(alpha = .4f) else if (b % 0.25f == 0f) Zk.line.copy(alpha = .3f) else if (b % 0.125f == 0f) Zk.line.copy(alpha = .22f) else Zk.line.copy(alpha = .15f)
+                            drawLine(col, Offset(gx, 0f), Offset(gx, size.height), 1f); k++
+                        }
                         val prev = dragPrev
                         for (n in track.notes) {
                             val shown = prev?.get(n) ?: n
