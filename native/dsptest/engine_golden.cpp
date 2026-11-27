@@ -215,6 +215,21 @@ static int notePropChecks() {
     return fails;
 }
 
+static int tempoMapChecks() {
+    int fails = 0; auto check = [&](const char* what, bool ok, double v) { printf("tempo map: %-56s %s (%.6g)\n", what, ok ? "ok" : "FAILED", v); if (!ok) fails++; };
+    auto ep = std::make_unique<Engine>(); Engine& e = *ep; double bpm, ppq;
+    e.setTempo(100); e.transportAtFrame(96000, bpm, ppq);
+    check("no map: the constant tempo, ppq = frames / rate * bpm / 60", bpm == 100.0 && ppq == (double)96000 / kProjectRate * 100.0 / 60.0, ppq);
+    e.setTempoMap({96000, 240000}, {120, 60, 90});   // 120 BPM for 2 s (4 beats), 60 BPM for 3 s (3 beats), then 90 BPM
+    e.transportAtFrame(48000, bpm, ppq); check("first segment: 120 BPM, 2 beats after 1 s", bpm == 120.0 && std::fabs(ppq - 2.0) < 1e-9, ppq);
+    e.transportAtFrame(96000, bpm, ppq); check("at the first change: 60 BPM, beat 4", bpm == 60.0 && std::fabs(ppq - 4.0) < 1e-9, ppq);
+    e.transportAtFrame(144000, bpm, ppq); check("1 s into the slow segment: beat 5", bpm == 60.0 && std::fabs(ppq - 5.0) < 1e-9, ppq);
+    e.transportAtFrame(240000, bpm, ppq); check("at the second change: 90 BPM, beat 7", bpm == 90.0 && std::fabs(ppq - 7.0) < 1e-9, ppq);
+    e.transportAtFrame(288000, bpm, ppq); check("1 s into the last segment: beat 8.5", std::fabs(ppq - 8.5) < 1e-9, ppq);
+    e.setTempoMap({}, {80}); e.transportAtFrame(48000, bpm, ppq); check("clearing the map goes back to a constant tempo", bpm == 80.0 && std::fabs(ppq - 80.0 / 60.0) < 1e-9, ppq);
+    return fails;
+}
+
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "--print", file = argc > 2 ? argv[2] : ""; bool strict = false;
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--strict")) strict = true;
@@ -241,6 +256,7 @@ int main(int argc, char** argv) {
     }
     fails += routingChecks();
     fails += notePropChecks();
+    fails += tempoMapChecks();
     if (mode == "--update") { FILE* f = fopen(file.c_str(), "w"); if (!f) return 2; fputs(table.c_str(), f); fclose(f); printf("wrote %s\n", file.c_str()); }
     printf(fails ? "FAILED (%d)\n" : "ok\n", fails);
     return fails ? 1 : 0;

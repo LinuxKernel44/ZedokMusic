@@ -92,9 +92,9 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
     val short = LocalShort.current
     val rowHpx = with(density) { ((if (short) RowHShort else RowHTall) * vm.rowScale).coerceAtLeast(54.dp).toPx() }
     val padPx = with(density) { 8.dp.toPx() }
-    val patPx = with(density) { (PatRowH * patternRows(vm)).toPx() }   // the pattern lane above the track rows
+    val patPx = with(density) { (TimelineLaneH + PatRowH * patternRows(vm)).toPx() }   // the pattern lane above the track rows
     fun clipBounds(c: ClipM, trackIndex: Int): androidx.compose.ui.geometry.Rect {
-        val pw = ppb * density.density; val len = c.lengthFrames / 48000f * vm.bpm / 60f
+        val pw = ppb * density.density; val len = vm.clipBeats(c)
         return androidx.compose.ui.geometry.Rect(c.start * pw, patPx + trackIndex * rowHpx + padPx, maxOf((c.start + len) * pw, c.start * pw + 12.dp.value * density.density), patPx + (trackIndex + 1) * rowHpx - padPx)
     }
     fun clipAt(p: Offset): ClipM? { for ((i, t) in vm.tracks.withIndex()) for (c in t.clips) if (clipBounds(c, i).contains(p)) return c; return null }
@@ -162,7 +162,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                 } while (ev.changes.any { it.pressed })
             }
         }.verticalScroll(vs).padding(bottom = ScrollBottomPad)) {
-            Column(Modifier.width(HeaderW)) { PatternHeader(vm); vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint(); if (dnd.payload != null) Spacer(Modifier.height(rowH() * 0.8f)) }
+            Column(Modifier.width(HeaderW)) { TimelineHeader(vm); PatternHeader(vm); vm.tracks.forEach { TrackHeader(vm, it, onImport) } ; if (vm.tracks.isEmpty()) EmptyHint(); if (dnd.payload != null) Spacer(Modifier.height(rowH() * 0.8f)) }
             Box(Modifier.weight(1f).horizontalScroll(hs)) {
                 Box(Modifier.width(totalW).pointerInput(ppb, vm.tracks.size, rowHpx) {
                     val lp = viewConfiguration.longPressTimeoutMillis; val slop = viewConfiguration.touchSlop
@@ -192,6 +192,7 @@ fun ArrangeView(vm: DawViewModel, pxPerBeat: Float, onZoom: (Float) -> Unit, onE
                     }
                 }) {
                     Column {
+                        TimelineLane(vm, totalBeats, ppb)
                         PatternTimeline(vm, totalBeats, ppb)
                         vm.tracks.forEach { t -> TimelineRow(vm, t, totalBeats, ppb, onEdit) }
                         if (dnd.payload != null) NewTrackZone(dnd)
@@ -252,11 +253,13 @@ private fun Ruler(vm: DawViewModel, totalBeats: Float, ppb: Float, totalW: andro
     Canvas(Modifier.width(totalW).fillMaxHeight().scrubRuler(ppb) { vm.seekBeat(it) }) {
         val pw = ppb * density
         var b = 0
-        while (b <= totalBeats) {
-            val x = gridLineX(b * pw); val bar = b % 4 == 0
-            drawLine(if (bar) Zk.dim else Zk.line, Offset(x, if (bar) 8.dp.toPx() else 18.dp.toPx()), Offset(x, size.height), 1f)
-            if (bar && pw * 4 > 40) drawText(tm.measure("${b / 4 + 1}", androidx.compose.ui.text.TextStyle(color = Zk.dim, fontSize = 10.sp)), topLeft = Offset(x + 4.dp.toPx(), 2.dp.toPx()))
-            b++
+        while (b <= totalBeats) { val x = gridLineX(b * pw); drawLine(Zk.line, Offset(x, 18.dp.toPx()), Offset(x, size.height), 1f); b++ }   // beats
+        // bar lines and numbers follow the time signature changes of the lane above
+        val bars = TimeSig.barStarts(vm.sigChanges.toList(), totalBeats)
+        for ((i, bl) in bars.withIndex()) {
+            val x = gridLineX(bl.first * pw); drawLine(Zk.dim, Offset(x, 8.dp.toPx()), Offset(x, size.height), 1f)
+            val nextW = if (i + 1 < bars.size) (bars[i + 1].first - bl.first) * pw else 4 * pw
+            if (nextW > 40) drawText(tm.measure("${bl.second}", androidx.compose.ui.text.TextStyle(color = Zk.dim, fontSize = 10.sp)), topLeft = Offset(x + 4.dp.toPx(), 2.dp.toPx()))
         }
         if (vm.loop) drawRect(Zk.accent.copy(alpha = .35f), Offset(0f, size.height - 4.dp.toPx()), Size(vm.loopBars * 4 * pw, 4.dp.toPx()))
         drawPlayhead(vm.playhead * pw, Zk.accent, head = true)
@@ -357,7 +360,7 @@ private fun ClipBlock(vm: DawViewModel, t: TrackM, c: ClipM, ppb: Float) {
     var edit by remember { mutableStateOf(false) }
     var selfDrag by remember(c) { mutableStateOf(false) }
     val selected = c in vm.clipSelection
-    val lenBeats = c.lengthFrames / 48000f * vm.bpm / 60f
+    val lenBeats = vm.clipBeats(c)
     val follow = if (selected && vm.clipDragging && !selfDrag) vm.clipDragBeats * ppb else drag
     val x = with(density) { ((c.start * ppb) + follow).dp.roundToPx() }
     // The real waveform, computed once and cached in the project (Cache/Peaks); it follows the processed copy when pitch / speed were changed.

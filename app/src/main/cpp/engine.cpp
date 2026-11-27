@@ -120,6 +120,21 @@ void Engine::setLoop(bool on, int64_t s, int64_t e) {
     edit([&](Project& p) { p.loop = on && e > s; p.loopStart = s; p.loopEnd = e; });
 }
 
+void Engine::setTempoMap(std::vector<int64_t> frames, std::vector<double> bpms) {
+    edit([&](Project& p) {
+        if (frames.empty() || bpms.size() != frames.size() + 1) { p.tempoFrames.clear(); p.tempoBpm.clear(); if (!bpms.empty()) tempo_.store(std::clamp(bpms[0], 20.0, 400.0)); return; }
+        for (auto& b : bpms) b = std::clamp(b, 20.0, 400.0);
+        p.tempoFrames = std::move(frames); p.tempoBpm = std::move(bpms);
+    });
+}
+void Engine::tempoAt(const Project* p, int64_t pos, double& bpm, double& ppq) const {
+    if (!p || p->tempoFrames.empty()) { bpm = tempo_.load(std::memory_order_relaxed); ppq = (double)pos / kProjectRate * bpm / 60.0; return; }
+    size_t seg = 0; while (seg < p->tempoFrames.size() && p->tempoFrames[seg] <= pos) seg++;
+    double q = 0.0; int64_t from = 0;
+    for (size_t k = 0; k < seg; k++) { q += (double)(p->tempoFrames[k] - from) / kProjectRate * p->tempoBpm[k] / 60.0; from = p->tempoFrames[k]; }
+    bpm = p->tempoBpm[seg]; ppq = q + (double)(pos - from) / kProjectRate * bpm / 60.0;
+}
+
 // ---------- routing ----------
 static BusState* findBus(Project& p, int id) { for (auto& b : p.buses) if (b.id == id) return &b; return nullptr; }
 static int busSlot(const Project& p, int id) { if (id <= 0) return -1; for (size_t i = 0; i < p.buses.size() && i < (size_t)kMaxBuses; i++) if (p.buses[i].id == id) return (int)i; return -1; }
@@ -311,7 +326,8 @@ void Engine::fxSubmit(const FxState& fx, const float* in, int frames, int64_t au
     if (autoPos < 0 || (lastPos && *lastPos != autoPos - frames)) for (int k = 0; k < kMaxLanes; k++) autoLast[k] = NAN;  // stopped or jumped: send the values again
     if (autoPos >= 0 && !fx.lanes.empty()) appendAutomation(fx.lanes, autoPos, autoLast, ch, nc);
     if (lastPos) *lastPos = autoPos;
-    fx.plugin->setTransport(tempo_.load(std::memory_order_relaxed), autoPos >= 0 ? (double)autoPos / kProjectRate * tempo_.load(std::memory_order_relaxed) / 60.0 : -1.0, autoPos >= 0);
+    double bpm, ppq; tempoAt(audioProject_, autoPos >= 0 ? autoPos : 0, bpm, ppq);
+    fx.plugin->setTransport(bpm, autoPos >= 0 ? ppq : -1.0, autoPos >= 0);
     fx.plugin->submitAudio(in, frames, ch, nc);
 }
 
@@ -384,7 +400,7 @@ void Engine::fxOffline(const Project& p, MixState& ms, int frames, int64_t pos) 
             if (!fxActive(f)) continue;
             ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
             if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
-            f.plugin->setTransport(tempo_.load(), (double)pos / kProjectRate * tempo_.load() / 60.0, true);
+            { double bpm, ppq; tempoAt(&p, pos, bpm, ppq); f.plugin->setTransport(bpm, ppq, true); }
             f.plugin->submitAudio(buf, frames, ch, nc);
             f.plugin->collect(buf, frames, kWait);
         }
@@ -396,7 +412,7 @@ void Engine::fxOfflineMaster(const Project& p, float* out, int frames, int64_t p
         if (!fxActive(f)) continue;
         ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
         if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
-        f.plugin->setTransport(tempo_.load(), (double)pos / kProjectRate * tempo_.load() / 60.0, true);
+        { double bpm, ppq; tempoAt(&p, pos, bpm, ppq); f.plugin->setTransport(bpm, ppq, true); }
         f.plugin->submitAudio(out, frames, ch, nc);
         f.plugin->collect(out, frames, kWait);
     }
@@ -454,7 +470,7 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
                 if (pos == from) for (int k = 0; k < kMaxLanes; k++) last[k] = NAN;
                 appendAutomation(t.lanes, pos, last, ch, nc);
             }
-            t.plugin->setTransport(tempo_.load(), (double)pos / kProjectRate * tempo_.load() / 60.0, true);
+            { double bpm, ppq; tempoAt(&q, pos, bpm, ppq); t.plugin->setTransport(bpm, ppq, true); }
             t.plugin->submit(ev, ne, plugFrames, ch, nc);
             t.plugin->collect(dst, plugFrames, kSyncWaitNs);
         }
@@ -754,7 +770,7 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
         if (playing) windowEvents(p, t, windowPos, frames, ev, n);
         for (int i = 0; i < nl; i++) if (le[i].track == t.id && n < ZK_MAX_EVENTS)
             ev[n++] = ZkEvent{0, le[i].on ? (uint8_t)ZK_NOTE_ON : (uint8_t)ZK_NOTE_OFF, 0, le[i].pitch, le[i].vel};
-        t.plugin->setTransport(tempo_.load(std::memory_order_relaxed), playing ? (double)windowPos / kProjectRate * tempo_.load(std::memory_order_relaxed) / 60.0 : -1.0, playing);
+        { double bpm, ppq; tempoAt(&p, windowPos, bpm, ppq); t.plugin->setTransport(bpm, playing ? ppq : -1.0, playing); }
         t.plugin->submit(ev, n, frames, ch, nc);
     }
 }

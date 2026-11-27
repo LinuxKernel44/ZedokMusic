@@ -1,0 +1,12 @@
+{
+ "version": 5,
+ "bpm": 128, "master": 1, "masterStereo": 0, "loopBars": 4, "loop": false,
+ "scale": {"root": 0, "type": 2},
+ "tracks": [{"name": "Lead", "kind": "Instrument", "gain": 1, "pan": 0, "stereo": 0, "mute": false, "solo": false, "plugin": "zedok:hybrid", "clips": [], "fx": []}],
+ "masterFx": [],
+ "patterns": [{"id": 1, "name": "Pattern 1", "color": 0, "tracks": {"0": [[60, 0, 1, 100]]}}],
+ "playlist": [{"pattern": 1, "start": 0, "row": 0}],
+ "currentPattern": 1,
+ "tempoChanges": [[16, 90], [32, 140.5]],
+ "markers": [{"beat": 0, "name": "Intro"}, {"beat": 16, "name": "Verse"}]
+}

@@ -64,6 +64,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         songMode = on; applyLoop(); syncAllNotes(); applyClipGains(); dirty = true
     }
     private fun applyClipGains() { for (t in tracks) for (c in t.clips) e.setClipGain(c.engineId, if (songMode) Math.pow(10.0, c.gainDb / 20.0).toFloat() else 0f) }
+    /** Tempo changes after beat 0 (the tempo from the start is [bpm]) and the markers of the timeline; saved with the project. */
+    val tempoChanges = androidx.compose.runtime.mutableStateListOf<TempoPoint>()
+    val markers = androidx.compose.runtime.mutableStateListOf<MarkerM>()
+    private var tm = TempoMap(DEFAULT_BPM)
+    /** Time signature changes after beat 0 (4/4 at the start); they set the bar lines of the arrangement ruler and are saved with the project. */
+    val sigChanges = androidx.compose.runtime.mutableStateListOf<SigPoint>()
+    /** The marker whose rename dialog is open. */
+    var renameMarkerDialog by mutableStateOf<MarkerM?>(null)
     private var patternCounter = 0
     private var lastPatLen = 0f
     private val projectFile get() = store?.file(projectName)
@@ -165,14 +173,66 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             if (t != null && f != null && r[4] == 1L && r[0] > 0) {
                 // The performer heard the output one output-buffer late and the input arrives one input-buffer late: shift the take earlier.
                 val comp = e.stats()[2].toDouble() + r[2].toDouble()
-                importClip(t, f, maxOf(0f, recStartBeat - (comp / fpb).toFloat()))
+                importClip(t, f, maxOf(0f, tm.beat(tm.frames(recStartBeat) - comp).toFloat()))
                 if (r[1] > 0) message = "Recorded with ${r[1]} dropped frames (storage too slow)."
             } else message = "Nothing was recorded."
         }
         recLevel = 0f
     }
 
-    private val fpb get() = 48000.0 * 60.0 / bpm  // frames per beat
+    /** Song beats -> engine frames (and back) through the tempo map. */
+    private fun fr(beat: Float): Long = tm.frames(beat).toLong()
+    /** How many beats an audio clip covers (its length is fixed in time, so it depends on the tempo where it plays). */
+    fun clipBeats(c: ClipM): Float = tm.beatsFor(c.start, c.lengthFrames)
+    /** Rebuilds the tempo map from [bpm] and [tempoChanges], gives it to the engine and, when [reflow], puts every clip, note, lane and the loop at the right frame again. */
+    private fun rebuildTempo(reflow: Boolean) {
+        val beat = playhead
+        tm = TempoMap(bpm, tempoChanges.toList())
+        e.setTempo(bpm.toDouble())
+        e.setTempoMap(LongArray(tm.segments - 1) { tm.startFrame(it + 1) }, DoubleArray(tm.segments) { tm.bpmOf(it).toDouble() })
+        if (!reflow) return
+        tracks.forEach { syncNotes(it); syncLanes(it); it.clips.forEach { c -> e.moveClip(c.engineId, fr(c.start)) } }
+        applyLoop(); e.seek(fr(beat)); dirty = true
+    }
+    fun addTempoChange(beat: Float, newBpm: Float) {
+        val b = Math.round(beat * 4f) / 4f; if (b <= 0f) { changeBpm(newBpm); return }
+        val old = tempoChanges.firstOrNull { it.beat == b }; val p = TempoPoint(b, newBpm.coerceIn(30f, 300f))
+        val at = tempoChanges.indexOf(old)
+        if (old != null) tempoChanges[at] = p else tempoChanges.add(p)
+        rebuildTempo(true)
+        record("Tempo change", undo = { if (old != null) tempoChanges[tempoChanges.indexOf(p)] = old else tempoChanges.remove(p); rebuildTempo(true) }, redo = { if (old != null) tempoChanges[tempoChanges.indexOf(old)] = p else tempoChanges.add(p); rebuildTempo(true) })
+    }
+    fun removeTempoChange(p: TempoPoint) {
+        val at = tempoChanges.indexOf(p); if (at < 0) return
+        tempoChanges.remove(p); rebuildTempo(true)
+        record("Delete tempo change", undo = { tempoChanges.add(at.coerceAtMost(tempoChanges.size), p); rebuildTempo(true) }, redo = { tempoChanges.remove(p); rebuildTempo(true) })
+    }
+    fun addSigChange(beat: Float, num: Int, den: Int) {
+        val b = Math.round(beat); if (b <= 0) return
+        val old = sigChanges.firstOrNull { it.beat == b.toFloat() }; val p = SigPoint(b.toFloat(), num.coerceIn(1, 32), den)
+        val at = sigChanges.indexOf(old)
+        if (old != null) sigChanges[at] = p else sigChanges.add(p); dirty = true
+        record("Time signature", undo = { if (old != null) sigChanges[sigChanges.indexOf(p)] = old else sigChanges.remove(p); dirty = true }, redo = { if (old != null) sigChanges[sigChanges.indexOf(old)] = p else sigChanges.add(p); dirty = true })
+    }
+    fun removeSigChange(p: SigPoint) {
+        val at = sigChanges.indexOf(p); if (at < 0) return
+        sigChanges.remove(p); dirty = true
+        record("Delete time signature", undo = { sigChanges.add(at.coerceAtMost(sigChanges.size), p); dirty = true }, redo = { sigChanges.remove(p); dirty = true })
+    }
+    fun addMarker(beat: Float, name: String): MarkerM {
+        val m = MarkerM(Math.round(beat * 4f) / 4f, name.ifBlank { "Marker ${markers.size + 1}" }.trim().take(40)); markers.add(m); dirty = true
+        record("Add marker", undo = { markers.remove(m); dirty = true }, redo = { markers.add(m); dirty = true })
+        return m
+    }
+    fun renameMarker(m: MarkerM, name: String) {
+        val n = name.trim().take(40); val o = m.name; if (n.isEmpty() || n == o) return
+        m.name = n; dirty = true; record("Rename marker", undo = { m.name = o; dirty = true }, redo = { m.name = n; dirty = true })
+    }
+    fun removeMarker(m: MarkerM) {
+        val at = markers.indexOf(m); if (at < 0) return
+        markers.remove(m); dirty = true
+        record("Delete marker", undo = { markers.add(at.coerceAtMost(markers.size), m); dirty = true }, redo = { markers.remove(m); dirty = true })
+    }
     private var dirty = false
 
     // Declared before init: load() runs from init and fills them.
@@ -221,7 +281,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         while (true) {
             delay(33)
             playing = e.isPlaying()
-            playhead = (e.position() / fpb).toFloat()
+            playhead = tm.beat(e.position().toDouble()).toFloat()
             for (t in tracks) { t.meter = maxOf(e.peak(t.id), t.meter * 0.86f) }
             masterMeter = maxOf(e.peak(-1), masterMeter * 0.86f)
             val plugins = allPlugins()
@@ -268,7 +328,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private var lastSeekFrame = -1L
     /** Moves the play cursor. The same place asked twice in a row (a finger resting on the ruler) is only sent once while playing: every seek restarts the audio block. */
     fun seekBeat(beat: Float) {
-        val b = beat.coerceAtLeast(0f); val f = (b * fpb).toLong()
+        val b = beat.coerceAtLeast(0f); val f = fr(b)
         if (playing && f == lastSeekFrame) return
         lastSeekFrame = f; e.seek(f); playhead = b
     }
@@ -285,8 +345,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     private fun applyLoop() {
         val p = currentPattern
-        if (!songMode && p != null) e.setLoop(true, 0, (patternLength(p) * fpb).toLong())   // Pattern mode: the pattern loops on itself
-        else e.setLoop(loop, 0, (loopBars * 4 * fpb).toLong())
+        if (!songMode && p != null) e.setLoop(true, 0, fr(patternLength(p)))   // Pattern mode: the pattern loops on itself
+        else e.setLoop(loop, 0, fr(loopBars * 4f))
     }
     fun changeBpm(v: Float) {
         val old = bpm; applyBpm(v); val now = bpm
@@ -294,11 +354,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     }
     private fun applyBpm(v: Float) {
         val old = bpm; bpm = v.coerceIn(30f, 300f)
-        e.setTempo(bpm.toDouble())
-        if (old == bpm) return
-        val beat = playhead
-        tracks.forEach { syncNotes(it); syncLanes(it); it.clips.forEach { c -> e.moveClip(c.engineId, (c.start * fpb).toLong()) } }
-        applyLoop(); e.seek((beat * fpb).toLong()); dirty = true
+        if (old == bpm) { e.setTempo(bpm.toDouble()); return }
+        rebuildTempo(true)
     }
 
     // ---------- tracks ----------
@@ -327,7 +384,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         e.removeTrack(t.id); tracks.remove(t); if (selected == t) selected = tracks.firstOrNull(); dirty = true
     }
     fun importClip(t: TrackM, wav: File, startBeat: Float = 0f): ClipM? {
-        val r = e.loadClip(t.id, wav.absolutePath, (startBeat * fpb).toLong())
+        val r = e.loadClip(t.id, wav.absolutePath, fr(startBeat))
         if (r == null) { message = "Could not read ${wav.name} (WAV only)."; return null }
         val c = ClipM(r[0].toInt(), wav.absolutePath, wav.nameWithoutExtension, startBeat, r[1])
         t.clips.add(c); if (!songMode) e.setClipGain(c.engineId, 0f); dirty = true; return c
@@ -386,7 +443,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     /** Clone (Ctrl+B in FL Studio): copies the selection right after its end. Returns the copies, which become the selection. */
     fun cloneClips(sel: List<ClipM>): List<ClipM> {
         if (sel.isEmpty()) return emptyList()
-        val span = sel.maxOf { it.start + it.lengthFrames / 48000f * bpm / 60f } - sel.minOf { it.start }
+        val span = sel.maxOf { it.start + clipBeats(it) } - sel.minOf { it.start }
         return sel.mapNotNull { c -> trackOf(c)?.let { addClipLike(it, c, c.start + span) } }.also { recordAdded("Clone clips", it) }
     }
     class ClipCopy(val track: TrackM, val src: ClipM, val rel: Float)
@@ -436,7 +493,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 if (err != null) { message = err; return@withContext }
                 val f = target ?: return@withContext
                 val i = t.clips.indexOf(c); if (i < 0) return@withContext
-                val r = e.loadClip(t.id, f.absolutePath, (c.start * fpb).toLong())
+                val r = e.loadClip(t.id, f.absolutePath, fr(c.start))
                 if (r == null) { message = "Could not load the processed clip."; return@withContext }
                 e.removeClip(c.engineId)
                 val n = ClipM(r[0].toInt(), f.absolutePath, c.name, c.start, r[1])
@@ -450,7 +507,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun moveClip(c: ClipM, startBeat: Float) {
-        c.start = startBeat.coerceAtLeast(0f); e.moveClip(c.engineId, (c.start * fpb).toLong()); dirty = true
+        c.start = startBeat.coerceAtLeast(0f); e.moveClip(c.engineId, fr(c.start)); dirty = true
     }
     fun removeClip(t: TrackM, c: ClipM) { e.removeClip(c.engineId); t.clips.remove(c); dirty = true }
 
@@ -572,7 +629,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val d = LongArray(list.size * 10)   // per note: start, length, pitch, velocity, pan, cutoff, res, fine, release, slide
         list.forEachIndexed { i, n ->
             val o = i * 10
-            d[o] = (n.start * fpb).toLong(); d[o + 1] = (n.length * fpb).toLong(); d[o + 2] = n.pitch.toLong(); d[o + 3] = n.velocity.toLong()
+            val f0 = fr(n.start); d[o] = f0; d[o + 1] = maxOf(1L, fr(n.start + n.length) - f0); d[o + 2] = n.pitch.toLong(); d[o + 3] = n.velocity.toLong()
             d[o + 4] = n.pan.toLong(); d[o + 5] = n.cutoff.toLong(); d[o + 6] = n.res.toLong(); d[o + 7] = n.fine.toLong(); d[o + 8] = n.release.toLong(); d[o + 9] = if (n.slide) 1L else 0L
         }
         e.setNotes(t.id, d)
@@ -596,7 +653,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun songBeats(): Float {
         var end = 0f
         for (c in playlist) end = maxOf(end, c.start + clipLength(c))
-        for (t in tracks) for (c in t.clips) end = maxOf(end, c.start + c.lengthFrames / 48000f * bpm / 60f)
+        for (t in tracks) for (c in t.clips) end = maxOf(end, c.start + clipBeats(c))
         return maxOf(4f, kotlin.math.ceil(end / 4f) * 4f)
     }
     /** The position of the playhead inside the current pattern (while a placement of it plays), else -1. */
@@ -767,7 +824,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val lanes = t.lanes.filter { it.points.isNotEmpty() }
         val meta = LongArray(lanes.size * 2); val frames = ArrayList<Long>(); val values = ArrayList<Float>(); val shapes = ArrayList<Byte>()
         lanes.forEachIndexed { i, l -> meta[i * 2] = l.paramIndex.toLong(); meta[i * 2 + 1] = l.points.size.toLong()
-            l.points.forEach { frames.add((it.beat * fpb).toLong()); values.add(it.value); shapes.add(it.shape.toByte()) } }
+            l.points.forEach { frames.add(fr(it.beat)); values.add(it.value); shapes.add(it.shape.toByte()) } }
         e.setAutomation(t.id, meta, frames.toLongArray(), values.toFloatArray(), shapes.toByteArray())
     }
     /** While recording (transport running), writes the touched parameter into its lane at the playhead. */
@@ -1048,8 +1105,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun exportAudio(range: Int, format: Int, name: String, stems: Boolean) {
         val dir = projectExportsDir() ?: run { message = "No workspace folder."; return }
         if (exporting) return
-        val to = if (range == 1) (loopBars * 4 * fpb).toLong()
-            else (tracks.maxOfOrNull { it.lengthBeats(bpm) }?.let { (it * fpb).toLong() + 2 * 48000L } ?: 0L)
+        val to = if (range == 1) fr(loopBars * 4f)
+            else fr(songBeats()) + 2 * 48000L
         if (to <= 0 || tracks.all { it.notes.isEmpty() && it.clips.isEmpty() }) { message = "Nothing to export: add notes or clips first."; return }
         e.pause(); playing = false
         dir.mkdirs()
@@ -1129,6 +1186,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             tracks.forEachIndexed { i, t -> if (t.kind == TrackKind.Instrument) { val ns = notesOf(pt, t); if (ns.isNotEmpty()) per.put(i.toString(), JSONArray().also { a -> ns.forEach { n -> a.put(noteJson(n)) } }) } }
             pats.put(JSONObject().put("id", pt.id).put("name", pt.name).put("color", TrackColors.indexOf(pt.color).coerceAtLeast(0)).also { o -> pt.fixedLength?.let { o.put("length", it.toDouble()) } }.put("tracks", per))
         }
+        root.put("sigChanges", JSONArray().also { a -> sigChanges.forEach { a.put(JSONArray().put(it.beat.toDouble()).put(it.num).put(it.den)) } })
+        root.put("tempoChanges", JSONArray().also { a -> tempoChanges.forEach { a.put(JSONArray().put(it.beat.toDouble()).put(it.bpm.toDouble())) } })
+            .put("markers", JSONArray().also { a -> markers.forEach { a.put(JSONObject().put("beat", it.beat.toDouble()).put("name", it.name)) } })
         root.put("patterns", pats).put("currentPattern", currentPattern?.id ?: 1)
             .put("playlist", JSONArray().also { a -> playlist.forEach { c -> a.put(JSONObject().put("pattern", c.pattern.id).put("start", c.start.toDouble()).put("row", c.row).also { o -> c.length?.let { o.put("length", it.toDouble()) } }) } })
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
@@ -1186,7 +1246,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         pluginTarget = null; panelExpanded = false
         editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
-        bpm = DEFAULT_BPM; e.setTempo(bpm.toDouble()); scaleRoot = 0; scaleType = 2; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); masterStereo = 0f; e.setMasterWidth(1f); applyLoop()
+        tempoChanges.clear(); markers.clear(); sigChanges.clear(); bpm = DEFAULT_BPM; rebuildTempo(false); scaleRoot = 0; scaleType = 2; loopBars = 4; masterGain = 1f; e.setMasterGain(1f); masterStereo = 0f; e.setMasterWidth(1f); applyLoop()
         pendingLanes.clear(); pendingParams.clear(); pendingStates.clear()
         e.seek(0); playhead = 0f; selected = null; laneSelected = null; dirty = false
     }
@@ -1430,6 +1490,14 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun loadTempo(root: JSONObject) {
+        tempoChanges.clear(); markers.clear(); sigChanges.clear()
+        root.optJSONArray("sigChanges")?.let { a -> for (i in 0 until a.length()) a.optJSONArray(i)?.let { sigChanges.add(SigPoint(it.getDouble(0).toFloat(), it.getInt(1), it.getInt(2))) } }
+        root.optJSONArray("tempoChanges")?.let { a -> for (i in 0 until a.length()) a.optJSONArray(i)?.let { tempoChanges.add(TempoPoint(it.getDouble(0).toFloat(), it.getDouble(1).toFloat())) } }
+        root.optJSONArray("markers")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { markers.add(MarkerM(it.optDouble("beat", 0.0).toFloat(), it.optString("name", "Marker"))) } }
+        rebuildTempo(false)
+    }
+
     /** Reads the patterns and the playlist; the notes of the current pattern go into the tracks' note lists, the others stay stored in their pattern. */
     private fun loadPatterns(root: JSONObject) {
         patterns.clear(); playlist.clear(); currentPattern = null
@@ -1461,7 +1529,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         if (!f.exists()) return
         try {
             val root = try { ProjectFormat.migrate(JSONObject(f.readText())) } catch (ex: ProjectFormat.TooNew) { formatLocked = true; message = ex.message; dirty = false; return }
-            bpm = root.optDouble("bpm", 120.0).toFloat(); e.setTempo(bpm.toDouble()); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain); masterStereo = root.optDouble("masterStereo", 0.0).toFloat(); e.setMasterWidth(widthOf(masterStereo))
+            bpm = root.optDouble("bpm", 120.0).toFloat(); loadTempo(root); masterGain = root.optDouble("master", 1.0).toFloat(); e.setMasterGain(masterGain); masterStereo = root.optDouble("masterStereo", 0.0).toFloat(); e.setMasterWidth(widthOf(masterStereo))
             loopBars = root.optInt("loopBars", 4); loop = root.optBoolean("loop", false); applyLoop()
             root.optJSONObject("scale").let { sc -> scaleRoot = sc?.optInt("root", 0)?.coerceIn(0, 11) ?: 0; scaleType = sc?.optInt("type", 0)?.coerceIn(0, Theory.SCALES.size - 1) ?: 0 }
             root.optJSONObject("view")?.let { v ->

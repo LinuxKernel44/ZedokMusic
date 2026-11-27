@@ -35,9 +35,11 @@ class ProjectFormatTest {
     }
 
     @Test fun currentFormatIsLeftAsItIs() {
-        val src = witness("v4_current.zedok")
-        val r = ProjectFormat.migrate(witness("v4_current.zedok"))
+        val src = witness("v5_current.zedok")
+        val r = ProjectFormat.migrate(witness("v5_current.zedok"))
         assertEquals(src.toString(), r.toString())
+        assertEquals(2, r.getJSONArray("tempoChanges").length()); assertEquals(2, r.getJSONArray("markers").length())
+        assertEquals(5, ProjectFormat.CURRENT)
     }
 
     @Test fun migrationIsIdempotent() {
@@ -69,6 +71,6 @@ class ProjectFormatTest {
         val notes = r.getJSONArray("patterns").getJSONObject(0).getJSONObject("tracks").getJSONArray("0")
         assertEquals(2, notes.length()); assertEquals(9, notes.getJSONArray(1).length())   // a note with its five properties survives the move into the pattern
         assertEquals(1, r.getJSONArray("playlist").length()); assertEquals(1, r.getInt("currentPattern"))
-        assertEquals(4, ProjectFormat.CURRENT)
+        assertTrue(ProjectFormat.CURRENT >= 4)
     }
 }

@@ -84,6 +84,13 @@ J(jfloatArray, pluginTelemetry, jint track, jint what) {
 J(jstring, paramGroup, jint track, jint index) { return env->NewStringUTF(eng().paramGroup(track, index).c_str()); }
 J(jstring, paramTextAt, jint track, jint index, jfloat norm) { return env->NewStringUTF(eng().paramTextAt(track, index, norm).c_str()); }
 J(void, setTempo, jdouble bpm) { eng().setTempo(bpm); }
+// Tempo map: frames = the start frame of every segment after the first, bpms = one tempo per segment (frames.size() + 1 values).
+J(void, setTempoMap, jlongArray frames, jdoubleArray bpms) {
+    std::vector<int64_t> f(env->GetArrayLength(frames)); std::vector<double> b(env->GetArrayLength(bpms));
+    if (!f.empty()) env->GetLongArrayRegion(frames, 0, (jsize)f.size(), reinterpret_cast<jlong*>(f.data()));
+    if (!b.empty()) env->GetDoubleArrayRegion(bpms, 0, (jsize)b.size(), b.data());
+    eng().setTempoMap(std::move(f), std::move(b));
+}
 // The built-in plugins: "id|name|kind|description" (kind 1 instrument, 2 effect).
 J(jobjectArray, nativePlugins) {
     const auto& l = zdsp::pluginList(); jclass sc = env->FindClass("java/lang/String"); jobjectArray a = env->NewObjectArray((jsize)l.size(), sc, nullptr);

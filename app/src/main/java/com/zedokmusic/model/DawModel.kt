@@ -112,3 +112,6 @@ val TrackColors = listOf(
 fun faderToGain(p: Float): Float { val x = p / 0.75f; return x * x }
 fun gainToFader(g: Float): Float = (kotlin.math.sqrt(g.coerceAtLeast(0f)) * 0.75f).coerceIn(0f, 1f)
 fun gainToDb(g: Float): String = if (g < 0.001f) "-∞" else "%.1f".format(20f * kotlin.math.log10(g))
+
+/** A named flag on the timeline: tap it to jump there. */
+class MarkerM(val beat: Float, name: String) { var name by mutableStateOf(name) }

@@ -84,6 +84,10 @@ struct Project {
     std::vector<TrackState> tracks;
     std::vector<FxState> masterFx;                  // insert effects on the summed mix
     std::vector<BusState> buses;
+    // Tempo changes along the song, for the tempo and position given to plugins: tempoFrames[i] = the frame where segment i + 1 begins, tempoBpm[0] = the tempo from frame 0,
+    // tempoBpm[i + 1] = the tempo of segment i + 1. Empty: the constant tempo set with setTempo.
+    std::vector<int64_t> tempoFrames;
+    std::vector<double> tempoBpm;
     std::vector<int> busOrder;                      // indices into `buses`, every bus after all the buses that feed it (computed by Engine::planRouting)
     float masterGain = 1.f;
     float masterWidth = 1.f;
@@ -177,6 +181,10 @@ public:
     std::string paramTextAt(int id, int index, float norm);   // display text of a value the parameter does not have now (choice labels)
     int pluginTelemetry(int id, int what, float* out, int cap);   // plugin-specific display data
     void setTempo(double bpm) { tempo_.store(bpm < 20.0 ? 20.0 : bpm > 400.0 ? 400.0 : bpm); }
+    /** Tempo changes: segment i + 1 starts at frames[i] and runs at bpms[i + 1]; bpms[0] is the tempo from the start (frames.size() + 1 values). Empty frames = constant tempo. */
+    void setTempoMap(std::vector<int64_t> frames, std::vector<double> bpms);
+    /** The tempo and the position in quarter notes the plugins get at engine frame [pos] (for tests and display). */
+    void transportAtFrame(int64_t pos, double& bpm, double& ppq) { std::lock_guard<std::mutex> lk(editMutex_); tempoAt(current_.get(), pos, bpm, ppq); }
     bool detachPlugin(int track);
     int pluginState(int track);  // 0 none, 1 starting, 2 ready, 3 error
     std::string pluginName(int track);
@@ -277,6 +285,8 @@ private:
     MixState audioMix_;
 
     std::atomic<double> tempo_{120.0};
+    /** Tempo and position in quarter notes at engine frame [pos] (legacy constant-tempo expression when the project has no tempo map). */
+    void tempoAt(const Project* p, int64_t pos, double& bpm, double& ppq) const;
     bool attachBridge(int id, std::shared_ptr<PluginBridge> bridge);
     std::atomic<bool> playing_{false};
     std::atomic<int64_t> pos_{0};

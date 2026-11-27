@@ -101,11 +101,11 @@ Risques : migration du format, régressions d'édition sur arrangement/piano rol
 
 ## Phase 3 — Marqueurs, carte de tempo et de signature
 
-- [ ] **3.1 Marqueurs** de la timeline : nom, couleur, saut de lecture, liste ; marqueurs de **tempo** et de **signature** (insertion à une mesure donnée).
-- [ ] **3.2 Carte de tempo** (BPM par segment, rampes de tempo) : le moteur convertit temps ↔ position en échantillons par la carte ; la lecture, l'enregistrement, l'export et l'étirement de clips audio (« Fit to project BPM ») l'utilisent.
-- [ ] **3.3 Signatures variables** (4/4, 3/4, 7/8, 6/8 …) : règle, grille, début de mesure, métronome, « Fit to bar » selon la signature courante.
-- [ ] **3.4 Transmission aux plugins** (compléter 0.1/0.2 par segment).
-- [ ] **3.5 Interface** : piste de tempo / de marqueurs en haut de la Playlist, édition tactile.
+- [x] **3.1 Marqueurs** (0.56.0) de la timeline : nom, couleur, saut de lecture, liste ; marqueurs de **tempo** et de **signature** (insertion à une mesure donnée).
+- [x] **3.2 Carte de tempo** (0.56.0 : clips, notes, automation, boucle, curseur et plugins suivent la carte ; vérifié sur S10 : 100 → 150 BPM à la mesure 3) (BPM par segment, rampes de tempo) : le moteur convertit temps ↔ position en échantillons par la carte ; la lecture, l'enregistrement, l'export et l'étirement de clips audio (« Fit to project BPM ») l'utilisent.
+- [~] **3.3 Signatures variables (0.56.0 : lignes de mesure et numéros de la règle de l'arrangement ; piano roll, rack et patterns comptent toujours des mesures de 4 temps ; métronome et « Fit to bar » non adaptés)** (4/4, 3/4, 7/8, 6/8 …) : règle, grille, début de mesure, métronome, « Fit to bar » selon la signature courante.
+- [~] **3.4 Transmission aux plugins** (0.56.0 : tempo et position par segment ; signature toujours 4/4) (compléter 0.1/0.2 par segment).
+- [x] **3.5 Interface** (0.56.0 : voie Markers · Tempo) : piste de tempo / de marqueurs en haut de la Playlist, édition tactile.
 
 Critères : un projet à tempo variable s'exporte avec les bons points d'échantillon (mesure de position de pics hors ligne) ; changer la signature ne casse pas les clips existants.
 
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.56.0-alpha | 2026-11-27 | Phase 3 : marqueurs, carte de tempo, signatures (règle) ; format 5 |
 | 0.55.0-alpha | 2026-11-27 | Phase 2 : Rack (step sequencer), mode Song / Pattern. Reste de la phase 2 : navigateur (2.8), voir feuille |
 | 0.54.0-alpha | 2026-11-27 | Phase 2 (1re partie) : patterns, playlist (voie de patterns), format 4 |
 | 0.53.0-alpha | 2026-11-27 | Phase 1.9 : slide notes (Hybrid, Sampler). Phase 1 terminée |

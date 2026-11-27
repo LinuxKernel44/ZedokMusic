@@ -82,6 +82,7 @@ object NativeEngine {
     /** Display text a built-in plugin's parameter would show at normalized value [norm] (choice labels). */
     external fun paramTextAt(track: Int, index: Int, norm: Float): String
     external fun setTempo(bpm: Double)
+    external fun setTempoMap(frames: LongArray, bpms: DoubleArray)
     /** The built-in plugins as "id|name|kind|description" (kind 1 = instrument, 2 = effect). */
     external fun nativePlugins(): Array<String>
     external fun detachPlugin(track: Int): Boolean
