@@ -124,6 +124,13 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
         val ch = sel.associateWith(f); vm.replaceNotes(track, ch); selection.clear(); selection.addAll(sel.map { ch[it]!! })
     }
 
+    /** Sets the velocity of notes (one undo step); the selection follows the replaced notes. */
+    fun applyVelocities(vels: Map<NoteM, Int>) {
+        val ch = vels.mapValues { (n, v) -> NoteM(n.pitch, n.start, n.length, v.coerceIn(1, 127)) }.filter { (n, m) -> n.velocity != m.velocity }
+        if (ch.isEmpty()) return
+        val before = selNotes; vm.replaceNotes(track, ch, "Edit velocity"); selection.clear(); selection.addAll(before.map { ch[it] ?: it })
+    }
+
     if (scaleDialog) androidx.compose.material3.AlertDialog(onDismissRequest = { scaleDialog = false }, containerColor = Zk.panel, title = { Text("Project scale") }, text = {
         // The whole content scrolls as one piece: on a landscape phone the dialog is short, and a list with its own height used to be squeezed to one cut-off line.
         Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
@@ -161,6 +168,7 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
                 LabelButton("↶", false, w = 32.dp, h = 32.dp, enabled = canUndo) { vm.undo() }
                 LabelButton("↷", false, w = 32.dp, h = 32.dp, enabled = canRedo) { vm.redo() }
                 LabelButton(Theory.label(scaleRoot, scaleType), scaleType > 0, Zk.accent, w = 84.dp, h = 32.dp) { scaleDialog = true }
+                LabelButton("Vel", vm.velocityPane, Zk.accent, w = 44.dp, h = 32.dp) { vm.velocityPane = !vm.velocityPane }
                 LabelButton("Select", selectMode, w = 56.dp, h = 32.dp) { selectMode = !selectMode }
                 if (selNotes.isEmpty()) {
                     Text("Len", color = Zk.dim, fontSize = 11.sp)
@@ -217,7 +225,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         val ppbNow = rememberUpdatedState(ppb); val keysPx = with(density) { KeysW.toPx() }
-        Box(Modifier.fillMaxSize().onSizeChanged { viewH = it.height }) {
+        Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { viewH = it.height }) {
         Row(Modifier.fillMaxSize().pointerInput(Unit) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
@@ -436,6 +445,8 @@ fun PianoRollView(vm: DawViewModel, track: TrackM, pxPerBeat: Float) {
             }
         }
         }
+        if (vm.velocityPane) VelocityPane(track, ppb, totalW, hs, selSet, vm.playhead) { changes -> applyVelocities(changes) }
+        }
     }
 }
 
@@ -455,3 +466,74 @@ private fun BarButton(text: String, color: Color = Zk.text, onClick: () -> Unit)
 
 /** Empty room kept below scrolling content so that the last rows are not under the thumb / the system navigation gesture. */
 val ScrollBottomPad = 120.dp
+
+/**
+ * The velocity lane under the piano roll: one stem per note at the note's start (height = velocity, the head is the grip). Drag a stem to set that
+ * note's velocity; drag sideways to paint the velocity of the notes you pass; when the touched note is part of a selection of several notes, every
+ * selected note moves by the same amount. The change is applied when the finger lifts (one undo step). Scrolls with the grid above.
+ */
+@Composable
+private fun VelocityPane(track: TrackM, ppb: Float, totalW: androidx.compose.ui.unit.Dp, hs: androidx.compose.foundation.ScrollState, selected: Set<NoteM>, playhead: Float, onCommit: (Map<NoteM, Int>) -> Unit) {
+    val density = LocalDensity.current
+    val tm = rememberTextMeasurer()
+    var shown by remember { mutableStateOf<Map<NoteM, Int>>(emptyMap()) }   // velocities while a finger is down
+    var touched by remember { mutableStateOf<NoteM?>(null) }
+    val padTop = 14.dp; val padBottom = 6.dp
+    val latestNotes = rememberUpdatedState(track.notes.toList()); val latestSel = rememberUpdatedState(selected)
+    Row(Modifier.fillMaxWidth().height(84.dp).background(Zk.panel)) {
+        Column(Modifier.width(KeysW).fillMaxHeight().background(Zk.panel2).padding(4.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Text("Velocity", color = Zk.dim, fontSize = 10.sp, maxLines = 1)
+            val t = touched
+            Text(if (t != null) "${shown[t] ?: t.velocity}" else "", color = Zk.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        }
+        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hs)) {
+            Canvas(Modifier.width(totalW).fillMaxHeight().pointerInput(ppb, track) {
+                val pw = ppb * density.density
+                val top = padTop.toPx(); val bottom = padBottom.toPx()
+                val hitR = 16.dp.toPx()
+                fun velAt(y: Float): Int { val f = ((size.height - bottom - y) / (size.height - top - bottom)).coerceIn(0f, 1f); return (1 + f * 126f).roundToInt() }
+                fun yOf(v: Int) = size.height - bottom - (v - 1) / 126f * (size.height - top - bottom)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val notes = latestNotes.value
+                    // the stem under the finger; when several stand at the same place (a chord) the one whose head is nearest to the finger
+                    fun pick(x: Float, y: Float): NoteM? = notes.filter { kotlin.math.abs(it.start * pw - x) <= hitR }
+                        .minByOrNull { kotlin.math.abs(it.start * pw - x) * 0.4f + kotlin.math.abs(yOf(it.velocity) - y) }
+                    val first = pick(down.position.x, down.position.y) ?: return@awaitEachGesture
+                    down.consume()
+                    val group = if (first in latestSel.value && latestSel.value.size > 1) latestSel.value.toList() else listOf(first)
+                    val vels = HashMap<NoteM, Int>()
+                    fun move(x: Float, y: Float) {
+                        val v = velAt(y)
+                        if (group.size > 1) { val d = v - first.velocity; for (n in group) vels[n] = (n.velocity + d).coerceIn(1, 127) }
+                        else { val n = pick(x, y)?.takeIf { it === first || group.size == 1 } ?: first; vels[n] = v; touched = n }
+                        shown = HashMap(vels)
+                    }
+                    touched = first; move(down.position.x, down.position.y)
+                    while (true) {
+                        val ev = awaitPointerEvent(); val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        c.consume()
+                        if (!c.pressed) break
+                        move(c.position.x, c.position.y)
+                    }
+                    val result = HashMap(vels); shown = emptyMap(); touched = null
+                    onCommit(result)
+                }
+            }) {
+                val pw = ppb * density.density; val top = padTop.toPx(); val bottom = padBottom.toPx()
+                var b = 0
+                while (b <= totalW.toPx() / pw) { drawLine(if (b % 4 == 0) Zk.dim.copy(alpha = .5f) else Zk.line.copy(alpha = .5f), Offset(gridLineX(b * pw), 0f), Offset(gridLineX(b * pw), size.height), 1f); b++ }
+                for (y in listOf(1f, 64f, 127f)) { val yy = size.height - bottom - (y - 1) / 126f * (size.height - top - bottom); drawLine(Zk.line.copy(alpha = .6f), Offset(0f, yy), Offset(size.width, yy), 1f) }
+                for (n in track.notes) {
+                    val v = shown[n] ?: n.velocity; val x = n.start * pw
+                    val y = size.height - bottom - (v - 1) / 126f * (size.height - top - bottom)
+                    val sel = n in selected; val active = n === touched || (shown.isNotEmpty() && n in shown)
+                    drawLine(track.color.copy(alpha = if (sel || active) 1f else .75f), Offset(x, size.height - bottom), Offset(x, y), 3.dp.toPx())
+                    drawCircle(if (sel) Color.White else track.color, 6.dp.toPx(), Offset(x, y))
+                    if (sel) drawCircle(track.color, 3.dp.toPx(), Offset(x, y))
+                }
+                drawLine(Zk.accent, Offset(playhead * pw, 0f), Offset(playhead * pw, size.height), 2f)
+            }
+        }
+    }
+}

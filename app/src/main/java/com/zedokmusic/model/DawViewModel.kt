@@ -163,6 +163,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var rowScale by mutableFloatStateOf(1f)
     /** Height factor of the piano roll's note rows (pinch vertically to change it). */
     var rollRowScale by mutableFloatStateOf(1f)
+    /** The velocity lane under the piano roll is shown. */
+    var velocityPane by mutableStateOf(true)
     private var ppbValue by mutableFloatStateOf(44f)
     var ppb: Float get() = ppbValue; set(v) { if (v != ppbValue) { ppbValue = v; viewDirty = true } }
     var arrangeX = 0; var arrangeY = 0; var rollX = 0; var rollY = -1   // -1: the piano roll's own default (around C5)
@@ -497,9 +499,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- several notes at once (one undo step each)
     /** Replaces every note of [changes] (old -> new) at once. */
-    fun replaceNotes(t: TrackM, changes: Map<NoteM, NoteM>) {
+    fun replaceNotes(t: TrackM, changes: Map<NoteM, NoteM>, name: String = "Edit notes") {
         if (changes.isEmpty()) return
-        snapshot(t); if (e.isPlaying()) e.panic(t.id)
+        snapshot(t, name); if (e.isPlaying()) e.panic(t.id)
         for ((o, n) in changes) { val i = t.notes.indexOf(o); if (i >= 0) t.notes[i] = n }
         syncNotes(t); dirty = true
     }

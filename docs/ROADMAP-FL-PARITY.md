@@ -53,7 +53,7 @@ Risques : le graphe de rendu touche la boucle audio ; tout changement doit reste
 
 But : gains visibles rapides, sans changer le modèle de projet (sauf champs de note supplémentaires, migration 0.3).
 
-- [ ] **1.1 Éditeur de vélocité** en bas du piano roll (barres par note, glisser pour modifier, tracé à main levée, sélection liée à celle des notes, redimensionnable). Les notes sélectionnées s'éditent ensemble.
+- [x] **1.1 Éditeur de vélocité** (0.50.0 ; vérifié sur S10 : glisser une tige, undo. Reste : pan/cutoff… voir 1.2, hauteur réglable) en bas du piano roll (barres par note, glisser pour modifier, tracé à main levée, sélection liée à celle des notes, redimensionnable). Les notes sélectionnées s'éditent ensemble.
 - [ ] **1.2 Propriétés par note** : pan, cutoff, résonance, accord fin (fine pitch), longueur de release. Les sélecteurs de contrôleur de l'éditeur du bas (vélocité, pan, cutoff…). Transmis aux instruments natifs via de nouveaux champs de `ZkEvent`.
 - [ ] **1.3 Ghost notes** : voir les notes des autres pistes (atténuées), option par piste.
 - [ ] **1.4 Quantize avancé** : force (%), fenêtre, quantize des débuts / fins, swing, grille irrégulière.
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.50.0-alpha | 2026-11-27 | Phase 1.1 : éditeur de vélocité sous le piano roll |
 | 0.49.9-alpha | 2026-11-27 | Phase 0.5 : graphe de routage du moteur (bus), rendu inchangé bit pour bit ; phase 0 terminée |
 | 0.49.8-alpha | 2026-11-27 | Phase 0.4 : undo/redo unique pour tout le projet (File → Undo/Redo, pile nommée de 100 actions) |
 | 0.49.7-alpha | 2026-11-27 | Phase 0.3 : format de projet versionné (migrations, refus des fichiers plus récents, tests avec projets témoins) |
