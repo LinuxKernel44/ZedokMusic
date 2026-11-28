@@ -48,15 +48,6 @@ constexpr int kMaxLanes = 32;
 constexpr int kMaxBuses = 16;     // buses in one project (a bus sums the tracks routed to it, then goes to the master or to another bus)
 constexpr int kMaxBusId = 64;     // bus ids are never reused while the app runs, so this bounds the buses created in one session
 
-// A mixing bus: tracks (and other buses) are routed into it; it has the same gain / pan / width / mute as a track and its own destination.
-// Effect chains, sends and sidechain come with phase 4 of docs/ROADMAP-FL-PARITY.md; this is the routing graph they will hang on.
-struct BusState {
-    int id = 0;
-    float gain = 1.f, pan = 0.f, width = 1.f;
-    bool mute = false;
-    int output = 0;                                 // 0 = the master, else the id of another bus (never one that leads back here)
-};
-
 // One insert effect: a VST3 plugin in its own Wine host, processing the track's (or the master's) audio.
 struct FxState {
     int id = 0;
@@ -66,10 +57,20 @@ struct FxState {
     std::vector<AutoLane> lanes;
 };
 
+// A mixing bus: tracks (and other buses) are routed into it; it has the same gain / pan / width / mute as a track and its own destination.
+// Effect chains, sends and sidechain come with phase 4 of docs/ROADMAP-FL-PARITY.md; this is the routing graph they will hang on.
+struct BusState {
+    int id = 0;
+    float gain = 1.f, pan = 0.f, width = 1.f;
+    bool mute = false;
+    int output = 0;                                 // 0 = the master, else the id of another bus (never one that leads back here)
+    std::vector<FxState> fx;                        // insert effects on the bus's sum, before its fader
+};
+
 constexpr int kMaxSends = 4;      // sends per track
 
 // A send: a copy of the track's signal, at its own level, mixed into a bus (before the fader, or after fader / pan / width).
-struct SendState { int bus = 0; float gain = 1.f; bool pre = false; };
+struct SendState { int bus = 0; float gain = 1.f; bool pre = false; int delay = 0; /* blocks, set by planLatency */ };
 
 struct TrackState {
     int id = 0;
@@ -85,6 +86,7 @@ struct TrackState {
     bool frozen = false;                            // frozen: the instrument, its notes, its effects and its own clips are skipped; only clips marked frozen play
     int output = 0;                                 // 0 = the master, else the id of the bus this track is mixed into
     std::vector<SendState> sends;                   // at most kMaxSends, one per bus
+    int outDelay = 0;                               // blocks the track's own output waits so that every path to the master has the same latency (set by planLatency)
 };
 
 // Immutable snapshot, published by the UI thread and read by the audio thread.
@@ -96,6 +98,8 @@ struct Project {
     // tempoBpm[i + 1] = the tempo of segment i + 1. Empty: the constant tempo set with setTempo.
     std::vector<int64_t> tempoFrames;
     std::vector<double> tempoBpm;
+    std::vector<int> busLat;                        // per bus (like `buses`): blocks of effect latency from the bus's input to the master (its own effects and those of the buses after it)
+    int latency = 0;                                // blocks every path to the master is brought to (the longest one), at most kMaxFx
     std::vector<int> busOrder;                      // indices into `buses`, every bus after all the buses that feed it (computed by Engine::planRouting)
     float masterGain = 1.f;
     float masterWidth = 1.f;
@@ -120,7 +124,10 @@ struct MixState {
     float stage[kMaxFx][kCallbackFramesFx * 2];     // scratch: outputs of the effects of the chain being processed
     FxChain chain[kMaxTracks];
     FxChain masterChain;
-    int latencyBlocks = 0;                          // longest track chain (callbacks), set by Engine::fxRealtime
+    int latencyBlocks = 0;                          // Project::latency of the block being mixed
+    FxChain busChain[kMaxBuses];                    // pipeline state of each bus's effects (only `hold` is used)
+    const float* sendSrc[kMaxTracks][kMaxSends];    // what each send reads: the track's output delayed as planLatency says (valid when useSendSrc)
+    bool useSendSrc = false;
     float smoothGain[kMaxTracks];
     float smoothWidth[kMaxTracks];
     float bus[kMaxBuses][ZK_MAX_FRAMES * 2];        // what each bus has received so far (by position in Project::buses)
@@ -175,6 +182,10 @@ public:
     void setBusPan(int busId, float p);
     void setBusWidth(int busId, float w);
     void setBusMute(int busId, bool m);
+    // plugin delay compensation as planned for the current project (callbacks of 128 frames): the longest path, and how long a track's output / send to a bus waits
+    int totalLatency();
+    int trackOutDelay(int track);
+    int trackSendDelay(int track, int busId);
     bool setSend(int track, int busId, float gain, bool pre);   // adds or updates the send of this track to that bus; false for an unknown track or bus, or when the track already has kMaxSends
     bool removeSend(int track, int busId);
     bool setTrackOutput(int track, int busId);    // busId 0 = master; false for an unknown track or bus
@@ -260,7 +271,11 @@ private:
     // Zeroes the dry buffers, then accumulates `frames` frames from `pos` (following loop wraps); returns the new position.
     static int64_t renderBlockDry(const Project& p, int64_t pos, int frames, MixState& ms);
     // Applies gain, pan, mute/solo to each track's dry buffer and sums into out (interleaved stereo); no master gain yet.
-    static void mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters);
+    void mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters, bool offline = false, int64_t pos = 0, int64_t budgetNs = 0);
+    // Effects of one bus: realtime (one callback behind per effect, like the track chains) or offline (every effect waited for).
+    void busFx(const Project& p, MixState& ms, int busIndex, int frames, bool offline, int64_t pos, int64_t budgetNs);
+    /** Works out p.busLat, p.latency and the delays of every track output and send (plugin delay compensation). */
+    static void planLatency(Project& p);
     // Master gain and meter.
     /** Orders p.busOrder so that every bus comes after the buses routed into it. */
     static void planRouting(Project& p);

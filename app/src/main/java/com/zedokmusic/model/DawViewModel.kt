@@ -558,7 +558,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val b = BusM(id, "Bus ${buses.size + 1}", TrackColors[id % TrackColors.size]); buses.add(b); dirty = true; return b
     }
     fun removeBus(b: BusM) {
-        clearHistory(); e.removeBus(b.id); buses.remove(b)
+        clearHistory(); b.fx.toList().forEach { removeEffect(null, it, b) }; e.removeBus(b.id); buses.remove(b)
         for (t in tracks) { if (t.output == b.id) t.output = 0; t.sends.removeAll { it.bus == b.id } }
         for (o in buses) if (o.output == b.id) o.output = 0
         dirty = true
@@ -612,37 +612,37 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- insert effects ----------
     /** Every plugin of the project: instruments, then each track's effects, then the master's. */
-    fun allPlugins(): List<TrackM> = tracks.flatMap { t -> (if (t.pluginPath != null) listOf(t) else emptyList()) + t.fx } + masterFx
-    fun fxOf(owner: TrackM?): MutableList<TrackM> = owner?.fx ?: masterFx
+    fun allPlugins(): List<TrackM> = tracks.flatMap { t -> (if (t.pluginPath != null) listOf(t) else emptyList()) + t.fx } + buses.flatMap { it.fx } + masterFx
+    fun fxOf(owner: TrackM?, bus: BusM? = null): MutableList<TrackM> = bus?.fx ?: owner?.fx ?: masterFx
     /** The plugin the Plugin and Auto panels work on. */
     fun panelPlugin(): TrackM? {
         val tg = pluginTarget; val sel = selected
-        if (tg != null && (tg === sel || sel?.fx?.contains(tg) == true || masterFx.contains(tg))) return tg
+        if (tg != null && (tg === sel || sel?.fx?.contains(tg) == true || masterFx.contains(tg) || buses.any { it.fx.contains(tg) })) return tg
         return sel?.takeIf { it.kind == TrackKind.Instrument } ?: sel?.fx?.firstOrNull() ?: tracks.firstOrNull { it.kind == TrackKind.Instrument } ?: masterFx.firstOrNull()
     }
 
     /** Adds [plugin] at the end of the chain of [owner] (null = the master) and starts its Wine host. */
-    fun addEffect(owner: TrackM?, plugin: PluginInfo): TrackM? = addEffectInternal(owner, plugin.name, plugin.path).also { if (it != null) { pluginTarget = it; dirty = true } }
-    private fun addEffectInternal(owner: TrackM?, name: String, path: String): TrackM? {
-        val list = fxOf(owner)
+    fun addEffect(owner: TrackM?, plugin: PluginInfo, bus: BusM? = null): TrackM? = addEffectInternal(owner, plugin.name, plugin.path, bus).also { if (it != null) { pluginTarget = it; dirty = true } }
+    private fun addEffectInternal(owner: TrackM?, name: String, path: String, bus: BusM? = null): TrackM? {
+        val list = fxOf(owner, bus)
         if (list.size >= 10) { message = "At most 10 effects per mixer track."; return null }
-        val id = e.addFx(owner?.id ?: 0, list.size)
+        val id = e.addFx(if (bus != null) -bus.id else owner?.id ?: 0, list.size)
         if (id == 0) { message = "Could not add the effect."; return null }
-        val t = TrackM(id, name, TrackKind.Effect, owner?.color ?: Color(0xFFE6E8EE), path)
+        val t = TrackM(id, name, TrackKind.Effect, bus?.color ?: owner?.color ?: Color(0xFFE6E8EE), path)
         list.add(t)
         t.pluginState = 1
         if (!host.launch(id, path)) { t.pluginState = 3; message = "Could not start the plugin host." }
         return t
     }
-    fun removeEffect(owner: TrackM?, fx: TrackM) {
+    fun removeEffect(owner: TrackM?, fx: TrackM, bus: BusM? = null) {
         closeEditor(fx); host.stop(fx.id)
-        e.removeFx(fx.id); fxOf(owner).remove(fx)
+        e.removeFx(fx.id); fxOf(owner, bus).remove(fx)
         if (pluginTarget === fx) pluginTarget = null
         dirty = true
     }
     /** Moves an effect one place earlier (delta -1) or later (+1) in its chain. */
-    fun moveEffect(owner: TrackM?, fx: TrackM, delta: Int) {
-        val list = fxOf(owner); val i = list.indexOf(fx); val j = i + delta
+    fun moveEffect(owner: TrackM?, fx: TrackM, delta: Int, bus: BusM? = null) {
+        val list = fxOf(owner, bus); val i = list.indexOf(fx); val j = i + delta
         if (i < 0 || j < 0 || j >= list.size) return
         if (e.moveFx(fx.id, j)) { list.removeAt(i); list.add(j, fx); dirty = true }
     }
@@ -1263,7 +1263,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
                 .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
         root.put("tracks", arr).put("masterFx", fxJson(masterFx))
-        if (buses.isNotEmpty()) root.put("buses", JSONArray().also { a -> buses.forEach { b -> a.put(JSONObject().put("name", b.name).put("gain", b.gain.toDouble()).put("pan", b.pan.toDouble()).put("stereo", b.stereo.toDouble()).put("mute", b.mute).put("output", busPos(b.output))) } })
+        if (buses.isNotEmpty()) root.put("buses", JSONArray().also { a -> buses.forEach { b -> a.put(JSONObject().put("name", b.name).put("gain", b.gain.toDouble()).put("pan", b.pan.toDouble()).put("stereo", b.stereo.toDouble()).put("mute", b.mute).put("output", busPos(b.output)).also { o -> if (b.fx.isNotEmpty()) o.put("fx", fxJson(b.fx)) }) } })
         val pats = JSONArray()
         for (pt in patterns) {
             val per = JSONObject()
@@ -1295,12 +1295,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             lo.getString("param") to (0 until pa.length()).map { q -> pa.getJSONArray(q).let { x -> AutoPoint(x.getDouble(0).toFloat(), x.getDouble(1).toFloat(), x.optInt(2, 0)) } } } }
         o.optJSONArray("params")?.let { pa -> pendingParams[t.id] = (0 until pa.length()).map { k -> pa.getJSONArray(k).let { x -> x.getString(0) to x.getDouble(1).toFloat() } } }
     }
-    private fun loadFx(owner: TrackM?, arr: JSONArray?) {
+    private fun loadFx(owner: TrackM?, arr: JSONArray?, bus: BusM? = null) {
         if (arr == null) return
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             val path = o.optString("plugin").takeIf { it.isNotEmpty() && (PluginHost.isNative(it) || File(it).exists()) } ?: continue
-            val fx = addEffectInternal(owner, o.optString("name", File(path).nameWithoutExtension), path) ?: continue
+            val fx = addEffectInternal(owner, o.optString("name", File(path).nameWithoutExtension), path, bus) ?: continue
             if (o.optBoolean("bypass")) { fx.bypass = true; e.setFxBypass(fx.id, true) }
             readPluginState(fx, o)
         }
@@ -1330,7 +1330,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         resetPatterns()
         tracks.toList().forEach { removeTrack(it) }
         masterFx.toList().forEach { removeEffect(null, it) }
-        buses.toList().forEach { e.removeBus(it.id) }; buses.clear()
+        buses.toList().forEach { b -> b.fx.toList().forEach { removeEffect(null, it, b) }; e.removeBus(b.id) }; buses.clear()
         pluginTarget = null; panelExpanded = false
         editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
@@ -1622,6 +1622,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             b.gain = o.optDouble("gain", 1.0).toFloat(); b.pan = o.optDouble("pan", 0.0).toFloat(); b.stereo = o.optDouble("stereo", 0.0).toFloat(); b.mute = o.optBoolean("mute")
             e.setBusGain(b.id, b.gain); e.setBusPan(b.id, b.pan); e.setBusWidth(b.id, widthOf(b.stereo)); e.setBusMute(b.id, b.mute)
             val dest = busAt(o.optInt("output", 0)); if (dest != 0 && e.setBusOutput(b.id, dest)) b.output = dest
+            loadFx(null, o.optJSONArray("fx"), b)
         }
     }
     private fun loadRouting(t: TrackM, o: JSONObject) {

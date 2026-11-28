@@ -41,6 +41,7 @@ template <class F> void Engine::edit(F&& f) {
     std::lock_guard<std::mutex> lk(editMutex_);
     auto p = std::make_shared<Project>(*current_);
     f(*p);
+    planLatency(*p);
     publish(std::move(p));
 }
 void Engine::releaseRetired() {
@@ -158,6 +159,29 @@ void Engine::planRouting(Project& p) {
     for (size_t i = 0; i < n; i++) if (std::find(order.begin(), order.end(), (int)i) == order.end()) order.push_back((int)i);   // never happens: setBusOutput refuses loops
     p.busOrder = std::move(order);
 }
+// Plugin delay compensation: every effect adds one callback, so each path from a track to the master gets the same total by waiting
+// (D - its own latency) callbacks at the track's output. R(bus) = the bus's effects + R(its output).
+void Engine::planLatency(Project& p) {
+    const int nb = (int)std::min<size_t>(p.buses.size(), kMaxBuses);
+    p.busLat.assign(p.buses.size(), 0);
+    auto fxN = [](const std::vector<FxState>& v) { return std::min((int)v.size(), kMaxFx); };
+    for (int pass = 0; pass < nb + 1; pass++)   // the bus graph has no loops: one pass per level settles it
+        for (int b = 0; b < nb; b++) { const int d = busSlot(p, p.buses[b].output); p.busLat[b] = fxN(p.buses[b].fx) + (d >= 0 ? p.busLat[d] : 0); }
+    auto routeOf = [&](int bus) { const int s = busSlot(p, bus); return s >= 0 && s < nb ? p.busLat[s] : 0; };
+    int D = 0;
+    for (auto& t : p.tracks) {
+        const int n = fxN(t.fx);
+        D = std::max(D, n + routeOf(t.output));
+        for (auto& s : t.sends) D = std::max(D, n + routeOf(s.bus));
+    }
+    D = std::min(D, kMaxFx);
+    p.latency = D;
+    for (auto& t : p.tracks) {
+        const int n = fxN(t.fx);
+        t.outDelay = std::clamp(D - (n + routeOf(t.output)), 0, kMaxFx);
+        for (auto& s : t.sends) s.delay = std::clamp(D - (n + routeOf(s.bus)), 0, kMaxFx);
+    }
+}
 int Engine::addBus() {
     int id = 0;
     edit([&](Project& p) {
@@ -186,6 +210,9 @@ BUS_SET(setBusGain(int id, float g), b->gain = std::clamp(g, 0.f, 4.f))
 BUS_SET(setBusPan(int id, float v), b->pan = std::clamp(v, -1.f, 1.f))
 BUS_SET(setBusWidth(int id, float v), b->width = std::clamp(v, 0.f, 2.f))
 BUS_SET(setBusMute(int id, bool m), b->mute = m)
+int Engine::totalLatency() { std::lock_guard<std::mutex> lk(editMutex_); return current_->latency; }
+int Engine::trackOutDelay(int track) { std::lock_guard<std::mutex> lk(editMutex_); for (auto& t : current_->tracks) if (t.id == track) return t.outDelay; return -1; }
+int Engine::trackSendDelay(int track, int busId) { std::lock_guard<std::mutex> lk(editMutex_); for (auto& t : current_->tracks) if (t.id == track) for (auto& s : t.sends) if (s.bus == busId) return s.delay; return -1; }
 bool Engine::setSend(int track, int busId, float gain, bool pre) {
     bool ok = false;
     edit([&](Project& p) {
@@ -273,7 +300,7 @@ int64_t Engine::renderBlockDry(const Project& p, int64_t pos, int frames, MixSta
     return pos;
 }
 
-void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
+void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters, bool offline, int64_t pos, int64_t budgetNs) {
     if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; for (auto& w : ms.smoothWidth) w = 1.f; for (auto& g : ms.smoothBusGain) g = 1.f; for (auto& row : ms.smoothSend) for (auto& g : row) g = 1.f; for (auto& w : ms.smoothBusWidth) w = 1.f; ms.init = true; }
     memset(out, 0, sizeof(float) * 2 * frames);
     const int nBuses = (int)std::min<size_t>(p.buses.size(), kMaxBuses);
@@ -302,15 +329,17 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
             dst[i * 2] += l; dst[i * 2 + 1] += r;
             tpk = std::max(tpk, std::max(fabsf(l), fabsf(r)));
         }
+        int sk = -1;
         for (const SendState& sd : t.sends) {   // sends: a copy at the send level (pre: before the fader and the pan, but not while the track is muted or not soloed)
-            const int bs = busSlot(p, sd.bus); if (bs < 0 || t.id >= kMaxTracks) continue;
+            sk++; const int bs = busSlot(p, sd.bus); if (bs < 0 || t.id >= kMaxTracks) continue;
+            const float* sb = (ms.useSendSrc && sk < kMaxSends) ? ms.sendSrc[ti][sk] : tb;   // the track's output, delayed to line up with the other paths
             float& sm = ms.smoothSend[t.id][sd.bus]; const float s0 = sm, s1 = sd.gain * (sd.pre ? (audible ? 1.f : 0.f) : 1.f); sm = s1;
             float* sdst = ms.bus[bs];
-            if (sd.pre) { for (int i = 0; i < frames; i++) { const float s = s0 + (s1 - s0) * ((float)i / (float)frames); sdst[i * 2] += tb[i * 2] * s; sdst[i * 2 + 1] += tb[i * 2 + 1] * s; } }
+            if (sd.pre) { for (int i = 0; i < frames; i++) { const float s = s0 + (s1 - s0) * ((float)i / (float)frames); sdst[i * 2] += sb[i * 2] * s; sdst[i * 2 + 1] += sb[i * 2 + 1] * s; } }
             else {   // after the fader: what the track sends to its output, scaled by the send level
                 for (int i = 0; i < frames; i++) {
                     const float s = s0 + (s1 - s0) * ((float)i / (float)frames), g = g0 + (g1 - g0) * ((float)i / (float)frames);
-                    float xl = tb[i * 2], xr = tb[i * 2 + 1];
+                    float xl = sb[i * 2], xr = sb[i * 2 + 1];
                     if (w0 != 1.f || w1 != 1.f) { const float w = w0 + (w1 - w0) * ((float)i / (float)frames); const float m = 0.5f * (xl + xr), sdv = 0.5f * (xl - xr) * w; xl = m + sdv; xr = m - sdv; }
                     sdst[i * 2] += xl * g * pl * s; sdst[i * 2 + 1] += xr * g * pr * s;
                 }
@@ -322,6 +351,7 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
     for (int oi = 0; oi < (int)p.busOrder.size() && oi < nBuses; oi++) {
         const int bi = p.busOrder[oi]; if (bi < 0 || bi >= nBuses) continue;
         const BusState& b = p.buses[bi];
+        if (!b.fx.empty()) busFx(p, ms, bi, frames, offline, pos, budgetNs);
         const float g0 = ms.smoothBusGain[b.id], g1 = b.mute ? 0.f : b.gain; ms.smoothBusGain[b.id] = g1;
         const float w0 = ms.smoothBusWidth[b.id], w1 = b.width; ms.smoothBusWidth[b.id] = w1;
         const float ang = (b.pan * 0.5f + 0.5f) * (float)M_PI_2;
@@ -372,14 +402,14 @@ void Engine::fxSubmit(const FxState& fx, const float* in, int frames, int64_t au
 }
 
 void Engine::fxRealtime(const Project& p, MixState& ms, int frames, int64_t budgetNs) {
-    int L = 0;
-    for (auto& t : p.tracks) L = std::max(L, std::min((int)t.fx.size(), kMaxFx));
-    ms.latencyBlocks = L;
+    const int L = p.latency;
+    ms.latencyBlocks = L; ms.useSendSrc = false;
     if (L == 0 || frames != kCallbackFramesFx) return;
     const size_t bytes = sizeof(float) * 2 * frames;
     const auto t0 = std::chrono::steady_clock::now();
     const int64_t totalNs = (int64_t)(0.7 * 1e9 * frames / kProjectRate);
     auto waitLeft = [&]() { int64_t el = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(); return std::min<int64_t>(budgetNs, std::max<int64_t>(0, totalNs - el)); };
+    ms.useSendSrc = true;
     const int ring = kMaxFx + 1;
     for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
         const TrackState& t = p.tracks[ti];
@@ -400,12 +430,49 @@ void Engine::fxRealtime(const Project& p, MixState& ms, int frames, int64_t budg
             }
             cur = ms.stage[n - 1];
         }
-        // Delay compensation: shorter chains wait so that every track lines up with the longest one.
+        // Delay compensation: the track's output (and each send) waits so that every path to the master has the same latency, see planLatency.
         memcpy(ch.fin[ch.finPos], cur, bytes);
-        const int rd = ((ch.finPos - (L - n)) % ring + ring) % ring;
+        const int rd = ((ch.finPos - t.outDelay) % ring + ring) % ring;
+        for (size_t k = 0; k < t.sends.size() && k < (size_t)kMaxSends; k++) ms.sendSrc[ti][k] = ch.fin[((ch.finPos - t.sends[k].delay) % ring + ring) % ring];
         memcpy(ms.dry[ti], ch.fin[rd], bytes);
         ch.finPos = (ch.finPos + 1) % ring;
     }
+}
+
+void Engine::busFx(const Project& p, MixState& ms, int bi, int frames, bool offline, int64_t pos, int64_t budgetNs) {
+    const BusState& b = p.buses[bi];
+    const int n = std::min((int)b.fx.size(), kMaxFx);
+    float* buf = ms.bus[bi];
+    if (offline) {
+        constexpr int64_t kWait = 5'000'000'000;
+        for (int i = 0; i < n; i++) {
+            const FxState& f = b.fx[i]; if (!fxActive(f)) continue;
+            ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
+            if (!f.lanes.empty()) appendAutomation(f.lanes, pos, fxAutoLastOff_[f.pluginSlot], ch, nc);
+            { double bpm, ppq; tempoAt(&p, pos, bpm, ppq); f.plugin->setTransport(bpm, ppq, true); }
+            f.plugin->submitAudio(buf, frames, ch, nc);
+            f.plugin->collect(buf, frames, kWait);
+        }
+        return;
+    }
+    if (frames != kCallbackFramesFx) return;
+    const size_t bytes = sizeof(float) * 2 * frames;
+    FxChain& ch = ms.busChain[bi];
+    if (ch.sig != n) { memset(ch.hold, 0, sizeof ch.hold); ch.sig = n; }
+    const auto t0 = std::chrono::steady_clock::now();
+    const int64_t totalNs = (int64_t)(0.7 * 1e9 * frames / kProjectRate);
+    auto waitLeft = [&]() { int64_t el = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count(); return std::min<int64_t>(budgetNs, std::max<int64_t>(0, totalNs - el)); };
+    for (int i = 0; i < n; i++) {
+        const FxState& f = b.fx[i]; float* o = ms.stage[i];
+        if (fxActive(f)) f.plugin->collect(o, frames, waitLeft()); else memcpy(o, ch.hold[i], bytes);
+    }
+    const int before = p.latency - (bi < (int)p.busLat.size() ? p.busLat[bi] : 0);   // callbacks between the timeline and this bus's input
+    for (int i = 0; i < n; i++) {
+        const FxState& f = b.fx[i]; const float* in = i == 0 ? buf : ms.stage[i - 1];
+        if (fxActive(f)) fxSubmit(f, in, frames, posRing_[(blockCounter_ - before - i) & 31], fxAutoLast_[f.pluginSlot], &fxLastPos_[f.pluginSlot]);
+        else memcpy(ch.hold[i], in, bytes);
+    }
+    memcpy(buf, ms.stage[n - 1], bytes);
 }
 
 void Engine::masterFxRealtime(const Project& p, MixState& ms, float* out, int frames, int64_t budgetNs) {
@@ -491,6 +558,7 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
         std::vector<const FxState*> fxs;
         for (auto& t : q.tracks) for (auto& f : t.fx) if (fxActive(f)) fxs.push_back(&f);
         for (auto& f : q.masterFx) if (fxActive(f)) fxs.push_back(&f);
+        for (auto& b : q.buses) for (auto& f : b.fx) if (fxActive(f)) fxs.push_back(&f);
         std::vector<float> zeros(plugFrames * 2, 0.f), sink(plugFrames * 2);
         for (auto* f : fxs) f->plugin->collect(sink.data(), plugFrames, kSyncWaitNs);
         for (int b = 0; b < 150 && !fxs.empty(); b++) for (auto* f : fxs) { f->plugin->submitAudio(zeros.data(), plugFrames); f->plugin->collect(sink.data(), plugFrames, kSyncWaitNs); }
@@ -527,7 +595,7 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
         for (size_t ti = 0; ti < q.tracks.size() && ti < (size_t)kMaxTracks; ti++) memset(ms->dry[ti], 0, sizeof(float) * 2 * plugFrames);
         accumulateDry(q, pos, n, *ms, 0);
         fxOffline(q, *ms, plugFrames, pos);
-        mixTracks(q, plugFrames, blk.data(), *ms, nullptr);
+        mixTracks(q, plugFrames, blk.data(), *ms, nullptr, true, pos);
         if (onlyTrack == 0) fxOfflineMaster(q, blk.data(), plugFrames, pos);  // stems come without the master effects
         masterOut(q, plugFrames, blk.data(), *ms, nullptr);
         all.insert(all.end(), blk.begin(), blk.begin() + n * 2);
@@ -575,6 +643,7 @@ static Endpoint findEndpoint(Project& p, int id) {
     Endpoint e;
     if (id >= kFxIdBase) {
         for (auto& f : p.masterFx) if (f.id == id) return Endpoint{&f.plugin, &f.pluginSlot, &f.lanes};
+        for (auto& b : p.buses) for (auto& f : b.fx) if (f.id == id) return Endpoint{&f.plugin, &f.pluginSlot, &f.lanes};
         for (auto& t : p.tracks) for (auto& f : t.fx) if (f.id == id) return Endpoint{&f.plugin, &f.pluginSlot, &f.lanes};
     } else for (auto& t : p.tracks) if (t.id == id) return Endpoint{&t.plugin, &t.pluginSlot, &t.lanes};
     return e;
@@ -590,6 +659,7 @@ bool Engine::attachBridge(int id, std::shared_ptr<PluginBridge> bridge) {
         bool used[kMaxPlugins] = {};
         for (auto& t : p.tracks) { if (t.plugin && t.pluginSlot >= 0) used[t.pluginSlot] = true; for (auto& f : t.fx) if (f.plugin && f.pluginSlot >= 0) used[f.pluginSlot] = true; }
         for (auto& f : p.masterFx) if (f.plugin && f.pluginSlot >= 0) used[f.pluginSlot] = true;
+        for (auto& b : p.buses) for (auto& f : b.fx) if (f.plugin && f.pluginSlot >= 0) used[f.pluginSlot] = true;
         Endpoint e = findEndpoint(p, id);
         if (!e.bridge) return;
         int slot = *e.slot >= 0 ? *e.slot : -1;
@@ -662,7 +732,7 @@ int Engine::addFx(int track, int position) {
     int id = 0;
     edit([&](Project& p) {
         std::vector<FxState>* v = nullptr;
-        if (track == 0) v = &p.masterFx; else for (auto& t : p.tracks) if (t.id == track) v = &t.fx;
+        if (track == 0) v = &p.masterFx; else if (track < 0) { if (auto* b = findBus(p, -track)) v = &b->fx; } else for (auto& t : p.tracks) if (t.id == track) v = &t.fx;
         if (!v || (int)v->size() >= kMaxFx) return;
         FxState f; f.id = nextFxId_++; id = f.id;
         position = std::clamp(position, 0, (int)v->size());
@@ -674,6 +744,7 @@ int Engine::addFx(int track, int position) {
 static std::vector<FxState>* chainOf(Project& p, int fxId, int* index) {
     auto look = [&](std::vector<FxState>& v) -> std::vector<FxState>* { for (size_t i = 0; i < v.size(); i++) if (v[i].id == fxId) { *index = (int)i; return &v; } return nullptr; };
     if (auto* v = look(p.masterFx)) return v;
+    for (auto& b : p.buses) if (auto* v = look(b.fx)) return v;
     for (auto& t : p.tracks) if (auto* v = look(t.fx)) return v;
     return nullptr;
 }
@@ -853,7 +924,7 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
         else { for (size_t ti = 0; ti < p->tracks.size() && ti < (size_t)kMaxTracks; ti++) memset(audioMix_.dry[ti], 0, sizeof(float) * 2 * frames); accumulateDry(*p, pos, frames, audioMix_, 0); }
         posRing_[blockCounter_ & 31] = audioMix_.playClips ? pos : -1;
         fxRealtime(*p, audioMix_, frames, budgetNs);
-        mixTracks(*p, frames, out, audioMix_, meters_);
+        mixTracks(*p, frames, out, audioMix_, meters_, false, 0, budgetNs);
         masterFxRealtime(*p, audioMix_, out, frames, budgetNs);
         masterOut(*p, frames, out, audioMix_, meters_);
         // --- anti-click ---

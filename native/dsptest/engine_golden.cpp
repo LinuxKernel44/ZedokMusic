@@ -166,6 +166,22 @@ static int routingChecks() {
     double dpre = maxDiff(preRef, postFader, 1024); check("a post-fader send does follow the fader", dpre > 0.05, dpre);
     const auto muted = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 1.f, true); e.setTrackMute(t, true); });
     double mpk = 0; for (size_t i = 8192; i < muted.size(); i++) mpk = std::max(mpk, (double)std::fabs(muted[i]));   // the first block ramps from the initial unity gain check("a muted track sends nothing, even pre-fader", mpk < 1e-6, mpk);
+    // delay compensation: effects add latency (one callback each); every path to the master is brought to the longest one
+    {
+        auto ep = std::make_unique<Engine>(); Engine& e = *ep;
+        int a = e.addTrack(), b = e.addTrack(), c2 = e.addTrack(); int bus1 = e.addBus(), bus2 = e.addBus();
+        check("no effect anywhere: no latency", e.totalLatency() == 0 && e.trackOutDelay(a) == 0, e.totalLatency());
+        e.addFx(a, 0); e.addFx(a, 1);                                     // track a: 2 effects
+        check("a track chain of 2: total 2, the others wait 2", e.totalLatency() == 2 && e.trackOutDelay(a) == 0 && e.trackOutDelay(b) == 2, e.totalLatency());
+        e.setTrackOutput(b, bus1); e.addFx(-bus1, 0);                      // b -> bus1 (1 effect) -> master
+        check("an effect on a bus delays only what goes through it", e.trackOutDelay(b) == 1 && e.trackOutDelay(a) == 0 && e.trackOutDelay(c2) == 2, e.trackOutDelay(b));
+        e.setBusOutput(bus1, bus2); e.addFx(-bus2, 0); e.addFx(-bus2, 1); e.addFx(-bus2, 2);   // bus1 -> bus2 (3 effects)
+        check("a chain of buses adds up: b has 1 + 3 = 4, so total 4", e.totalLatency() == 4 && e.trackOutDelay(b) == 0 && e.trackOutDelay(a) == 2 && e.trackOutDelay(c2) == 4, e.totalLatency());
+        e.setSend(c2, bus2, 1.f, false);                                   // a send of c to bus2 (3 effects): path 3, the output of c goes straight to the master (0)
+        check("a send is delayed by its own path (4 - 3 = 1), the output by 4", e.trackSendDelay(c2, bus2) == 1 && e.trackOutDelay(c2) == 4, e.trackSendDelay(c2, bus2));
+        e.removeBus(bus2);
+        check("removing a bus gives the latency back", e.totalLatency() == 2, e.totalLatency());
+    }
     // freeze: the raw render of a track, played back as a frozen clip, sounds like the live track (fader, pan, width and routing stay live)
     {
         const int64_t N = (int64_t)(2.0 * kProjectRate);

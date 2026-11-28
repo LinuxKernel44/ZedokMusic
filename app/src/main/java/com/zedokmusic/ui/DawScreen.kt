@@ -46,7 +46,9 @@ fun DawScreen(vm: DawViewModel) {
     LaunchedEffect(Updater.justUpdatedTo) { Updater.justUpdatedTo?.let { vm.message = "Updated to $it."; Updater.justUpdatedTo = null } }
     var insertsOpen by remember { mutableStateOf(false) }
     var insertsOwner by remember { mutableStateOf<TrackM?>(null) }
-    val openInserts: (TrackM?) -> Unit = { owner -> insertsOwner = owner; insertsOpen = true }
+    var insertsBus by remember { mutableStateOf<BusM?>(null) }
+    val openInserts: (TrackM?) -> Unit = { owner -> insertsOwner = owner; insertsBus = null; insertsOpen = true }
+    val openBusInserts: (BusM) -> Unit = { b -> insertsOwner = null; insertsBus = b; insertsOpen = true }
     var plugins by remember { mutableStateOf(emptyList<PluginInfo>()) }
     val sel = vm.selected
     val ctx = LocalContext.current
@@ -83,7 +85,7 @@ fun DawScreen(vm: DawViewModel) {
                         }
                         VerticalDivider(color = Zk.line)
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" }, openInserts)
+                            PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" }, openInserts, openBusInserts)
                         }
                     }
                 } else if (wide) {
@@ -96,11 +98,11 @@ fun DawScreen(vm: DawViewModel) {
                         Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (p in listOf(Panel.Rack, Panel.Piano, Panel.Mixer, Panel.Plugin, Panel.Auto)) PanelChip(p.label, bottom == p) { bottom = p }
                         }
-                        Box(Modifier.weight(1f)) { PanelContent(vm, bottom, ppb, { ppb = it }, {}, {}, openInserts) }
+                        Box(Modifier.weight(1f)) { PanelContent(vm, bottom, ppb, { ppb = it }, {}, {}, openInserts, openBusInserts) }
                     }
                 } else {
                     Box(Modifier.weight(1f)) {
-                        PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" }, openInserts)
+                        PanelContent(vm, panel, ppb, { ppb = it }, { panel = Panel.Piano }, { vm.selected = it; dialog = "samples" }, openInserts, openBusInserts)
                     }
                     Row(Modifier.fillMaxWidth().background(Zk.panel).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (p in Panel.values()) PanelChip(p.label, panel == p, Modifier.weight(1f)) { panel = p }
@@ -141,13 +143,13 @@ fun DawScreen(vm: DawViewModel) {
         "version" -> { LaunchedEffect(Unit) { vm.saveNewVersion(); dialog = null } }
         "collect" -> { LaunchedEffect(Unit) { vm.collectSamples(); dialog = null } }
         "info" -> ProjectInfoDialog(vm) { dialog = null }
-        "fxpicker" -> EffectPickerDialog(vm, insertsOwner, { dialog = "installers" }, { dialog = null })
+        "fxpicker" -> EffectPickerDialog(vm, insertsOwner, { dialog = "installers" }, { dialog = null }, insertsBus)
         "installers" -> InstallersDialog(vm, { importPicker.launch(arrayOf("*/*")) }, { dialog = null })
         "export" -> ExportDialog(vm.loopBars, { r, f, n, st -> vm.exportAudio(r, f, n, st) }, { dialog = null })
     }
     if (vm.exporting) ExportingDialog()
     if (vm.projectBusy) AlertDialog(onDismissRequest = {}, containerColor = Zk.panel, title = { Text("Opening project…") }, text = { LinearProgressIndicator(Modifier.fillMaxWidth()) }, confirmButton = {})
-    if (insertsOpen) InsertsDialog(vm, insertsOwner, { fx -> insertsOwner?.let { vm.selected = it }; vm.pluginTarget = fx; panel = Panel.Plugin; bottom = Panel.Plugin; insertsOpen = false }, { dialog = "fxpicker" }, { insertsOpen = false })
+    if (insertsOpen) InsertsDialog(vm, insertsOwner, { fx -> insertsOwner?.let { vm.selected = it }; vm.pluginTarget = fx; panel = Panel.Plugin; bottom = Panel.Plugin; insertsOpen = false }, { dialog = "fxpicker" }, { insertsOpen = false }, insertsBus)
     InstallerScreen(vm)
     DesktopScreen(vm)
     if (showSettings) SettingsScreen(vm, { showUpdate = true }) { showSettings = false }
@@ -157,7 +159,7 @@ fun DawScreen(vm: DawViewModel) {
 }
 
 @Composable
-private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Float) -> Unit, openPiano: () -> Unit, importTo: (TrackM) -> Unit, onInserts: (TrackM?) -> Unit) {
+private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Float) -> Unit, openPiano: () -> Unit, importTo: (TrackM) -> Unit, onInserts: (TrackM?) -> Unit, onBusInserts: (BusM) -> Unit = {}) {
     when (panel) {
         Panel.Arrange -> ArrangeHost(vm, ppb, setPpb, { openPiano() }, importTo)
         Panel.Piano -> {
@@ -172,7 +174,7 @@ private fun PanelContent(vm: DawViewModel, panel: Panel, ppb: Float, setPpb: (Fl
             }
         }
         Panel.Rack -> RackView(vm)
-        Panel.Mixer -> MixerView(vm, onInserts)
+        Panel.Mixer -> MixerView(vm, onInserts, onBusInserts)
         Panel.Plugin -> PluginPanel(vm)
         Panel.Auto -> AutomationView(vm)
     }

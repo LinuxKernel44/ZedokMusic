@@ -118,10 +118,10 @@ Risques : tout ce qui suppose un BPM unique (étirement des clips, automation en
 Prérequis : 0.5 (graphe de rendu).
 
 - [~] **4.1 Pistes de mixer indépendantes (0.57.0 : bus, sorties de piste ; pas les canaux du Rack vers n'importe quelle piste)** (canaux du Channel Rack → n'importe quelle piste du mixer), bus/groupes, master.
-- [~] **4.2 Sends (0.57.0 : envois pré/post-fader, 4 par piste, niveau par envoi ; pas encore d'effets sur les bus ni de sidechain)** : niveau d'envoi par piste vers un bus (pré/post fader), plusieurs envois, bus d'effets partagés (reverb/delay).
+- [~] **4.2 Sends (0.57.0 : envois pré/post-fader, 4 par piste, niveau par envoi ; 0.59.0 : effets sur les bus ; pas de sidechain)** : niveau d'envoi par piste vers un bus (pré/post fader), plusieurs envois, bus d'effets partagés (reverb/delay).
 - [x] **4.3 Groupes (0.57.0)** : sous-mix (la sortie d'une piste va vers un bus plutôt que le master) ; routage libre sans boucle (détection de cycle, message d'erreur).
 - [ ] **4.4 Sidechain** : entrée latérale d'un effet (native et VST3 quand le plugin l'expose) ; sélection de la source dans l'interface de l'insert.
-- [ ] **4.5 Compensation de latence des plugins (PDC)** : lire la latence rapportée par chaque plugin (VST3 `getLatencySamples`, hôtes Wine), aligner toutes les voies sur la plus longue, avec option de désactivation ; affichage de la latence totale.
+- [~] **4.5 Compensation de latence des plugins (PDC) (0.59.0 : chaque chemin vers le master est aligné sur le plus long, pistes, bus, envois ; calcul testé hors ligne ; la latence rapportée par les plugins eux-mêmes (VST3 getLatencySamples) n'est pas lue, pas d'option de désactivation ni d'affichage)** : lire la latence rapportée par chaque plugin (VST3 `getLatencySamples`, hôtes Wine), aligner toutes les voies sur la plus longue, avec option de désactivation ; affichage de la latence totale.
 - [x] **4.6 Freeze / render de piste (0.58.0 ; rendu hors ligne testé ; interface non vérifiée sur le S10)** : rendre une piste (plugins compris) en audio, la remplacer par un clip audio gelé, dégeler pour retrouver les plugins ; cache dans `Cache/Freeze`.
 - [~] **4.7 Interface (0.57.0 : bouton de sortie, dialogue d'envois, bandes de bus ; pas de glisser pour router ni de groupes repliables)** : vue mixer avec sélecteur de sortie/envois par piste, indicateurs de routage, glisser pour router, groupes repliables.
 - [ ] **4.8 Stems** (préparation) : le graphe sait rendre une piste ou un bus seul.
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.59.0-alpha | 2026-11-28 | Phase 4 : effets sur les bus, compensation de latence des chemins (4.5 partielle) ; vérifié sur S10 : mixer, bus, envoi, gel, effet de bus (sans écoute) |
 | 0.58.0-alpha | 2026-11-28 | Phase 4 : gel / dégel de piste (4.6) ; correction de la fuite d'un fondu de piste muette au 1er bloc du rendu ; non vérifié sur le S10 |
 | 0.57.0-alpha | 2026-11-28 | Phase 4 (1re partie) : bus, sorties de piste, envois pré/post ; format 6. Non vérifié sur le S10 (téléphone non connecté) |
 | 0.56.0-alpha | 2026-11-27 | Phase 3 : marqueurs, carte de tempo, signatures (règle) ; format 5 |

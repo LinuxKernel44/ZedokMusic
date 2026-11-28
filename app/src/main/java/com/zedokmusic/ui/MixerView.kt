@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.zedokmusic.model.*
 
 @Composable
-fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
+fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}, onBusInserts: (BusM) -> Unit = {}) {
     var routeTrack by remember { mutableStateOf<TrackM?>(null) }; var routeBus by remember { mutableStateOf<BusM?>(null) }
     routeTrack?.let { t -> if (t in vm.tracks) TrackRoutingDialog(vm, t) { routeTrack = null } else routeTrack = null }
     routeBus?.let { b -> if (b in vm.buses) BusDialog(vm, b) { routeBus = null } else routeBus = null }
@@ -57,8 +57,8 @@ fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
                 route = routeLabel(vm, t), routeActive = t.output != 0 || t.sends.isNotEmpty(), onRoute = { routeTrack = t })
         }
         vm.buses.forEach { b ->
-            Strip(b.name, b.color, b.gain, b.pan, 0f, b.mute, false, false, 0, false, {}, stereo = b.stereo, onStereo = { vm.setBusStereo(b, it) }, onGain = { vm.setBusGain(b, it) }, onPan = { vm.setBusPan(b, it) },
-                onMute = { vm.setBusMute(b, !b.mute) }, onSolo = {}, onSelect = {}, showFx = false, showSolo = false,
+            Strip(b.name, b.color, b.gain, b.pan, 0f, b.mute, false, false, b.fx.size, b.fx.any { !it.bypass }, { onBusInserts(b) }, stereo = b.stereo, onStereo = { vm.setBusStereo(b, it) }, onGain = { vm.setBusGain(b, it) }, onPan = { vm.setBusPan(b, it) },
+                onMute = { vm.setBusMute(b, !b.mute) }, onSolo = {}, onSelect = {}, showSolo = false,
                 route = "→ " + (if (b.output == 0) "Master" else vm.busById(b.output)?.name ?: "Master"), routeActive = b.output != 0, onRoute = { routeBus = b })
         }
         Box(Modifier.width(64.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Zk.panel).border(1.dp, Zk.line, RoundedCornerShape(12.dp)).pointerInput(Unit) { detectTapGestures { vm.addBus() } }, contentAlignment = Alignment.Center) {

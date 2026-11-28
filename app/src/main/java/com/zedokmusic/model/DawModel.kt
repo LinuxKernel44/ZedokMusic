@@ -61,6 +61,8 @@ class BusM(val id: Int, name: String, val color: Color) {
     var mute by mutableStateOf(false)
     /** 0 = the master, else the id of the bus this one is mixed into. */
     var output by mutableIntStateOf(0)
+    /** Insert effects on the bus's sum, in series, before its fader. */
+    val fx = mutableStateListOf<TrackM>()
 }
 
 class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, val pluginPath: String?) {

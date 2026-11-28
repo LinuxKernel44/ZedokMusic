@@ -22,11 +22,11 @@ import com.zedokmusic.model.TrackM
 
 /** The insert effects of a mixer track (or the master when [owner] is null): in series, top to bottom. */
 @Composable
-fun InsertsDialog(vm: DawViewModel, owner: TrackM?, onEdit: (TrackM) -> Unit, onAdd: () -> Unit, onDismiss: () -> Unit) {
-    val list = vm.fxOf(owner)
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Effects · " + (owner?.name ?: "Master")) }, text = {
+fun InsertsDialog(vm: DawViewModel, owner: TrackM?, onEdit: (TrackM) -> Unit, onAdd: () -> Unit, onDismiss: () -> Unit, bus: com.zedokmusic.model.BusM? = null) {
+    val list = vm.fxOf(owner, bus)
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Effects · " + (bus?.name ?: owner?.name ?: "Master")) }, text = {
         Column {
-            Text("The audio goes through these effects in order. Each one adds about 3 ms; tracks stay in sync automatically.", color = Zk.dim, fontSize = 12.sp)
+            Text("The audio goes through these effects in order. Each one adds about 3 ms; every track and bus is delayed to stay in sync automatically.", color = Zk.dim, fontSize = 12.sp)
             Spacer(Modifier.height(6.dp))
             if (list.isEmpty()) Text("No effect yet.", color = Zk.dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))
             else LazyColumn(Modifier.heightIn(max = dialogListMax(330.dp))) {
@@ -45,9 +45,9 @@ fun InsertsDialog(vm: DawViewModel, owner: TrackM?, onEdit: (TrackM) -> Unit, on
                             LabelButton(if (fx.bypass) "Off" else "On", !fx.bypass, w = 44.dp, h = 30.dp) { vm.setBypass(fx, !fx.bypass) }
                             LabelButton("Edit", false, w = 48.dp, h = 30.dp) { onEdit(fx) }
                             Spacer(Modifier.weight(1f))
-                            TextButton({ vm.moveEffect(owner, fx, -1) }, enabled = i > 0, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↑") }
-                            TextButton({ vm.moveEffect(owner, fx, 1) }, enabled = i < list.size - 1, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↓") }
-                            TextButton({ vm.removeEffect(owner, fx) }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("✕", color = Zk.danger) }
+                            TextButton({ vm.moveEffect(owner, fx, -1, bus) }, enabled = i > 0, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↑") }
+                            TextButton({ vm.moveEffect(owner, fx, 1, bus) }, enabled = i < list.size - 1, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("↓") }
+                            TextButton({ vm.removeEffect(owner, fx, bus) }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.widthIn(min = 32.dp)) { Text("✕", color = Zk.danger) }
                         }
                     }
                     HorizontalDivider(color = Zk.line)
@@ -59,12 +59,12 @@ fun InsertsDialog(vm: DawViewModel, owner: TrackM?, onEdit: (TrackM) -> Unit, on
 
 /** Plugins that can be an effect: those known to be effects, and those whose type is not known yet. */
 @Composable
-fun EffectPickerDialog(vm: DawViewModel, owner: TrackM?, onInstall: () -> Unit, onDismiss: () -> Unit) {
+fun EffectPickerDialog(vm: DawViewModel, owner: TrackM?, onInstall: () -> Unit, onDismiss: () -> Unit, bus: com.zedokmusic.model.BusM? = null) {
     var plugins by remember { mutableStateOf(vm.scanPlugins()) }
     LaunchedEffect(vm.pluginsVersion) { plugins = vm.scanPlugins() }
     LaunchedEffect(Unit) { vm.probeUnknown(vm.scanPlugins()) }
     val effects = plugins.filter { it.kind != 1 }
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Add effect · " + (owner?.name ?: "Master")) }, text = {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Add effect · " + (bus?.name ?: owner?.name ?: "Master")) }, text = {
         Column {
             if (vm.probing) Text("Checking which plugins are effects…", color = Zk.accent, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
             if (effects.isEmpty()) Text("No effect plugin found.\n\nInstall one with Install .exe, or copy its .vst3 or VST2 .dll into:\n${vm.pluginDir()?.path ?: ""}", color = Zk.dim, fontSize = 13.sp)
@@ -72,13 +72,13 @@ fun EffectPickerDialog(vm: DawViewModel, owner: TrackM?, onInstall: () -> Unit, 
                 val own = effects.filter { it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
                 if (own.isNotEmpty()) item { Text("ZEDOK", color = Zk.accent, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 4.dp)) }
                 items(own, key = { it.path }) { p ->
-                    Column(Modifier.fillMaxWidth().clickable { vm.addEffect(owner, p); onDismiss() }.padding(vertical = 10.dp)) { Text(p.name, color = Zk.text); Text(p.blurb, color = Zk.dim, fontSize = 11.sp) }
+                    Column(Modifier.fillMaxWidth().clickable { vm.addEffect(owner, p, bus); onDismiss() }.padding(vertical = 10.dp)) { Text(p.name, color = Zk.text); Text(p.blurb, color = Zk.dim, fontSize = 11.sp) }
                     HorizontalDivider(color = Zk.line)
                 }
                 val vst = effects.filter { !it.path.startsWith(com.zedokmusic.engine.PluginHost.NATIVE_PREFIX) }
                 if (vst.isNotEmpty()) item { Text("WINDOWS PLUGINS", color = Zk.dim, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 12.dp)) }
                 items(vst, key = { it.path }) { p ->
-                    Row(Modifier.fillMaxWidth().clickable { vm.addEffect(owner, p); onDismiss() }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().clickable { vm.addEffect(owner, p, bus); onDismiss() }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(p.name, Modifier.weight(1f), color = Zk.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(if (p.kind == 2) "effect" else "type unknown", color = Zk.dim, fontSize = 11.sp)
                     }
