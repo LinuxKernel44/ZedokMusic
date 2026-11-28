@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,10 +47,22 @@ import com.zedokmusic.model.*
 
 @Composable
 fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
+    var routeTrack by remember { mutableStateOf<TrackM?>(null) }; var routeBus by remember { mutableStateOf<BusM?>(null) }
+    routeTrack?.let { t -> if (t in vm.tracks) TrackRoutingDialog(vm, t) { routeTrack = null } else routeTrack = null }
+    routeBus?.let { b -> if (b in vm.buses) BusDialog(vm, b) { routeBus = null } else routeBus = null }
     Row(Modifier.fillMaxSize().background(Zk.bg).horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         vm.tracks.forEach { t ->
             Strip(t.name, t.color, t.gain, t.pan, t.meter, t.mute, t.solo, vm.selected == t, t.fx.size, t.fx.any { !it.bypass }, { onInserts(t) }, stereo = t.stereo, onStereo = { vm.setStereo(t, it) },
-                onGain = { vm.setGain(t, it) }, onPan = { vm.setPan(t, it) }, onMute = { vm.setMute(t, !t.mute) }, onSolo = { vm.setSolo(t, !t.solo) }, onSelect = { vm.selected = t })
+                onGain = { vm.setGain(t, it) }, onPan = { vm.setPan(t, it) }, onMute = { vm.setMute(t, !t.mute) }, onSolo = { vm.setSolo(t, !t.solo) }, onSelect = { vm.selected = t },
+                route = routeLabel(vm, t), routeActive = t.output != 0 || t.sends.isNotEmpty(), onRoute = { routeTrack = t })
+        }
+        vm.buses.forEach { b ->
+            Strip(b.name, b.color, b.gain, b.pan, 0f, b.mute, false, false, 0, false, {}, stereo = b.stereo, onStereo = { vm.setBusStereo(b, it) }, onGain = { vm.setBusGain(b, it) }, onPan = { vm.setBusPan(b, it) },
+                onMute = { vm.setBusMute(b, !b.mute) }, onSolo = {}, onSelect = {}, showFx = false, showSolo = false,
+                route = "→ " + (if (b.output == 0) "Master" else vm.busById(b.output)?.name ?: "Master"), routeActive = b.output != 0, onRoute = { routeBus = b })
+        }
+        Box(Modifier.width(64.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Zk.panel).border(1.dp, Zk.line, RoundedCornerShape(12.dp)).pointerInput(Unit) { detectTapGestures { vm.addBus() } }, contentAlignment = Alignment.Center) {
+            Text("+ Bus", color = Zk.dim, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         Strip("Master", Zk.text, vm.masterGain, null, vm.masterMeter, false, false, false, vm.masterFx.size, vm.masterFx.any { !it.bypass }, { onInserts(null) }, stereo = vm.masterStereo, onStereo = { vm.applyMasterStereo(it) }, onGain = { vm.setMaster(it) }, onPan = {}, onMute = {}, onSolo = {}, onSelect = {})
         if (vm.tracks.isEmpty()) Text("No tracks yet", color = Zk.dim, modifier = Modifier.padding(16.dp))
@@ -58,7 +71,8 @@ fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
 
 @Composable
 private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: Float, mute: Boolean, solo: Boolean, selected: Boolean, fxCount: Int, fxOn: Boolean, onFx: () -> Unit, stereo: Float, onStereo: (Float) -> Unit,
-                  onGain: (Float) -> Unit, onPan: (Float) -> Unit, onMute: () -> Unit, onSolo: () -> Unit, onSelect: () -> Unit) {
+                  onGain: (Float) -> Unit, onPan: (Float) -> Unit, onMute: () -> Unit, onSolo: () -> Unit, onSelect: () -> Unit,
+                  route: String? = null, routeActive: Boolean = false, onRoute: () -> Unit = {}, showFx: Boolean = true, showSolo: Boolean = true) {
     // While the volume fader is used it grows over the whole height of the strip, and shrinks back when it is released.
     var faderActive by remember { mutableStateOf(false) }
     val grow by androidx.compose.animation.core.animateFloatAsState(if (faderActive) 1f else 0f, androidx.compose.animation.core.tween(if (faderActive) 240 else 360), label = "fader")
@@ -68,7 +82,10 @@ private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: F
         .pointerInput(Unit) { detectTapGestures { onSelect() } }.androidx_onSize { boxH = it }) {
         Column(Modifier.fillMaxSize().padding(8.dp).graphicsLayer { alpha = 1f - 0.75f * grow }, horizontalAlignment = Alignment.CenterHorizontally) {
             Text(name, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            LabelButton(if (fxCount == 0) "FX" else "FX $fxCount", fxOn, color, w = 60.dp, h = 26.dp, onClick = onFx)
+            if (showFx) LabelButton(if (fxCount == 0) "FX" else "FX $fxCount", fxOn, color, w = 60.dp, h = 26.dp, onClick = onFx) else Spacer(Modifier.height(26.dp))
+            if (route != null) Box(Modifier.padding(top = 3.dp).width(76.dp).height(22.dp).clip(RoundedCornerShape(6.dp)).background(if (routeActive) color.copy(alpha = .28f) else Zk.panel2).pointerInput(Unit) { detectTapGestures { onRoute() } }, contentAlignment = Alignment.Center) {
+                Text(route, color = if (routeActive) color else Zk.dim, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
+            }
             if (pan != null) {
                 Slider(pan, onPan, valueRange = -1f..1f, modifier = Modifier.height(28.dp).doubleTapReset { onPan(0f) }, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = Zk.line, inactiveTrackColor = Zk.line))
                 Text(if (pan == 0f) "C" else if (pan < 0) "L${(-pan * 100).toInt()}" else "R${(pan * 100).toInt()}", color = Zk.dim, fontSize = 10.sp)
@@ -78,7 +95,7 @@ private fun Strip(name: String, color: Color, gain: Float, pan: Float?, meter: F
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp).androidx_onPlaced { top, h -> phTop = top; phH = h })
             Text(gainToDb(gain) + " dB", color = Zk.dim, fontSize = 10.sp, modifier = Modifier.graphicsLayer { alpha = 1f - grow })
             Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { LabelButton("M", mute, Zk.warn, onClick = onMute); LabelButton("S", solo, Zk.accent, onClick = onSolo) }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { LabelButton("M", mute, Zk.warn, onClick = onMute); if (showSolo) LabelButton("S", solo, Zk.accent, onClick = onSolo) }
         }
         val top = phTop + (edge - phTop) * grow; val bottom = (phTop + phH) + ((boxH - edge) - (phTop + phH)) * grow
         Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(edge.toInt(), top.toInt()) }.width(76.dp).height(with(density) { (bottom - top).coerceAtLeast(1f).toDp() })) {

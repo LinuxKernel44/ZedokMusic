@@ -150,6 +150,29 @@ static int routingChecks() {
       check("a bus cannot feed itself", !e.setBusOutput(b2, b2), 0);
       check("an unknown bus or track is refused", !e.setBusOutput(b1, 99) && !e.setTrackOutput(1, 99) && !e.setTrackOutput(77, b1), 0);
       int n = 3; while (e.addBus()) n++; check("the bus limit is enforced", n == kMaxBuses, n); }
+    // sends: a send is a copy of the track at the send level, mixed into a bus
+    const auto one = [&](Engine& e, int& t) { t = e.addTrack(); e.addClip(t, tone(330, 1.5, 0.4), 0, 0, 1.5 * kProjectRate, 1.f); e.setTrackPan(t, 0.3f); e.setTrackGain(t, 0.8f); };
+    const auto plain = renderWith(2.0, [&](Engine& e) { int t; one(e, t); });
+    const auto postSend = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(); e.setSend(t, b, 1.f, false); });
+    std::vector<float> twice = plain; for (auto& x : twice) x *= 2.f;
+    check("a post-fader send at 1 doubles the track (output + copy) (<= 1e-5)", maxDiff(twice, postSend) < 1e-5, maxDiff(twice, postSend));
+    const auto sendOnly = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 0.5f, false); });
+    std::vector<float> halfCopy = plain; for (auto& x : halfCopy) x *= 0.5f;
+    check("output muted: only a send at 0.5 is heard, half of the track (<= 1e-5)", maxDiff(halfCopy, sendOnly, 1024) < 1e-5, maxDiff(halfCopy, sendOnly, 1024));
+    const auto preSend = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 1.f, true); e.setTrackGain(t, 0.4f); });
+    const auto preRef = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 1.f, true); });
+    check("a pre-fader send ignores the track fader but follows the pan of the bus only (<= 1e-5)", maxDiff(preRef, preSend, 1024) < 1e-5, maxDiff(preRef, preSend, 1024));
+    const auto postFader = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 1.f, false); e.setTrackGain(t, 0.4f); });
+    double dpre = maxDiff(preRef, postFader, 1024); check("a post-fader send does follow the fader", dpre > 0.05, dpre);
+    const auto muted = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 1.f, true); e.setTrackMute(t, true); });
+    double mpk = 0; for (size_t i = 8192; i < muted.size(); i++) mpk = std::max(mpk, (double)std::fabs(muted[i]));   // the first block ramps from the initial unity gain check("a muted track sends nothing, even pre-fader", mpk < 1e-6, mpk);
+    { auto ep = std::make_unique<Engine>(); Engine& e = *ep; int t = e.addTrack(), b = e.addBus();
+      check("a send needs a known track and bus", !e.setSend(t, 99, 1.f, false) && !e.setSend(77, b, 1.f, false), 0);
+      check("a bus can be sent to once, then updated", e.setSend(t, b, 1.f, false) && e.setSend(t, b, 0.5f, true), 0);
+      int b2 = e.addBus(), b3 = e.addBus(), b4 = e.addBus(), b5 = e.addBus();
+      check("four sends at most", e.setSend(t, b2, 1.f, false) && e.setSend(t, b3, 1.f, false) && e.setSend(t, b4, 1.f, false) && !e.setSend(t, b5, 1.f, false), 0);
+      check("a send can be removed, and removing a bus removes its sends", e.removeSend(t, b) && e.removeBus(b2) && e.setSend(t, b5, 1.f, false), 0);
+      int g1 = e.addBus(); e.removeBus(g1); int g2 = e.addBus(); check("a removed bus id is reused (sessions with many project switches)", g2 == g1, g2); }
     return fails;
 }
 

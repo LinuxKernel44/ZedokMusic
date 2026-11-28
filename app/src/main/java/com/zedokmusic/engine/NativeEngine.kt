@@ -42,6 +42,16 @@ object NativeEngine {
     external fun setTrackPan(id: Int, pan: Float)
     external fun setTrackWidth(id: Int, width: Float)
     external fun setMasterWidth(width: Float)
+    external fun addBus(): Int
+    external fun removeBus(id: Int): Boolean
+    external fun setBusGain(id: Int, gain: Float)
+    external fun setBusPan(id: Int, pan: Float)
+    external fun setBusWidth(id: Int, width: Float)
+    external fun setBusMute(id: Int, mute: Boolean)
+    external fun setTrackOutput(track: Int, bus: Int): Boolean
+    external fun setBusOutput(bus: Int, dest: Int): Boolean
+    external fun setSend(track: Int, bus: Int, gain: Float, pre: Boolean): Boolean
+    external fun removeSend(track: Int, bus: Int): Boolean
     external fun setDataDir(dir: String)
     external fun setTrackMute(id: Int, mute: Boolean)
     external fun setTrackSolo(id: Int, solo: Boolean)

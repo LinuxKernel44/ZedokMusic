@@ -35,11 +35,17 @@ class ProjectFormatTest {
     }
 
     @Test fun currentFormatIsLeftAsItIs() {
-        val src = witness("v5_current.zedok")
-        val r = ProjectFormat.migrate(witness("v5_current.zedok"))
+        val src = witness("v6_current.zedok")
+        val r = ProjectFormat.migrate(witness("v6_current.zedok"))
         assertEquals(src.toString(), r.toString())
+        assertEquals(2, r.getJSONArray("buses").length()); assertEquals(1, r.getJSONArray("tracks").getJSONObject(0).getJSONArray("sends").length())
+        assertEquals(6, ProjectFormat.CURRENT)
+    }
+
+    @Test fun olderWitnessesGainNothingForRouting() {   // format 5 -> 6 adds no key: a project without buses mixes straight into the master
+        val r = ProjectFormat.migrate(witness("v5_current.zedok"))
+        assertEquals(6, r.getInt("version")); assertFalse(r.has("buses")); assertFalse(r.getJSONArray("tracks").getJSONObject(0).has("sends"))
         assertEquals(2, r.getJSONArray("tempoChanges").length()); assertEquals(2, r.getJSONArray("markers").length())
-        assertEquals(5, ProjectFormat.CURRENT)
     }
 
     @Test fun migrationIsIdempotent() {

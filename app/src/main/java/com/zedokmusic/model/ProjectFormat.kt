@@ -16,8 +16,8 @@ import org.json.JSONObject
  * A file written by a *newer* app is refused ([TooNew]) instead of being half read and then overwritten by the next autosave.
  */
 object ProjectFormat {
-    /** The format written by this version. 2 = first numbered migration (defaults made explicit: scale, stereo width, view, per-track lists). 3 = a note may carry five more numbers after its velocity (pan, cutoff, resonance, fine pitch, release; a sixth 0/1 for slide). 4 = patterns: the notes of the tracks move into `patterns` (one set of notes per track per pattern) and a `playlist` places them. 5 = tempo changes (`tempoChanges`: [beat, bpm]) and timeline `markers` ({beat, name}). */
-    const val CURRENT = 5
+    /** The format written by this version. 2 = first numbered migration (defaults made explicit: scale, stereo width, view, per-track lists). 3 = a note may carry five more numbers after its velocity (pan, cutoff, resonance, fine pitch, release; a sixth 0/1 for slide). 4 = patterns: the notes of the tracks move into `patterns` (one set of notes per track per pattern) and a `playlist` places them. 5 = tempo changes (`tempoChanges`: [beat, bpm]) and timeline `markers` ({beat, name}). 6 = mixer routing: `buses` ({name, gain, pan, stereo, mute, output}) and per track `output` and `sends` ({bus, gain, pre}); bus references are 1-based positions in `buses`, 0 = the master. */
+    const val CURRENT = 6
 
     class TooNew(val found: Int) : Exception("This project was saved by a newer version of ZedokMusic (project format $found; this version reads up to $CURRENT). Update the app to open it.")
 
@@ -60,6 +60,7 @@ object ProjectFormat {
             }
         },
         { _ -> },   // 4 -> 5: tempoChanges and markers are optional keys: a project without them has one tempo and no markers
+        { _ -> },   // 5 -> 6: buses, output and sends are optional keys: a project without them mixes every track straight into the master
     )
 
     init { check(steps.size == CURRENT - 1) { "ProjectFormat.CURRENT ($CURRENT) needs ${CURRENT - 1} migration steps, found ${steps.size}" } }

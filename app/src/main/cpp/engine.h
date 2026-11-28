@@ -65,6 +65,11 @@ struct FxState {
     std::vector<AutoLane> lanes;
 };
 
+constexpr int kMaxSends = 4;      // sends per track
+
+// A send: a copy of the track's signal, at its own level, mixed into a bus (before the fader, or after fader / pan / width).
+struct SendState { int bus = 0; float gain = 1.f; bool pre = false; };
+
 struct TrackState {
     int id = 0;
     std::vector<Clip> clips;
@@ -77,6 +82,7 @@ struct TrackState {
     float width = 1.f;                              // stereo width: 0 mono, 1 unchanged, 2 twice as wide (side signal gain)
     bool mute = false, solo = false;
     int output = 0;                                 // 0 = the master, else the id of the bus this track is mixed into
+    std::vector<SendState> sends;                   // at most kMaxSends, one per bus
 };
 
 // Immutable snapshot, published by the UI thread and read by the audio thread.
@@ -117,6 +123,7 @@ struct MixState {
     float smoothWidth[kMaxTracks];
     float bus[kMaxBuses][ZK_MAX_FRAMES * 2];        // what each bus has received so far (by position in Project::buses)
     float smoothBusGain[kMaxBusId + 1];
+    float smoothSend[kMaxTracks][kMaxBusId + 1];    // send level actually applied, by track id and bus id
     float smoothBusWidth[kMaxBusId + 1];
     float smoothMaster = 1.f, smoothMasterWidth = 1.f;
     bool init = false;
@@ -164,6 +171,8 @@ public:
     void setBusPan(int busId, float p);
     void setBusWidth(int busId, float w);
     void setBusMute(int busId, bool m);
+    bool setSend(int track, int busId, float gain, bool pre);   // adds or updates the send of this track to that bus; false for an unknown track or bus, or when the track already has kMaxSends
+    bool removeSend(int track, int busId);
     bool setTrackOutput(int track, int busId);    // busId 0 = master; false for an unknown track or bus
     bool setBusOutput(int busId, int destBusId);  // false for an unknown bus, or when it would make a loop
 

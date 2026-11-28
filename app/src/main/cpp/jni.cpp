@@ -43,6 +43,16 @@ J(void, setTrackGain, jint id, jfloat g) { eng().setTrackGain(id, g); }
 J(void, setTrackPan, jint id, jfloat p) { eng().setTrackPan(id, p); }
 J(void, setTrackWidth, jint id, jfloat w) { eng().setTrackWidth(id, w); }
 J(void, setMasterWidth, jfloat w) { eng().setMasterWidth(w); }
+J(jint, addBus) { return eng().addBus(); }
+J(jboolean, removeBus, jint id) { return eng().removeBus(id); }
+J(void, setBusGain, jint id, jfloat g) { eng().setBusGain(id, g); }
+J(void, setBusPan, jint id, jfloat v) { eng().setBusPan(id, v); }
+J(void, setBusWidth, jint id, jfloat v) { eng().setBusWidth(id, v); }
+J(void, setBusMute, jint id, jboolean m) { eng().setBusMute(id, m); }
+J(jboolean, setTrackOutput, jint track, jint bus) { return eng().setTrackOutput(track, bus); }
+J(jboolean, setBusOutput, jint bus, jint dest) { return eng().setBusOutput(bus, dest); }
+J(jboolean, setSend, jint track, jint bus, jfloat g, jboolean pre) { return eng().setSend(track, bus, g, pre); }
+J(jboolean, removeSend, jint track, jint bus) { return eng().removeSend(track, bus); }
 J(void, setTrackMute, jint id, jboolean m) { eng().setTrackMute(id, m); }
 J(void, setTrackSolo, jint id, jboolean s) { eng().setTrackSolo(id, s); }
 J(void, setMasterGain, jfloat g) { eng().setMasterGain(g); }

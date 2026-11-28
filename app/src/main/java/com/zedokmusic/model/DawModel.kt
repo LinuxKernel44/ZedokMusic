@@ -46,6 +46,23 @@ class ClipM(val engineId: Int, path: String, val name: String, start: Float, val
     var replacedBy: ClipM? = null
 }
 
+/** A send of a track to a bus: a copy of the track's signal at [gain] (0..2), taken before the fader ([pre]) or after it. */
+class SendM(val bus: Int, gain: Float, pre: Boolean) {
+    var gain by mutableFloatStateOf(gain)
+    var pre by mutableStateOf(pre)
+}
+
+/** A mixer bus: the tracks (and buses) routed to it are summed, then it goes to the master or to another bus. [id] is the engine's id for the session. */
+class BusM(val id: Int, name: String, val color: Color) {
+    var name by mutableStateOf(name)
+    var gain by mutableFloatStateOf(1f)
+    var pan by mutableFloatStateOf(0f)
+    var stereo by mutableFloatStateOf(0f)
+    var mute by mutableStateOf(false)
+    /** 0 = the master, else the id of the bus this one is mixed into. */
+    var output by mutableIntStateOf(0)
+}
+
 class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, val pluginPath: String?) {
     var name by mutableStateOf(name)
     var gain by mutableFloatStateOf(1f)
@@ -54,6 +71,9 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     var stereo by mutableFloatStateOf(0f)
     var mute by mutableStateOf(false)
     var solo by mutableStateOf(false)
+    /** Where the track is mixed: 0 = the master, else a bus id. */
+    var output by mutableIntStateOf(0)
+    val sends = mutableStateListOf<SendM>()
     /** 0 none, 1 starting, 2 ready, 3 error */
     var pluginState by mutableIntStateOf(0)
     var pluginName by mutableStateOf("")

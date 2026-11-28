@@ -155,8 +155,10 @@ void Engine::planRouting(Project& p) {
 int Engine::addBus() {
     int id = 0;
     edit([&](Project& p) {
-        if ((int)p.buses.size() >= kMaxBuses || nextBusId_ > kMaxBusId) return;
-        BusState b; b.id = id = nextBusId_++; p.buses.push_back(b); planRouting(p);
+        if ((int)p.buses.size() >= kMaxBuses) return;
+        int nid = 1; while (nid <= kMaxBusId && findBus(p, nid)) nid++;   // the smallest id in use by no bus (ids come back when a bus is removed)
+        if (nid > kMaxBusId) return;
+        BusState b; b.id = id = nid; p.buses.push_back(b); planRouting(p);
     });
     return id;
 }
@@ -166,7 +168,7 @@ bool Engine::removeBus(int busId) {
         auto it = std::remove_if(p.buses.begin(), p.buses.end(), [&](auto& b) { return b.id == busId; });
         ok = it != p.buses.end(); if (!ok) return;
         p.buses.erase(it, p.buses.end());
-        for (auto& t : p.tracks) if (t.output == busId) t.output = 0;
+        for (auto& t : p.tracks) { if (t.output == busId) t.output = 0; t.sends.erase(std::remove_if(t.sends.begin(), t.sends.end(), [&](auto& s) { return s.bus == busId; }), t.sends.end()); }
         for (auto& b : p.buses) if (b.output == busId) b.output = 0;
         planRouting(p);
     });
@@ -178,6 +180,24 @@ BUS_SET(setBusGain(int id, float g), b->gain = std::clamp(g, 0.f, 4.f))
 BUS_SET(setBusPan(int id, float v), b->pan = std::clamp(v, -1.f, 1.f))
 BUS_SET(setBusWidth(int id, float v), b->width = std::clamp(v, 0.f, 2.f))
 BUS_SET(setBusMute(int id, bool m), b->mute = m)
+bool Engine::setSend(int track, int busId, float gain, bool pre) {
+    bool ok = false;
+    edit([&](Project& p) {
+        if (!findBus(p, busId)) return;
+        for (auto& t : p.tracks) if (t.id == track) {
+            const float g = std::clamp(gain, 0.f, 4.f);
+            for (auto& s : t.sends) if (s.bus == busId) { s.gain = g; s.pre = pre; ok = true; return; }
+            if ((int)t.sends.size() >= kMaxSends) return;
+            t.sends.push_back({busId, g, pre}); ok = true;
+        }
+    });
+    return ok;
+}
+bool Engine::removeSend(int track, int busId) {
+    bool ok = false;
+    edit([&](Project& p) { for (auto& t : p.tracks) if (t.id == track) { auto it = std::remove_if(t.sends.begin(), t.sends.end(), [&](auto& s) { return s.bus == busId; }); ok = it != t.sends.end(); t.sends.erase(it, t.sends.end()); } });
+    return ok;
+}
 bool Engine::setTrackOutput(int track, int busId) {
     bool ok = false;
     edit([&](Project& p) {
@@ -248,7 +268,7 @@ int64_t Engine::renderBlockDry(const Project& p, int64_t pos, int frames, MixSta
 }
 
 void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, std::atomic<float>* meters) {
-    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; for (auto& w : ms.smoothWidth) w = 1.f; for (auto& g : ms.smoothBusGain) g = 1.f; for (auto& w : ms.smoothBusWidth) w = 1.f; ms.init = true; }
+    if (!ms.init) { for (auto& g : ms.smoothGain) g = 1.f; for (auto& w : ms.smoothWidth) w = 1.f; for (auto& g : ms.smoothBusGain) g = 1.f; for (auto& row : ms.smoothSend) for (auto& g : row) g = 1.f; for (auto& w : ms.smoothBusWidth) w = 1.f; ms.init = true; }
     memset(out, 0, sizeof(float) * 2 * frames);
     const int nBuses = (int)std::min<size_t>(p.buses.size(), kMaxBuses);
     for (int b = 0; b < nBuses; b++) memset(ms.bus[b], 0, sizeof(float) * 2 * frames);
@@ -275,6 +295,20 @@ void Engine::mixTracks(const Project& p, int frames, float* out, MixState& ms, s
             float l = xl * g * pl, r = xr * g * pr;
             dst[i * 2] += l; dst[i * 2 + 1] += r;
             tpk = std::max(tpk, std::max(fabsf(l), fabsf(r)));
+        }
+        for (const SendState& sd : t.sends) {   // sends: a copy at the send level (pre: before the fader and the pan, but not while the track is muted or not soloed)
+            const int bs = busSlot(p, sd.bus); if (bs < 0 || t.id >= kMaxTracks) continue;
+            float& sm = ms.smoothSend[t.id][sd.bus]; const float s0 = sm, s1 = sd.gain * (sd.pre ? (audible ? 1.f : 0.f) : 1.f); sm = s1;
+            float* sdst = ms.bus[bs];
+            if (sd.pre) { for (int i = 0; i < frames; i++) { const float s = s0 + (s1 - s0) * ((float)i / (float)frames); sdst[i * 2] += tb[i * 2] * s; sdst[i * 2 + 1] += tb[i * 2 + 1] * s; } }
+            else {   // after the fader: what the track sends to its output, scaled by the send level
+                for (int i = 0; i < frames; i++) {
+                    const float s = s0 + (s1 - s0) * ((float)i / (float)frames), g = g0 + (g1 - g0) * ((float)i / (float)frames);
+                    float xl = tb[i * 2], xr = tb[i * 2 + 1];
+                    if (w0 != 1.f || w1 != 1.f) { const float w = w0 + (w1 - w0) * ((float)i / (float)frames); const float m = 0.5f * (xl + xr), sdv = 0.5f * (xl - xr) * w; xl = m + sdv; xr = m - sdv; }
+                    sdst[i * 2] += xl * g * pl * s; sdst[i * 2 + 1] += xr * g * pr * s;
+                }
+            }
         }
         if (meters && t.id < kMaxTracks) { float old = meters[t.id].load(std::memory_order_relaxed); if (tpk > old) meters[t.id].store(tpk, std::memory_order_relaxed); }
     }

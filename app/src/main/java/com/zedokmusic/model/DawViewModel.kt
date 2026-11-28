@@ -100,6 +100,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     var playhead by mutableFloatStateOf(0f); private set
     var selected by mutableStateOf<TrackM?>(null)
     var masterGain by mutableFloatStateOf(1f); private set
+    val buses = mutableStateListOf<BusM>()   // declared up here: load() runs from the constructor
     var masterStereo by mutableFloatStateOf(0f); private set   // declared up here: load() runs from the constructor
     var masterMeter by mutableFloatStateOf(0f); private set
     var engineInfo by mutableStateOf("")
@@ -519,6 +520,57 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun widthOf(s: Float) = 1f - s
     private fun putStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
     fun setStereo(t: TrackM, s: Float) { val o = t.stereo; putStereo(t, s); val n = t.stereo; if (o != n) record("Stereo width", "stereo${t.id}", undo = { putStereo(t, o) }, redo = { putStereo(t, n) }) }
+    // ---- mixer routing: buses, track / bus outputs, sends ----
+    fun busById(id: Int) = buses.firstOrNull { it.id == id }
+    fun addBus(): BusM? {
+        val id = e.addBus(); if (id == 0) { message = "No more buses (the limit is 16)."; return null }
+        clearHistory()   // removing a bus is not undoable, and older actions may name its id
+        val b = BusM(id, "Bus ${buses.size + 1}", TrackColors[id % TrackColors.size]); buses.add(b); dirty = true; return b
+    }
+    fun removeBus(b: BusM) {
+        clearHistory(); e.removeBus(b.id); buses.remove(b)
+        for (t in tracks) { if (t.output == b.id) t.output = 0; t.sends.removeAll { it.bus == b.id } }
+        for (o in buses) if (o.output == b.id) o.output = 0
+        dirty = true
+    }
+    private fun putBusGain(b: BusM, g: Float) { b.gain = g.coerceIn(0f, 4f); e.setBusGain(b.id, b.gain); dirty = true }
+    fun setBusGain(b: BusM, g: Float) { val o = b.gain; putBusGain(b, g); val n = b.gain; if (o != n) record("Bus volume", "busgain${b.id}", undo = { putBusGain(b, o) }, redo = { putBusGain(b, n) }) }
+    private fun putBusPan(b: BusM, v: Float) { b.pan = v.coerceIn(-1f, 1f); e.setBusPan(b.id, b.pan); dirty = true }
+    fun setBusPan(b: BusM, v: Float) { val o = b.pan; putBusPan(b, v); val n = b.pan; if (o != n) record("Bus pan", "buspan${b.id}", undo = { putBusPan(b, o) }, redo = { putBusPan(b, n) }) }
+    private fun putBusStereo(b: BusM, s: Float) { b.stereo = s.coerceIn(-1f, 1f); e.setBusWidth(b.id, widthOf(b.stereo)); dirty = true }
+    fun setBusStereo(b: BusM, s: Float) { val o = b.stereo; putBusStereo(b, s); val n = b.stereo; if (o != n) record("Bus stereo width", "busstereo${b.id}", undo = { putBusStereo(b, o) }, redo = { putBusStereo(b, n) }) }
+    private fun putBusMute(b: BusM, m: Boolean) { b.mute = m; e.setBusMute(b.id, m); dirty = true }
+    fun setBusMute(b: BusM, m: Boolean) { val o = b.mute; if (o == m) return; putBusMute(b, m); record(if (m) "Mute bus" else "Unmute bus", "busmute${b.id}", undo = { putBusMute(b, o) }, redo = { putBusMute(b, m) }) }
+    fun renameBus(b: BusM, name: String) { b.name = name.trim().ifEmpty { b.name }; dirty = true }
+    private fun putTrackOutput(t: TrackM, bus: Int): Boolean { if (!e.setTrackOutput(t.id, bus)) return false; t.output = bus; dirty = true; return true }
+    fun setTrackOutput(t: TrackM, bus: Int) { val o = t.output; if (o == bus) return; if (putTrackOutput(t, bus)) record("Track output", "out${t.id}", undo = { putTrackOutput(t, o) }, redo = { putTrackOutput(t, bus) }) }
+    private fun putBusOutput(b: BusM, dest: Int): Boolean { if (!e.setBusOutput(b.id, dest)) return false; b.output = dest; dirty = true; return true }
+    fun setBusOutput(b: BusM, dest: Int) {
+        val o = b.output; if (o == dest) return
+        if (!putBusOutput(b, dest)) { message = "That would send the bus back into itself (a routing loop)."; return }
+        record("Bus output", "busout${b.id}", undo = { putBusOutput(b, o) }, redo = { putBusOutput(b, dest) })
+    }
+    /** Buses that [b] could be routed into without a loop. */
+    fun busTargets(b: BusM): List<BusM> = buses.filter { x -> var at = x.id; var ok = true; var hops = 0; while (at != 0 && hops++ <= 16) { if (at == b.id) { ok = false; break }; at = busById(at)?.output ?: 0 }; ok }
+    private fun putSend(t: TrackM, bus: Int, gain: Float, pre: Boolean): Boolean {
+        if (!e.setSend(t.id, bus, gain, pre)) return false
+        val s = t.sends.firstOrNull { it.bus == bus }
+        if (s == null) t.sends.add(SendM(bus, gain, pre)) else { s.gain = gain; s.pre = pre }
+        dirty = true; return true
+    }
+    private fun dropSend(t: TrackM, bus: Int) { e.removeSend(t.id, bus); t.sends.removeAll { it.bus == bus }; dirty = true }
+    fun setSend(t: TrackM, bus: Int, gain: Float, pre: Boolean? = null) {
+        val old = t.sends.firstOrNull { it.bus == bus }; val og = old?.gain; val op = old?.pre ?: false
+        val np = pre ?: op; val ng = gain.coerceIn(0f, 2f)
+        if (!putSend(t, bus, ng, np)) { message = "A track can have at most 4 sends."; return }
+        record("Send level", "send${t.id}_$bus", undo = { if (og == null) dropSend(t, bus) else putSend(t, bus, og, op) }, redo = { putSend(t, bus, ng, np) })
+    }
+    fun removeSend(t: TrackM, bus: Int) {
+        val old = t.sends.firstOrNull { it.bus == bus } ?: return; val og = old.gain; val op = old.pre
+        dropSend(t, bus)
+        record("Remove send", "rmsend${t.id}_$bus", undo = { putSend(t, bus, og, op) }, redo = { dropSend(t, bus) })
+    }
+
     private fun putMasterStereo(s: Float) { masterStereo = s.coerceIn(-1f, 1f); e.setMasterWidth(widthOf(masterStereo)); dirty = true }
     fun applyMasterStereo(s: Float) { val o = masterStereo; putMasterStereo(s); val n = masterStereo; if (o != n) record("Master stereo width", "mstereo", undo = { putMasterStereo(o) }, redo = { putMasterStereo(n) }) }
     private fun putMute(t: TrackM, m: Boolean) { t.mute = m; e.setTrackMute(t.id, m); dirty = true }
@@ -1176,10 +1228,12 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
+            .also { o -> if (t.output != 0) o.put("output", busPos(t.output)); if (t.sends.isNotEmpty()) o.put("sends", JSONArray().also { a -> t.sends.forEach { s -> a.put(JSONObject().put("bus", busPos(s.bus)).put("gain", s.gain.toDouble()).put("pre", s.pre)) } }) }
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
                 .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
         root.put("tracks", arr).put("masterFx", fxJson(masterFx))
+        if (buses.isNotEmpty()) root.put("buses", JSONArray().also { a -> buses.forEach { b -> a.put(JSONObject().put("name", b.name).put("gain", b.gain.toDouble()).put("pan", b.pan.toDouble()).put("stereo", b.stereo.toDouble()).put("mute", b.mute).put("output", busPos(b.output))) } })
         val pats = JSONArray()
         for (pt in patterns) {
             val per = JSONObject()
@@ -1193,6 +1247,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .put("playlist", JSONArray().also { a -> playlist.forEach { c -> a.put(JSONObject().put("pattern", c.pattern.id).put("start", c.start.toDouble()).put("row", c.row).also { o -> c.length?.let { o.put("length", it.toDouble()) } }) } })
         try { f.parentFile?.mkdirs(); f.writeText(root.toString(1)) } catch (ex: Exception) { message = "Could not save the project: ${ex.message}" }
     }
+
+    /** A bus as saved: its 1-based position in the bus list (engine ids change from one session to the next), 0 = the master. */
+    private fun busPos(id: Int) = if (id == 0) 0 else buses.indexOfFirst { it.id == id } + 1
 
     /** A note as saved: [pitch, start, length, velocity] and, when it has properties, pan, cutoff, res, fine, release, slide. */
     private fun noteJson(n: NoteM) = JSONArray().put(n.pitch).put(n.start.toDouble()).put(n.length.toDouble()).put(n.velocity).also { r -> if (n.hasProps) r.put(n.pan).put(n.cutoff).put(n.res).put(n.fine).put(n.release).put(if (n.slide) 1 else 0) }
@@ -1243,6 +1300,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         resetPatterns()
         tracks.toList().forEach { removeTrack(it) }
         masterFx.toList().forEach { removeEffect(null, it) }
+        buses.toList().forEach { e.removeBus(it.id) }; buses.clear()
         pluginTarget = null; panelExpanded = false
         editorSlots.clear()
         loop = false; ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1; viewRevision++
@@ -1522,6 +1580,27 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         syncAllNotes()
     }
 
+    private fun busAt(pos: Int) = if (pos in 1..buses.size) buses[pos - 1].id else 0
+    private fun loadBuses(a: JSONArray?) {
+        if (a == null) return
+        for (i in 0 until a.length()) {
+            val id = e.addBus(); if (id == 0) break
+            val b = BusM(id, a.getJSONObject(i).optString("name", "Bus ${i + 1}"), TrackColors[id % TrackColors.size]); buses.add(b)
+        }
+        for (i in buses.indices) {
+            val o = a.getJSONObject(i); val b = buses[i]
+            b.gain = o.optDouble("gain", 1.0).toFloat(); b.pan = o.optDouble("pan", 0.0).toFloat(); b.stereo = o.optDouble("stereo", 0.0).toFloat(); b.mute = o.optBoolean("mute")
+            e.setBusGain(b.id, b.gain); e.setBusPan(b.id, b.pan); e.setBusWidth(b.id, widthOf(b.stereo)); e.setBusMute(b.id, b.mute)
+            val dest = busAt(o.optInt("output", 0)); if (dest != 0 && e.setBusOutput(b.id, dest)) b.output = dest
+        }
+    }
+    private fun loadRouting(t: TrackM, o: JSONObject) {
+        val out = busAt(o.optInt("output", 0)); if (out != 0 && e.setTrackOutput(t.id, out)) t.output = out
+        val sa = o.optJSONArray("sends") ?: return
+        for (k in 0 until sa.length()) { val s = sa.getJSONObject(k); val bus = busAt(s.optInt("bus", 0)); val g = s.optDouble("gain", 1.0).toFloat(); val pre = s.optBoolean("pre")
+            if (bus != 0 && e.setSend(t.id, bus, g, pre)) t.sends.add(SendM(bus, g, pre)) }
+    }
+
     private fun load() {
         formatLocked = false
         clearHistory()
@@ -1537,6 +1616,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 arrangeX = v.optInt("ax"); arrangeY = v.optInt("ay"); rollX = v.optInt("rx"); rollY = v.optInt("ry", -1)
             } ?: run { ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1 }
             viewRevision++
+            loadBuses(root.optJSONArray("buses"))
             val arr = root.getJSONArray("tracks")
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
@@ -1549,6 +1629,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 t.gain = o.optDouble("gain", 1.0).toFloat(); t.pan = o.optDouble("pan", 0.0).toFloat(); t.stereo = o.optDouble("stereo", 0.0).toFloat(); e.setTrackWidth(t.id, widthOf(t.stereo))
                 t.mute = o.optBoolean("mute"); t.solo = o.optBoolean("solo")
                 e.setTrackGain(t.id, t.gain); e.setTrackPan(t.id, t.pan); e.setTrackMute(t.id, t.mute); e.setTrackSolo(t.id, t.solo)
+                loadRouting(t, o)
                 readPluginState(t, o)
                 loadFx(t, o.optJSONArray("fx"))
                 val ca = o.getJSONArray("clips")

@@ -117,13 +117,13 @@ Risques : tout ce qui suppose un BPM unique (étirement des clips, automation en
 
 Prérequis : 0.5 (graphe de rendu).
 
-- [ ] **4.1 Pistes de mixer indépendantes** (canaux du Channel Rack → n'importe quelle piste du mixer), bus/groupes, master.
-- [ ] **4.2 Sends** : niveau d'envoi par piste vers un bus (pré/post fader), plusieurs envois, bus d'effets partagés (reverb/delay).
-- [ ] **4.3 Groupes** : sous-mix (la sortie d'une piste va vers un bus plutôt que le master) ; routage libre sans boucle (détection de cycle, message d'erreur).
+- [~] **4.1 Pistes de mixer indépendantes (0.57.0 : bus, sorties de piste ; pas les canaux du Rack vers n'importe quelle piste)** (canaux du Channel Rack → n'importe quelle piste du mixer), bus/groupes, master.
+- [~] **4.2 Sends (0.57.0 : envois pré/post-fader, 4 par piste, niveau par envoi ; pas encore d'effets sur les bus ni de sidechain)** : niveau d'envoi par piste vers un bus (pré/post fader), plusieurs envois, bus d'effets partagés (reverb/delay).
+- [x] **4.3 Groupes (0.57.0)** : sous-mix (la sortie d'une piste va vers un bus plutôt que le master) ; routage libre sans boucle (détection de cycle, message d'erreur).
 - [ ] **4.4 Sidechain** : entrée latérale d'un effet (native et VST3 quand le plugin l'expose) ; sélection de la source dans l'interface de l'insert.
 - [ ] **4.5 Compensation de latence des plugins (PDC)** : lire la latence rapportée par chaque plugin (VST3 `getLatencySamples`, hôtes Wine), aligner toutes les voies sur la plus longue, avec option de désactivation ; affichage de la latence totale.
 - [ ] **4.6 Freeze / render de piste** : rendre une piste (plugins compris) en audio, la remplacer par un clip audio gelé, dégeler pour retrouver les plugins ; cache dans `Cache/Freeze`.
-- [ ] **4.7 Interface** : vue mixer avec sélecteur de sortie/envois par piste, indicateurs de routage, glisser pour router, groupes repliables.
+- [~] **4.7 Interface (0.57.0 : bouton de sortie, dialogue d'envois, bandes de bus ; pas de glisser pour router ni de groupes repliables)** : vue mixer avec sélecteur de sortie/envois par piste, indicateurs de routage, glisser pour router, groupes repliables.
 - [ ] **4.8 Stems** (préparation) : le graphe sait rendre une piste ou un bus seul.
 
 Critères : tests hors ligne : somme de bus = somme des pistes ; PDC : deux voies avec un plugin de latence connue s'alignent à l'échantillon ; freeze produit un rendu identique à la lecture normale (à la tolérance près).
@@ -261,6 +261,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 
 | Version | Date | Contenu |
 |---|---|---|
+| 0.57.0-alpha | 2026-11-28 | Phase 4 (1re partie) : bus, sorties de piste, envois pré/post ; format 6. Non vérifié sur le S10 (téléphone non connecté) |
 | 0.56.0-alpha | 2026-11-27 | Phase 3 : marqueurs, carte de tempo, signatures (règle) ; format 5 |
 | 0.55.0-alpha | 2026-11-27 | Phase 2 : Rack (step sequencer), mode Song / Pattern. Reste de la phase 2 : navigateur (2.8), voir feuille |
 | 0.54.0-alpha | 2026-11-27 | Phase 2 (1re partie) : patterns, playlist (voie de patterns), format 4 |
