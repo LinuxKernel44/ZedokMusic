@@ -10,6 +10,7 @@
 #include <oboe/Oboe.h>
 #include <array>
 #include "plugin_bridge.h"
+#include "../../../../native/dsp/loudness.h"
 #include "wav.h"
 
 namespace zedok {
@@ -247,6 +248,9 @@ public:
     bool playing() const { return playing_.load(); }
     int64_t position() const { return pos_.load(); }
     float peak(int track) const;
+    /** Master loudness since the last reset, while playing: [momentary, short-term, integrated, range, true peak dB, sample peak dB, correlation] (LUFS / LU / dB; -200 = not enough audio yet). */
+    void loudness(float* out7) const;
+    void resetLoudness() { loudReset_.store(true, std::memory_order_relaxed); }
     int64_t projectLength() const;
 
     // --- offline render (any thread but the audio thread) ---
@@ -318,6 +322,10 @@ private:
     bool attachBridge(int id, std::shared_ptr<PluginBridge> bridge);
     std::atomic<bool> playing_{false};
     std::atomic<int64_t> pos_{0};
+    zdsp::LoudnessMeter loud_;                    // audio thread only
+    std::atomic<float> loudOut_[7];
+    std::atomic<bool> loudReset_{false};
+    bool loudWasPlaying_ = false;
     mutable std::atomic<float> meters_[kMaxTracks + 1];  // [kMaxTracks] = master
     std::shared_ptr<oboe::AudioStream> stream_;
     std::atomic<int64_t> callbacks_{0};

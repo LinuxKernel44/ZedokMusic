@@ -75,6 +75,8 @@ J(jboolean, renderTrackToWav, jstring path, jlong from, jlong to, jint fmt, jint
 J(jboolean, renderToWav, jstring path, jlong from, jlong to, jint fmt) {
     return eng().renderToWav(str(env, path), from, to, fmt == 0 ? WavFormat::Pcm16 : fmt == 1 ? WavFormat::Pcm24 : WavFormat::Float32);
 }
+J(jfloatArray, loudness) { float v[7]; eng().loudness(v); jfloatArray a = env->NewFloatArray(7); env->SetFloatArrayRegion(a, 0, 7, v); return a; }
+J(void, resetLoudness) { eng().resetLoudness(); }
 J(jfloatArray, stats) {
     auto s = eng().stats();
     float v[8] = {(float)s.sampleRate, (float)s.burst, (float)s.bufferSize, (float)s.xruns, s.avgUs, s.maxUs, s.latencyMs, s.exclusive ? 1.f : 0.f};

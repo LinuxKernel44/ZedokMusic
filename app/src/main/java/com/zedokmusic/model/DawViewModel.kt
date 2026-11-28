@@ -521,6 +521,9 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun widthOf(s: Float) = 1f - s
     private fun putStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
     fun setStereo(t: TrackM, s: Float) { val o = t.stereo; putStereo(t, s); val n = t.stereo; if (o != n) record("Stereo width", "stereo${t.id}", undo = { putStereo(t, o) }, redo = { putStereo(t, n) }) }
+    fun readLoudness(): FloatArray = e.loudness()
+    fun resetLoudness() = e.resetLoudness()
+
     // ---- freeze: render a track (instrument, notes, clips and effects, with a neutral fader) to a file and play that instead ----
     var freezing by mutableStateOf<TrackM?>(null); private set
     private fun freezeDir() = projectDir()?.let { File(it, "Cache/Freeze") }

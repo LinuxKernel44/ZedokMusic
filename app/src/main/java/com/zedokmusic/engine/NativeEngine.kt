@@ -44,6 +44,9 @@ object NativeEngine {
     external fun setMasterWidth(width: Float)
     external fun setClipFrozen(id: Int, frozen: Boolean): Boolean
     external fun setTrackFrozen(id: Int, frozen: Boolean)
+    /** [momentary, short-term, integrated LUFS, range LU, true peak dB, sample peak dB, correlation]; -200 = no value yet. */
+    external fun loudness(): FloatArray
+    external fun resetLoudness()
     external fun addBus(): Int
     external fun removeBus(id: Int): Boolean
     external fun setBusGain(id: Int, gain: Float)

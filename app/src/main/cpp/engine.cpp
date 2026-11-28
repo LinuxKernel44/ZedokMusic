@@ -15,6 +15,7 @@ namespace zedok {
 static void appendAutomation(const std::vector<AutoLane>& lanes, int64_t pos, float* last, ZkParamChange* ch, int& nc);
 
 Engine::Engine() {
+    loud_.prepare(kProjectRate); for (auto& v : loudOut_) v.store(zdsp::LoudnessMeter::kNone);
     auto p = std::make_shared<Project>();
     current_ = p;
     published_.store(p.get());
@@ -210,6 +211,7 @@ BUS_SET(setBusGain(int id, float g), b->gain = std::clamp(g, 0.f, 4.f))
 BUS_SET(setBusPan(int id, float v), b->pan = std::clamp(v, -1.f, 1.f))
 BUS_SET(setBusWidth(int id, float v), b->width = std::clamp(v, 0.f, 2.f))
 BUS_SET(setBusMute(int id, bool m), b->mute = m)
+void Engine::loudness(float* o) const { for (int i = 0; i < 7; i++) o[i] = loudOut_[i].load(std::memory_order_relaxed); }
 int Engine::totalLatency() { std::lock_guard<std::mutex> lk(editMutex_); return current_->latency; }
 int Engine::trackOutDelay(int track) { std::lock_guard<std::mutex> lk(editMutex_); for (auto& t : current_->tracks) if (t.id == track) return t.outDelay; return -1; }
 int Engine::trackSendDelay(int track, int busId) { std::lock_guard<std::mutex> lk(editMutex_); for (auto& t : current_->tracks) if (t.id == track) for (auto& s : t.sends) if (s.bus == busId) return s.delay; return -1; }
@@ -948,6 +950,14 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream*, void* data, in
             }
         }
         lastOut_[0] = out[(frames - 1) * 2]; lastOut_[1] = out[(frames - 1) * 2 + 1];
+        // loudness of what is heard: measured while playing, from the start of a play, or since the last manual reset
+        if (loudReset_.exchange(false, std::memory_order_relaxed) || (playing && !loudWasPlaying_ && pos == 0)) loud_.reset();
+        loudWasPlaying_ = playing;
+        if (playing && !preroll) {
+            loud_.process(out, frames);
+            loudOut_[0].store(loud_.momentary(), std::memory_order_relaxed); loudOut_[1].store(loud_.shortTerm(), std::memory_order_relaxed); loudOut_[2].store(loud_.integrated(), std::memory_order_relaxed);
+            loudOut_[3].store(loud_.range(), std::memory_order_relaxed); loudOut_[4].store(loud_.truePeakDb(), std::memory_order_relaxed); loudOut_[5].store(loud_.samplePeakDb(), std::memory_order_relaxed); loudOut_[6].store(loud_.correlation(), std::memory_order_relaxed);
+        }
         blockCounter_++;
         pos_.store(next, std::memory_order_relaxed);
         pluginSubmit(*p, preroll ? pos : next, frames, playing, jumped, true);

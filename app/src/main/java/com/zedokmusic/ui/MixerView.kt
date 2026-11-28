@@ -47,6 +47,8 @@ import com.zedokmusic.model.*
 
 @Composable
 fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}, onBusInserts: (BusM) -> Unit = {}) {
+    var meterOpen by remember { mutableStateOf(false) }
+    if (meterOpen) MeterDialog(vm) { meterOpen = false }
     var routeTrack by remember { mutableStateOf<TrackM?>(null) }; var routeBus by remember { mutableStateOf<BusM?>(null) }
     routeTrack?.let { t -> if (t in vm.tracks) TrackRoutingDialog(vm, t) { routeTrack = null } else routeTrack = null }
     routeBus?.let { b -> if (b in vm.buses) BusDialog(vm, b) { routeBus = null } else routeBus = null }
@@ -64,7 +66,7 @@ fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}, onBusInserts:
         Box(Modifier.width(64.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(Zk.panel).border(1.dp, Zk.line, RoundedCornerShape(12.dp)).pointerInput(Unit) { detectTapGestures { vm.addBus() } }, contentAlignment = Alignment.Center) {
             Text("+ Bus", color = Zk.dim, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
-        Strip("Master", Zk.text, vm.masterGain, null, vm.masterMeter, false, false, false, vm.masterFx.size, vm.masterFx.any { !it.bypass }, { onInserts(null) }, stereo = vm.masterStereo, onStereo = { vm.applyMasterStereo(it) }, onGain = { vm.setMaster(it) }, onPan = {}, onMute = {}, onSolo = {}, onSelect = {})
+        Strip("Master", Zk.text, vm.masterGain, null, vm.masterMeter, false, false, false, vm.masterFx.size, vm.masterFx.any { !it.bypass }, { onInserts(null) }, stereo = vm.masterStereo, onStereo = { vm.applyMasterStereo(it) }, onGain = { vm.setMaster(it) }, onPan = {}, onMute = {}, onSolo = {}, onSelect = {}, route = "LUFS", routeActive = false, onRoute = { meterOpen = true })
         if (vm.tracks.isEmpty()) Text("No tracks yet", color = Zk.dim, modifier = Modifier.padding(16.dp))
     }
 }
