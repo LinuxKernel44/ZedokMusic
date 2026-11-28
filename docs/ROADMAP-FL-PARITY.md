@@ -144,7 +144,7 @@ Tous natifs (`native/dsp/*`), enregistrés dans `registry.cpp`, avec presets et 
 - [ ] **5.6 Saturation / distorsion** (plusieurs courbes, oversampling 2×/4×, tone, mix).
 - [ ] **5.7 Filtre** (LP/HP/BP/notch/peigne, pentes, enveloppe suiveuse, LFO sync).
 - [ ] **5.8 Autres effets utiles** : chorus/flanger/phaser, tremolo, bitcrusher, transient shaper, gate, de-esser, widener (utilise déjà la roue stéréo), pitch shifter simple.
-- [~] **5.9 Panneau de mesure (0.60.0 : loudness momentané / court terme / intégré / LRA, true-peak, corrélation de phase sur le master ; testé hors ligne et sur S10 ; pas encore : spectre, vectorscope, oscilloscope, mesure par piste)** (sur le master et par piste) : analyseur de spectre (FFT, lissage, échelle), **loudness** (momentané, court terme, intégré, LRA, true-peak, selon ITU-R BS.1770 / EBU R128), **vectorscope / corrélation de phase**, oscilloscope.
+- [~] **5.9 Panneau de mesure (0.60.0 : loudness momentané / court terme / intégré / LRA, true-peak, corrélation de phase sur le master ; testé hors ligne et sur S10 ; 0.61.0 : analyseur de spectre 64 bandes sur le master ; pas encore : vectorscope, oscilloscope, mesure par piste)** (sur le master et par piste) : analyseur de spectre (FFT, lissage, échelle), **loudness** (momentané, court terme, intégré, LRA, true-peak, selon ITU-R BS.1770 / EBU R128), **vectorscope / corrélation de phase**, oscilloscope.
 - [ ] **5.10 Intégration** : ces effets apparaissent dans la liste des inserts et des bus ; cohérence avec les presets natifs (étoile, aperçu).
 
 Critères : chaque effet validé hors ligne (réponse en fréquence, courbe de compression, gain de réduction, true-peak) ; mesures LUFS comparées à un signal de référence (ex. sinus à -23 LUFS) ; aucune allocation dans le callback.
@@ -262,6 +262,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 | Version | Date | Contenu |
 |---|---|---|
 | 0.60.0-alpha | 2026-11-28 | Phase 5 (début) : mesure de loudness BS.1770 / R128 sur le master. Constat : EQ 6 bandes, compresseur, limiteur, reverb, delay, chorus / phaser / saturation / bitcrusher existaient déjà (5.1 à 5.7 en grande partie) |
+| 0.61.0-alpha | 2026-11-28 | Phase 5 : analyseur de spectre du master (FFT 4096 Hann, 64 bandes log, pic retombant) dans le panneau de mesure ; testé hors ligne (t_spectrum) et sur S10. |
 | 0.59.0-alpha | 2026-11-28 | Phase 4 : effets sur les bus, compensation de latence des chemins (4.5 partielle) ; vérifié sur S10 : mixer, bus, envoi, gel, effet de bus (sans écoute) |
 | 0.58.0-alpha | 2026-11-28 | Phase 4 : gel / dégel de piste (4.6) ; correction de la fuite d'un fondu de piste muette au 1er bloc du rendu ; non vérifié sur le S10 |
 | 0.57.0-alpha | 2026-11-28 | Phase 4 (1re partie) : bus, sorties de piste, envois pré/post ; format 6. Non vérifié sur le S10 (téléphone non connecté) |

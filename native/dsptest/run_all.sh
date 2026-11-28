@@ -7,5 +7,6 @@ g++ -std=c++17 -O2 -pthread fuzz.cpp ../dsp/registry.cpp ../../app/src/main/cpp/
 g++ -std=c++17 -O2 -pthread render.cpp ../dsp/registry.cpp ../../app/src/main/cpp/wav.cpp /tmp/zstbv.o -o /tmp/zrender
 /tmp/zfuzz "${1:-30}"
 g++ -std=c++17 -O2 t_loudness.cpp -o /tmp/zloud && /tmp/zloud
+g++ -std=c++17 -O2 t_spectrum.cpp -o /tmp/zspec && /tmp/zspec
 ./run_engine.sh
 ../presets/build.sh

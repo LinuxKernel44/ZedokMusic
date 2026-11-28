@@ -11,6 +11,7 @@
 #include <array>
 #include "plugin_bridge.h"
 #include "../../../../native/dsp/loudness.h"
+#include "../../../../native/dsp/spectrum.h"
 #include "wav.h"
 
 namespace zedok {
@@ -250,6 +251,8 @@ public:
     float peak(int track) const;
     /** Master loudness since the last reset, while playing: [momentary, short-term, integrated, range, true peak dB, sample peak dB, correlation] (LUFS / LU / dB; -200 = not enough audio yet). */
     void loudness(float* out7) const;
+    /** Master spectrum: `bands` log-spaced levels (dBFS, 20 Hz..20 kHz) of the last ~85 ms played. Any non-audio thread. */
+    void spectrum(float* db, int bands) const;
     void resetLoudness() { loudReset_.store(true, std::memory_order_relaxed); }
     int64_t projectLength() const;
 
@@ -322,6 +325,7 @@ private:
     bool attachBridge(int id, std::shared_ptr<PluginBridge> bridge);
     std::atomic<bool> playing_{false};
     std::atomic<int64_t> pos_{0};
+    zdsp::SpectrumRing specRing_;                 // written by the audio thread
     zdsp::LoudnessMeter loud_;                    // audio thread only
     std::atomic<float> loudOut_[7];
     std::atomic<bool> loudReset_{false};

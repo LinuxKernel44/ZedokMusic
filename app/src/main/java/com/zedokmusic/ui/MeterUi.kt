@@ -2,6 +2,8 @@ package com.zedokmusic.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -24,9 +26,23 @@ private fun lufs(v: Float) = if (v <= NONE) "—" else "%.1f".format(v)
 @Composable
 fun MeterDialog(vm: DawViewModel, onDismiss: () -> Unit) {
     var v by remember { mutableStateOf(vm.readLoudness()) }
-    LaunchedEffect(Unit) { while (true) { v = vm.readLoudness(); delay(100) } }
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Master loudness") }, text = {
-        Column {
+    val bands = 64
+    var spec by remember { mutableStateOf(FloatArray(bands) { -120f }) }
+    var hold by remember { mutableStateOf(FloatArray(bands) { -120f }) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            v = vm.readLoudness()
+            val raw = vm.readSpectrum(bands)
+            // fast attack, slow release; the peak line falls more slowly still
+            spec = FloatArray(bands) { i -> if (raw[i] > spec[i]) raw[i] else spec[i] - 2.5f }
+            hold = FloatArray(bands) { i -> maxOf(spec[i], hold[i] - 0.6f) }
+            delay(50)
+        }
+    }
+    AlertDialog(onDismissRequest = onDismiss, containerColor = Zk.panel, title = { Text("Master meters") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            SpectrumView(spec, hold)
+            Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Big("Momentary", lufs(v[0]), "LUFS"); Big("Short-term", lufs(v[1]), "LUFS"); Big("Integrated", lufs(v[2]), "LUFS")
             }
@@ -53,4 +69,23 @@ private fun Big(label: String, value: String, unit: String) {
         Text(value, color = Zk.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text("$label · $unit", color = Zk.dim, fontSize = 10.sp, maxLines = 1)
     }
+}
+
+/** Log-frequency spectrum, 20 Hz to 20 kHz, -90 to 0 dBFS, with a falling peak line. */
+@Composable
+private fun SpectrumView(db: FloatArray, hold: FloatArray) {
+    val dim = Zk.dim
+    Text("Spectrum", color = Zk.dim, fontSize = 12.sp)
+    Canvas(Modifier.fillMaxWidth().height(110.dp)) {
+        drawRect(Zk.line.copy(alpha = 0.35f), Offset.Zero, size)
+        fun y(d: Float) = size.height * (1f - ((d + 90f) / 90f).coerceIn(0f, 1f))
+        for (g in listOf(-60f, -30f)) drawLine(Zk.line, Offset(0f, y(g)), Offset(size.width, y(g)), 1f)
+        for (f in listOf(100f, 1000f, 10000f)) { val x = size.width * (Math.log10(f / 20.0) / Math.log10(1000.0)).toFloat(); drawLine(Zk.line, Offset(x, 0f), Offset(x, size.height), 1f) }
+        val w = size.width / db.size
+        for (i in db.indices) {
+            val top = y(db[i]); drawRect(Zk.accent, Offset(i * w + 0.5f, top), Size(w - 1f, size.height - top))
+            val h = y(hold[i]); drawRect(Zk.text, Offset(i * w + 0.5f, h), Size(w - 1f, 1.5f))
+        }
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { for (t in listOf("20", "100", "1k", "10k", "20k Hz")) Text(t, color = dim, fontSize = 9.sp) }
 }

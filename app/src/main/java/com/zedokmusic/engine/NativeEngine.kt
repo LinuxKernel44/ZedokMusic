@@ -46,6 +46,7 @@ object NativeEngine {
     external fun setTrackFrozen(id: Int, frozen: Boolean)
     /** [momentary, short-term, integrated LUFS, range LU, true peak dB, sample peak dB, correlation]; -200 = no value yet. */
     external fun loudness(): FloatArray
+    external fun spectrum(bands: Int): FloatArray
     external fun resetLoudness()
     external fun addBus(): Int
     external fun removeBus(id: Int): Boolean

@@ -75,6 +75,7 @@ J(jboolean, renderTrackToWav, jstring path, jlong from, jlong to, jint fmt, jint
 J(jboolean, renderToWav, jstring path, jlong from, jlong to, jint fmt) {
     return eng().renderToWav(str(env, path), from, to, fmt == 0 ? WavFormat::Pcm16 : fmt == 1 ? WavFormat::Pcm24 : WavFormat::Float32);
 }
+J(jfloatArray, spectrum, jint bands) { std::vector<float> v(bands); eng().spectrum(v.data(), bands); jfloatArray a = env->NewFloatArray(bands); env->SetFloatArrayRegion(a, 0, bands, v.data()); return a; }
 J(jfloatArray, loudness) { float v[7]; eng().loudness(v); jfloatArray a = env->NewFloatArray(7); env->SetFloatArrayRegion(a, 0, 7, v); return a; }
 J(void, resetLoudness) { eng().resetLoudness(); }
 J(jfloatArray, stats) {
