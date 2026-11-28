@@ -35,16 +35,17 @@ class ProjectFormatTest {
     }
 
     @Test fun currentFormatIsLeftAsItIs() {
-        val src = witness("v6_current.zedok")
-        val r = ProjectFormat.migrate(witness("v6_current.zedok"))
+        val src = witness("v7_current.zedok")
+        val r = ProjectFormat.migrate(witness("v7_current.zedok"))
         assertEquals(src.toString(), r.toString())
         assertEquals(2, r.getJSONArray("buses").length()); assertEquals(1, r.getJSONArray("tracks").getJSONObject(0).getJSONArray("sends").length())
-        assertEquals(6, ProjectFormat.CURRENT)
+        assertTrue(r.getBoolean("autoCrossfade")); assertEquals(0.25, r.getJSONArray("tracks").getJSONObject(1).getJSONArray("clips").getJSONObject(0).getDouble("fadeIn"), 0.0)
+        assertEquals(7, ProjectFormat.CURRENT)
     }
 
     @Test fun olderWitnessesGainNothingForRouting() {   // format 5 -> 6 adds no key: a project without buses mixes straight into the master
         val r = ProjectFormat.migrate(witness("v5_current.zedok"))
-        assertEquals(6, r.getInt("version")); assertFalse(r.has("buses")); assertFalse(r.getJSONArray("tracks").getJSONObject(0).has("sends"))
+        assertEquals(ProjectFormat.CURRENT, r.getInt("version")); assertFalse(r.getBoolean("autoCrossfade")); assertFalse(r.has("buses")); assertFalse(r.getJSONArray("tracks").getJSONObject(0).has("sends"))
         assertEquals(2, r.getJSONArray("tempoChanges").length()); assertEquals(2, r.getJSONArray("markers").length())
     }
 

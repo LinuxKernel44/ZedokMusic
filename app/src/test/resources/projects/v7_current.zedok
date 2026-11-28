@@ -1,0 +1,117 @@
+{
+ "version": 7,
+ "bpm": 128,
+ "master": 1,
+ "masterStereo": 0,
+ "loopBars": 4,
+ "loop": false,
+ "scale": {
+  "root": 0,
+  "type": 2
+ },
+ "buses": [
+  {
+   "name": "Drums",
+   "gain": 0.8,
+   "pan": 0,
+   "stereo": 0,
+   "mute": false,
+   "output": 0
+  },
+  {
+   "name": "Reverb",
+   "gain": 1,
+   "pan": 0,
+   "stereo": 0,
+   "mute": false,
+   "output": 1
+  }
+ ],
+ "tracks": [
+  {
+   "name": "Lead",
+   "kind": "Instrument",
+   "gain": 1,
+   "pan": 0,
+   "stereo": 0,
+   "mute": false,
+   "solo": false,
+   "plugin": "zedok:hybrid",
+   "clips": [],
+   "fx": [],
+   "output": 1,
+   "sends": [
+    {
+     "bus": 2,
+     "gain": 0.5,
+     "pre": false
+    }
+   ]
+  },
+  {
+   "name": "Vocals",
+   "kind": "Audio",
+   "gain": 1,
+   "pan": 0,
+   "stereo": 0,
+   "mute": false,
+   "solo": false,
+   "clips": [
+    {
+     "path": "/x/a.wav",
+     "src": "/x/a.wav",
+     "start": 0,
+     "gain": 0,
+     "semis": 0,
+     "speed": 1,
+     "mode": 1,
+     "srcBpm": 0,
+     "fadeIn": 0.25,
+     "fadeOut": 10,
+     "fadeInShape": 3,
+     "fadeOutShape": 2
+    }
+   ],
+   "fx": []
+  }
+ ],
+ "masterFx": [],
+ "patterns": [
+  {
+   "id": 1,
+   "name": "Pattern 1",
+   "color": 0,
+   "tracks": {
+    "0": [
+     [
+      60,
+      0,
+      1,
+      100
+     ]
+    ]
+   }
+  }
+ ],
+ "playlist": [
+  {
+   "pattern": 1,
+   "start": 0,
+   "row": 0
+  }
+ ],
+ "currentPattern": 1,
+ "tempoChanges": [
+  [
+   16,
+   90
+  ]
+ ],
+ "markers": [
+  {
+   "beat": 0,
+   "name": "Intro"
+  }
+ ],
+ "autoCrossfade": true
+}

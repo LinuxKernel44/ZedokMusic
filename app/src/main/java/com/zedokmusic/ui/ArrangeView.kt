@@ -379,6 +379,18 @@ private fun ClipBlock(vm: DawViewModel, t: TrackM, c: ClipM, ppb: Float) {
                     vm.moveClips(group, target - c.start)
                 }, onDragCancel = { drag = 0f; selfDrag = false; vm.clipDragging = false; vm.clipDragBeats = 0f }) { ch, d -> ch.consume(); drag += d.x; vm.clipDragBeats = drag / density.density / ppb }
         }.pointerInput(c) { detectTapGestures(onTap = { if (vm.clipSelectMode) { if (!vm.clipSelection.remove(c)) vm.clipSelection.add(c) } else { vm.clipSelection.clear(); vm.clipSelection.add(c) } }, onLongPress = { menu = true }) }) {
+        if (c.hasFades && c.lengthFrames > 0) Canvas(Modifier.matchParentSize()) {   // the fade ramps: what the fade takes away is shaded
+            val secs = c.lengthFrames / 48000f
+            fun ramp(frac: Float, shape: Int, fromLeft: Boolean) {
+                val wpx = (size.width * frac).coerceIn(0f, size.width); if (wpx < 1f) return
+                val path = androidx.compose.ui.graphics.Path(); val n = 24
+                path.moveTo(if (fromLeft) 0f else size.width, 0f)
+                for (k in 0..n) { val u = k / n.toFloat(); val x = if (fromLeft) wpx * u else size.width - wpx * u; path.lineTo(x, size.height * (1f - com.zedokmusic.engine.fadeShape(shape, if (fromLeft) u else u)).let { y -> y }) }
+                path.lineTo(if (fromLeft) wpx else size.width - wpx, 0f); path.close()
+                drawPath(path, Zk.bg.copy(alpha = .55f))
+            }
+            ramp(c.fadeInMs / 1000f / secs, c.fadeInShape, true); ramp(c.fadeOutMs / 1000f / secs, c.fadeOutShape, false)
+        }
         peaks?.let { pk ->
             Canvas(Modifier.matchParentSize().padding(vertical = 2.dp)) {
                 val nb = pk.size / 2; if (nb == 0) return@Canvas
@@ -392,7 +404,7 @@ private fun ClipBlock(vm: DawViewModel, t: TrackM, c: ClipM, ppb: Float) {
                 }
             }
         }
-        Text(c.name + (if (c.busy) "  · processing…" else if (c.edited) "  · " + clipSummary(c) else ""), color = Zk.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
+        Text(c.name + (if (c.busy) "  · processing…" else if (c.edited || c.hasFades) "  · " + clipSummary(c) else ""), color = Zk.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(6.dp))
         DropdownMenu(menu, { menu = false }) {
             // the full name, even when the clip is too short to show it
             Text(java.io.File(c.src).name + if (c.edited) "\n" + clipSummary(c) else "", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.widthIn(max = 260.dp).padding(horizontal = 16.dp, vertical = 8.dp))
@@ -405,6 +417,7 @@ private fun ClipBlock(vm: DawViewModel, t: TrackM, c: ClipM, ppb: Float) {
 
 private fun clipSummary(c: ClipM): String = buildList {
     if (c.gainDb != 0f) add("%+.1f dB".format(c.gainDb))
+    if (c.hasFades) add("fades")
     if (c.semis != 0f) add("%+.1f st".format(c.semis))
     if (c.speed != 1f) add("×%.2f".format(c.speed))
 }.joinToString(" · ")

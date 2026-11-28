@@ -217,6 +217,34 @@ static int routingChecks() {
     return fails;
 }
 
+// ---- clip fades and crossfades ----
+static AudioData dc(double secs, double v) { auto d = std::make_shared<std::vector<float>>((size_t)(secs * kProjectRate) * 2, (float)v); return d; }
+static int fadeChecks() {
+    int fails = 0; auto check = [&](const char* what, bool ok, double v) { printf("fades: %-66s %s (%.4g)\n", what, ok ? "ok" : "FAILED", v); if (!ok) fails++; };
+    const int64_t R = kProjectRate; const size_t skip = 4096;
+    auto at = [&](const std::vector<float>& o, double sec) { return o[(size_t)(sec * R) * 2]; };
+    const auto plain = renderWith(2.0, [&](Engine& e) { int t = e.addTrack(); e.addClip(t, dc(1.5, 0.5), 0, 0, 1.5 * R, 1.f); });
+    const auto lin = renderWith(2.0, [&](Engine& e) { int t = e.addTrack(); int c = e.addClip(t, dc(1.5, 0.5), 0, 0, 1.5 * R, 1.f); e.setClipFade(c, R / 2, R / 2, 0, 0); });
+    check("no fade: unchanged", std::fabs(at(plain, 0.5) - 0.5f) < 1e-3, at(plain, 0.5));
+    check("linear fade-in: half way is half the level", std::fabs(at(lin, 0.25) - 0.25f) < 2e-3, at(lin, 0.25));
+    check("full level between the fades", std::fabs(at(lin, 0.75) - 0.5f) < 1e-3, at(lin, 0.75));
+    check("linear fade-out: a quarter before the end is half the level", std::fabs(at(lin, 1.25) - 0.25f) < 2e-3, at(lin, 1.25));
+    check("a fade starts silent and ends silent", std::fabs(at(lin, 0.0)) < 1e-3 && std::fabs(at(lin, 1.4999)) < 2e-3, at(lin, 1.4999));
+    for (int sh = 1; sh <= 3; sh++) {
+        const auto o = renderWith(2.0, [&](Engine& e) { int t = e.addTrack(); int c = e.addClip(t, dc(1.5, 0.5), 0, 0, 1.5 * R, 1.f); e.setClipFade(c, R, 0, sh, 0); });
+        const float want = 0.5f * fadeCurve(sh, 0.5f); char m[80]; snprintf(m, sizeof m, "shape %d: level at the middle of the fade", sh);
+        check(m, std::fabs(at(o, 0.5) - want) < 2e-3, at(o, 0.5));
+    }
+    // crossfade: A 0..1.5 s, B starts at 1.0 s: overlap 0.5 s, equal power -> sum of squares stays constant for equal-level material
+    const auto xf = [&](bool on) { return renderWith(3.0, [&](Engine& e) { int t = e.addTrack(); e.addClip(t, dc(1.5, 0.5), 0, 0, 1.5 * R, 1.f); e.addClip(t, dc(1.5, 0.5), 1.0 * R, 0, 1.5 * R, 1.f); e.setAutoCrossfade(on); }); };
+    const auto off = xf(false), on = xf(true);
+    check("without the option an overlap simply adds (0.5 + 0.5)", std::fabs(at(off, 1.25) - 1.0f) < 1e-3, at(off, 1.25));
+    const float a = at(on, 1.25); check("crossfade: the middle of the overlap is sin+cos of 45 degrees (0.707)", std::fabs(a - 0.5f * 1.41421356f) < 3e-3, a);
+    check("crossfade: outside the overlap nothing changes", std::fabs(at(on, 0.5) - 0.5f) < 1e-3 && std::fabs(at(on, 2.0) - 0.5f) < 1e-3, at(on, 2.0));
+    (void)skip;
+    return fails;
+}
+
 // ---- per-note properties (pan, fine pitch, cutoff, release) through the whole chain: project note -> engine event -> instrument ----
 static void oneNote(Engine& e, const char* plugin, int pitch, double lenSec, int8_t pan, int8_t cutoff, int8_t res, int8_t fine, int8_t release) {
     int t = e.addTrack(); e.createNativePlugin(t, plugin);
@@ -319,6 +347,7 @@ int main(int argc, char** argv) {
         }
     }
     fails += routingChecks();
+    fails += fadeChecks();
     fails += notePropChecks();
     fails += tempoMapChecks();
     if (mode == "--update") { FILE* f = fopen(file.c_str(), "w"); if (!f) return 2; fputs(table.c_str(), f); fclose(f); printf("wrote %s\n", file.c_str()); }

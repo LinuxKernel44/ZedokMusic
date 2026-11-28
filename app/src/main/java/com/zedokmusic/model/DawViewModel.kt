@@ -82,6 +82,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun projectPresetsDir(): File? = store?.presets(projectName)
 
     val tracks = mutableStateListOf<TrackM>()
+    /** Clips that overlap on a track crossfade (equal power) over the overlap. */
+    var autoCrossfade by mutableStateOf(true)
     var bpm by mutableFloatStateOf(DEFAULT_BPM); private set
     var playing by mutableStateOf(false); private set
     /** The project's scale: root (0 = C ... 11 = B) and type (index in Theory.SCALES, 0 = none). Shown in the piano roll grid and saved with the project. */
@@ -406,7 +408,18 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun addClipLike(t: TrackM, c: ClipM, start: Float): ClipM? {
         val n = importClip(t, File(c.path), start.coerceAtLeast(0f)) ?: return null
         n.src = c.src; n.semis = c.semis; n.speed = c.speed; n.mode = c.mode; n.srcBpm = c.srcBpm
-        setClipGainDb(n, c.gainDb); return n
+        setClipGainDb(n, c.gainDb); n.fadeInMs = c.fadeInMs; n.fadeOutMs = c.fadeOutMs; n.fadeInShape = c.fadeInShape; n.fadeOutShape = c.fadeOutShape; pushFade(n); return n
+    }
+    private fun pushFade(c: ClipM) { e.setClipFade(c.engineId, (c.fadeInMs * 48f).toLong(), (c.fadeOutMs * 48f).toLong(), c.fadeInShape, c.fadeOutShape); dirty = true }
+    fun setAutoCrossfadeOn(on: Boolean) { autoCrossfade = on; e.setAutoCrossfade(on); dirty = true }
+    /** Fades of every clip in [list] (one slider drag = one undo step). */
+    fun setClipsFade(list: List<ClipM>, inMs: Float, outMs: Float, shapeIn: Int, shapeOut: Int) {
+        class F(val i: Float, val o: Float, val si: Int, val so: Int)
+        val olds = list.map { it to F(it.fadeInMs, it.fadeOutMs, it.fadeInShape, it.fadeOutShape) }
+        val nw = F(inMs.coerceIn(0f, 5000f), outMs.coerceIn(0f, 5000f), shapeIn, shapeOut)
+        fun put(c: ClipM, f: F) { c.fadeInMs = f.i; c.fadeOutMs = f.o; c.fadeInShape = f.si; c.fadeOutShape = f.so; pushFade(c) }
+        for (c in list) put(c, nw)
+        record("Clip fades", "cfade" + list.joinToString(",") { it.engineId.toString() }, undo = { olds.forEach { (c, f) -> put(live(c), f) } }, redo = { list.forEach { put(live(it), nw) } })
     }
     /** The clip that stands for [c] now: clip objects are replaced when a clip is edited or put back by an undo, and old history entries still name the old object. */
     private fun live(c: ClipM): ClipM { var x = c; while (true) x = x.replacedBy ?: return x }
@@ -499,8 +512,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 if (r == null) { message = "Could not load the processed clip."; return@withContext }
                 e.removeClip(c.engineId)
                 val n = ClipM(r[0].toInt(), f.absolutePath, c.name, c.start, r[1])
-                n.src = c.src; n.gainDb = c.gainDb; n.semis = se; n.speed = sp; n.mode = mode; n.srcBpm = srcBpm
-                e.setClipGain(n.engineId, Math.pow(10.0, n.gainDb / 20.0).toFloat())
+                n.src = c.src; n.gainDb = c.gainDb; n.fadeInMs = c.fadeInMs; n.fadeOutMs = c.fadeOutMs; n.fadeInShape = c.fadeInShape; n.fadeOutShape = c.fadeOutShape; n.semis = se; n.speed = sp; n.mode = mode; n.srcBpm = srcBpm
+                e.setClipGain(n.engineId, Math.pow(10.0, n.gainDb / 20.0).toFloat()); pushFade(n)
                 t.clips[i] = n; dirty = true; c.replacedBy = n
                 if (recordIt) record("Edit clip", undo = { applyClipEdit(t, live(n), oSemis, oSpeed, oMode, oBpm, false) }, redo = { applyClipEdit(t, live(n), se, sp, mode, srcBpm, false) })
                 val si = clipSelection.indexOf(c); if (si >= 0) clipSelection[si] = n
@@ -1257,7 +1270,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Writes the project to [f]; [mapPath] rewrites sample paths (used when the project moves to another folder). */
     private fun write(f: File, mapPath: (String) -> String = { it }) {
-        val root = JSONObject().put("version", ProjectFormat.CURRENT).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("masterStereo", masterStereo.toDouble()).put("loopBars", loopBars).put("loop", loop).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
+        val root = JSONObject().put("version", ProjectFormat.CURRENT).put("bpm", bpm.toDouble()).put("master", masterGain.toDouble()).put("masterStereo", masterStereo.toDouble()).put("loopBars", loopBars).put("loop", loop).put("autoCrossfade", autoCrossfade).put("scale", JSONObject().put("root", scaleRoot).put("type", scaleType))
             .put("view", JSONObject().put("ppb", ppb.toDouble()).put("ax", arrangeX).put("ay", arrangeY).put("rx", rollX).put("ry", rollY))
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
@@ -1265,7 +1278,8 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
             .also { o -> t.frozenFile?.let { ff -> if (t.frozen) o.put("frozen", mapPath(ff.absolutePath)) }; if (t.output != 0) o.put("output", busPos(t.output)); if (t.sends.isNotEmpty()) o.put("sends", JSONArray().also { a -> t.sends.forEach { s -> a.put(JSONObject().put("bus", busPos(s.bus)).put("gain", s.gain.toDouble()).put("pre", s.pre)) } }) }
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
-                .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
+                .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())
+                .also { o -> if (c.hasFades) o.put("fadeIn", c.fadeInMs.toDouble()).put("fadeOut", c.fadeOutMs.toDouble()).put("fadeInShape", c.fadeInShape).put("fadeOutShape", c.fadeOutShape) }) } }))
         root.put("tracks", arr).put("masterFx", fxJson(masterFx))
         if (buses.isNotEmpty()) root.put("buses", JSONArray().also { a -> buses.forEach { b -> a.put(JSONObject().put("name", b.name).put("gain", b.gain.toDouble()).put("pan", b.pan.toDouble()).put("stereo", b.stereo.toDouble()).put("mute", b.mute).put("output", busPos(b.output)).also { o -> if (b.fx.isNotEmpty()) o.put("fx", fxJson(b.fx)) }) } })
         val pats = JSONArray()
@@ -1651,6 +1665,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 arrangeX = v.optInt("ax"); arrangeY = v.optInt("ay"); rollX = v.optInt("rx"); rollY = v.optInt("ry", -1)
             } ?: run { ppbValue = 44f; arrangeX = 0; arrangeY = 0; rollX = 0; rollY = -1 }
             viewRevision++
+            autoCrossfade = root.optBoolean("autoCrossfade", false); e.setAutoCrossfade(autoCrossfade)
             loadBuses(root.optJSONArray("buses"))
             val arr = root.getJSONArray("tracks")
             for (i in 0 until arr.length()) {
@@ -1673,13 +1688,15 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                     if (w != null) importClip(t, w, c.getDouble("start").toFloat())?.let { cl ->
                         cl.src = src.absolutePath; cl.semis = c.optDouble("semis", 0.0).toFloat(); cl.speed = c.optDouble("speed", 1.0).toFloat(); cl.mode = c.optInt("mode", 1); cl.srcBpm = c.optDouble("srcBpm", 0.0).toFloat()
                         if (w == src && (cl.semis != 0f || cl.speed != 1f)) { cl.semis = 0f; cl.speed = 1f }   // the processed copy is gone: back to the original
-                        setClipGainDb(cl, c.optDouble("gain", 0.0).toFloat()); dirty = false
+                        setClipGainDb(cl, c.optDouble("gain", 0.0).toFloat())
+                        cl.fadeInMs = c.optDouble("fadeIn", 0.0).toFloat(); cl.fadeOutMs = c.optDouble("fadeOut", 0.0).toFloat(); cl.fadeInShape = c.optInt("fadeInShape", 0); cl.fadeOutShape = c.optInt("fadeOutShape", 0); if (cl.hasFades) pushFade(cl)
+                        dirty = false
                     } }
             }
             loadFx(null, root.optJSONArray("masterFx"))
             loadPatterns(root)
             selected = tracks.firstOrNull()
-        } catch (ex: Exception) { message = "Could not open the saved project: ${ex.message}" }
+        } catch (ex: Exception) { android.util.Log.e("Zedok", "project load failed", ex); message = "Could not open the saved project: ${ex.message}" }
         dirty = false
     }
 

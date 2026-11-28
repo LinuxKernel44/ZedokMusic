@@ -43,6 +43,7 @@ template <class F> void Engine::edit(F&& f) {
     auto p = std::make_shared<Project>(*current_);
     f(*p);
     planLatency(*p);
+    planFades(*p);
     publish(std::move(p));
 }
 void Engine::releaseRetired() {
@@ -103,6 +104,29 @@ bool Engine::moveClip(int clipId, int64_t start) {
     bool ok = false;
     edit([&](Project& p) { for (auto& t : p.tracks) for (auto& c : t.clips) if (c.id == clipId) { c.start = std::max<int64_t>(0, start); ok = true; } });
     return ok;
+}
+bool Engine::setClipFade(int clipId, int64_t fadeIn, int64_t fadeOut, int shapeIn, int shapeOut) {
+    bool ok = false;
+    edit([&](Project& p) { for (auto& t : p.tracks) for (auto& c : t.clips) if (c.id == clipId) {
+        c.fadeIn = std::clamp<int64_t>(fadeIn, 0, c.length); c.fadeOut = std::clamp<int64_t>(fadeOut, 0, c.length);
+        c.shapeIn = (uint8_t)std::clamp(shapeIn, 0, 3); c.shapeOut = (uint8_t)std::clamp(shapeOut, 0, 3); ok = true; } });
+    return ok;
+}
+void Engine::setAutoCrossfade(bool on) { edit([&](Project& p) { p.autoCrossfade = on; }); }
+// A clip that starts inside another one of the same track (and ends after it) crossfades with it over the overlap, equal power; the user's fades still apply where they are longer.
+void Engine::planFades(Project& p) {
+    for (auto& t : p.tracks) {
+        for (auto& c : t.clips) { c.efIn = c.fadeIn; c.efOut = c.fadeOut; c.efShapeIn = c.shapeIn; c.efShapeOut = c.shapeOut; }
+        if (!p.autoCrossfade) continue;
+        for (auto& a : t.clips) for (auto& b : t.clips) {
+            if (&a == &b || a.frozen != b.frozen) continue;
+            const int64_t aEnd = a.start + a.length, bEnd = b.start + b.length;
+            if (!(a.start < b.start && b.start < aEnd && bEnd > aEnd)) continue;
+            const int64_t ov = aEnd - b.start;
+            if (ov > b.efIn) { b.efIn = ov; b.efShapeIn = 3; }
+            if (ov > a.efOut) { a.efOut = ov; a.efShapeOut = 3; }
+        }
+    }
 }
 bool Engine::setClipFrozen(int clipId, bool frozen) {
     bool ok = false;
@@ -280,7 +304,10 @@ void Engine::accumulateDry(const Project& p, int64_t pos, int n, MixState& ms, i
             for (int64_t f = cs; f < ce; f++) {
                 int64_t si = c.offset + (f - c.start); if (si < 0 || si >= total) continue;
                 int o = (int)(f - pos) * 2;
-                tb[o] += src[si * 2] * c.gain; tb[o + 1] += src[si * 2 + 1] * c.gain;
+                float g = c.gain; const int64_t i = f - c.start;
+                if (i < c.efIn) g *= fadeCurve(c.efShapeIn, (float)i / (float)c.efIn);
+                if (i >= c.length - c.efOut) g *= fadeCurve(c.efShapeOut, (float)(c.length - i) / (float)c.efOut);
+                tb[o] += src[si * 2] * g; tb[o + 1] += src[si * 2 + 1] * g;
             }
         }
         if (t.plugin && t.pluginSlot >= 0 && !t.frozen) {

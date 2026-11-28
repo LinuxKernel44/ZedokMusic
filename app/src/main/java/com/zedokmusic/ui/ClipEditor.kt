@@ -14,6 +14,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +58,23 @@ fun ClipEditDialog(vm: DawViewModel, t: TrackM, c: ClipM, group: List<ClipM> = l
                 Slider(c.gainDb, { g -> vm.setClipsGain(group, g) }, Modifier.weight(1f), valueRange = -24f..12f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
                 Text("%+.1f dB".format(c.gainDb), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(64.dp))
                 Chip("0", false) { vm.setClipsGain(group, 0f) }
+            }
+            Section("Fades")
+            val shapes = listOf("Linear", "Exp", "S", "Power")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("In", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.width(22.dp))
+                Slider(c.fadeInMs, { vm.setClipsFade(group, it.roundToInt().toFloat(), c.fadeOutMs, c.fadeInShape, c.fadeOutShape) }, Modifier.weight(1f), valueRange = 0f..2000f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Text("%.0f ms".format(c.fadeInMs), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(64.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { shapes.forEachIndexed { i, n -> Chip(n, c.fadeInShape == i) { vm.setClipsFade(group, c.fadeInMs, c.fadeOutMs, i, c.fadeOutShape) } } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Out", color = Zk.dim, fontSize = 12.sp, modifier = Modifier.width(22.dp))
+                Slider(c.fadeOutMs, { vm.setClipsFade(group, c.fadeInMs, it.roundToInt().toFloat(), c.fadeInShape, c.fadeOutShape) }, Modifier.weight(1f), valueRange = 0f..2000f, colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color))
+                Text("%.0f ms".format(c.fadeOutMs), color = Zk.text, fontSize = 12.sp, modifier = Modifier.width(64.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { shapes.forEachIndexed { i, n -> Chip(n, c.fadeOutShape == i) { vm.setClipsFade(group, c.fadeInMs, c.fadeOutMs, c.fadeInShape, i) } } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Chip("Crossfade overlaps: " + if (vm.autoCrossfade) "on" else "off", vm.autoCrossfade) { vm.setAutoCrossfadeOn(!vm.autoCrossfade) }
             }
             Section("Pitch")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

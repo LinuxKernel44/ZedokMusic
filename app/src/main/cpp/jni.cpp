@@ -31,6 +31,8 @@ J(jlongArray, loadClip, jint track, jstring path, jlong start) {
 }
 J(jboolean, removeClip, jint id) { return eng().removeClip(id); }
 J(jboolean, moveClip, jint id, jlong start) { return eng().moveClip(id, start); }
+J(jboolean, setClipFade, jint id, jlong fi, jlong fo, jint si, jint so) { return eng().setClipFade(id, fi, fo, si, so); }
+J(void, setAutoCrossfade, jboolean on) { eng().setAutoCrossfade(on); }
 J(jboolean, setClipFrozen, jint id, jboolean f) { return eng().setClipFrozen(id, f); }
 J(void, setTrackFrozen, jint id, jboolean f) { eng().setTrackFrozen(id, f); }
 J(jboolean, setClipGain, jint id, jfloat g) { return eng().setClipGain(id, g); }

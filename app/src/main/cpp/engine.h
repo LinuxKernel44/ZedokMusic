@@ -1,5 +1,6 @@
 // ZedokMusic native audio engine: project snapshot -> mixer -> Oboe output (and offline WAV render).
 #pragma once
+#include <cmath>
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -30,8 +31,23 @@ struct Clip {
     int64_t offset = 0;  // offset into the audio (frames)
     int64_t length = 0;  // frames played
     float gain = 1.f;
+    int64_t fadeIn = 0, fadeOut = 0;   // fades set by the user (frames) and their shapes (see fadeCurve)
+    uint8_t shapeIn = 0, shapeOut = 0;
+    int64_t efIn = 0, efOut = 0;       // what is played: the larger of the fade and the crossfade with an overlapping clip (computed by Engine::planFades)
+    uint8_t efShapeIn = 0, efShapeOut = 0;
     bool frozen = false; // the rendered audio of a frozen track: played only while the track is frozen (the track's own clips are then silent)
 };
+
+/** Fade curve at position t in 0..1 (0 = silent, 1 = full): 0 linear, 1 exponential, 2 S-curve, 3 equal power. */
+inline float fadeCurve(int shape, float t) {
+    t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
+    switch (shape) {
+        case 1: return (std::exp(4.f * t) - 1.f) / (std::exp(4.f) - 1.f);
+        case 2: return t * t * (3.f - 2.f * t);
+        case 3: return std::sin(t * 1.5707963f);
+        default: return t;
+    }
+}
 
 struct Note {
     int64_t start = 0, length = 0;  // timeline frames
@@ -103,6 +119,7 @@ struct Project {
     std::vector<int> busLat;                        // per bus (like `buses`): blocks of effect latency from the bus's input to the master (its own effects and those of the buses after it)
     int latency = 0;                                // blocks every path to the master is brought to (the longest one), at most kMaxFx
     std::vector<int> busOrder;                      // indices into `buses`, every bus after all the buses that feed it (computed by Engine::planRouting)
+    bool autoCrossfade = true;                      // clips that overlap on a track crossfade over the overlap
     float masterGain = 1.f;
     float masterWidth = 1.f;
     bool loop = false;
@@ -166,6 +183,8 @@ public:
     bool removeClip(int clipId);
     bool moveClip(int clipId, int64_t start);
     bool setClipGain(int clipId, float gain);
+    bool setClipFade(int clipId, int64_t fadeIn, int64_t fadeOut, int shapeIn, int shapeOut);
+    void setAutoCrossfade(bool on);
     bool setClipFrozen(int clipId, bool frozen);  // marks a clip as the render of a frozen track
     void setTrackFrozen(int id, bool frozen);
     void setTrackGain(int id, float g);
@@ -283,6 +302,7 @@ private:
     void busFx(const Project& p, MixState& ms, int busIndex, int frames, bool offline, int64_t pos, int64_t budgetNs);
     /** Works out p.busLat, p.latency and the delays of every track output and send (plugin delay compensation). */
     static void planLatency(Project& p);
+    static void planFades(Project& p);
     // Master gain and meter.
     /** Orders p.busOrder so that every bus comes after the buses routed into it. */
     static void planRouting(Project& p);

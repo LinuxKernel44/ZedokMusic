@@ -156,8 +156,8 @@ Risques : coût CPU des effets sur appareils anciens (mesurer avec `xruns`) ; ov
 ## Phase 6 — Clips audio
 
 ### 6A. Éditions de base
-- [ ] **6.1 Fondus d'entrée/sortie** sur chaque clip (poignées sur le clip), formes (linéaire, exponentielle, S, constante en puissance).
-- [ ] **6.2 Crossfades automatiques** entre clips qui se chevauchent sur la même piste.
+- [x] **6.1 (0.62.0, réglage par curseurs dans l'éditeur de clip, pas de poignées à la main) Fondus d'entrée/sortie** sur chaque clip (poignées sur le clip), formes (linéaire, exponentielle, S, constante en puissance).
+- [x] **6.2 (0.62.0, equal power, interrupteur global) Crossfades automatiques** entre clips qui se chevauchent sur la même piste.
 - [ ] **6.3 Courbe de gain du clip** (enveloppe de volume dessinée sur le clip, points et segments, annulable).
 - [ ] **6.4 Découpage** (couper à la position, couper en grille, couper aux marqueurs) et **tranchage** par détection de transitoires (voir 6.7).
 
@@ -263,6 +263,7 @@ Risques : FLP (légal : rétro-ingénierie d'interopérabilité, ne pas copier d
 |---|---|---|
 | 0.60.0-alpha | 2026-11-28 | Phase 5 (début) : mesure de loudness BS.1770 / R128 sur le master. Constat : EQ 6 bandes, compresseur, limiteur, reverb, delay, chorus / phaser / saturation / bitcrusher existaient déjà (5.1 à 5.7 en grande partie) |
 | 0.61.0-alpha | 2026-11-28 | Phase 5 : analyseur de spectre du master (FFT 4096 Hann, 64 bandes log, pic retombant) dans le panneau de mesure ; testé hors ligne (t_spectrum) et sur S10. |
+| 0.62.0-alpha | 2026-11-28 | Phase 6 (début) : fondus d'entrée/sortie par clip (4 formes) et crossfades automatiques sur les chevauchements ; format 7. Testé hors ligne (11 contrôles dans engine_golden, rendus de référence inchangés) ; le projet de test s'ouvre sur S10 ; l'éditeur de fondus n'a pas été essayé sur le téléphone (pas de clip audio dans le projet de test). Corrigé en cours de route : un ordre d'initialisation qui empêchait l'ouverture des projets. |
 | 0.59.0-alpha | 2026-11-28 | Phase 4 : effets sur les bus, compensation de latence des chemins (4.5 partielle) ; vérifié sur S10 : mixer, bus, envoi, gel, effet de bus (sans écoute) |
 | 0.58.0-alpha | 2026-11-28 | Phase 4 : gel / dégel de piste (4.6) ; correction de la fuite d'un fondu de piste muette au 1er bloc du rendu ; non vérifié sur le S10 |
 | 0.57.0-alpha | 2026-11-28 | Phase 4 (1re partie) : bus, sorties de piste, envois pré/post ; format 6. Non vérifié sur le S10 (téléphone non connecté) |

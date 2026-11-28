@@ -42,6 +42,8 @@ object NativeEngine {
     external fun setTrackPan(id: Int, pan: Float)
     external fun setTrackWidth(id: Int, width: Float)
     external fun setMasterWidth(width: Float)
+    external fun setClipFade(id: Int, fadeIn: Long, fadeOut: Long, shapeIn: Int, shapeOut: Int): Boolean
+    external fun setAutoCrossfade(on: Boolean)
     external fun setClipFrozen(id: Int, frozen: Boolean): Boolean
     external fun setTrackFrozen(id: Int, frozen: Boolean)
     /** [momentary, short-term, integrated LUFS, range LU, true peak dB, sample peak dB, correlation]; -200 = no value yet. */
@@ -138,4 +140,15 @@ object NativeEngine {
     external fun recActive(): Boolean
     /** Input peak since the last call. */
     external fun recLevel(): Float
+}
+
+/** Same curves as the engine's fadeCurve (0 linear, 1 exponential, 2 S-curve, 3 equal power): 0 = silent, 1 = full level. */
+fun fadeShape(shape: Int, t: Float): Float {
+    val x = t.coerceIn(0f, 1f)
+    return when (shape) {
+        1 -> ((Math.exp(4.0 * x) - 1.0) / (Math.exp(4.0) - 1.0)).toFloat()
+        2 -> x * x * (3f - 2f * x)
+        3 -> Math.sin(x * 1.5707963).toFloat()
+        else -> x
+    }
 }

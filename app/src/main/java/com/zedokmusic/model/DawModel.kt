@@ -41,6 +41,12 @@ class ClipM(val engineId: Int, path: String, val name: String, start: Float, val
     var srcBpm by mutableFloatStateOf(0f)
     /** True while a processed copy is being rendered. */
     var busy by androidx.compose.runtime.mutableStateOf(false)
+    /** Fade-in / fade-out lengths in milliseconds and their shapes (0 linear, 1 exponential, 2 S-curve, 3 equal power). */
+    var fadeInMs by mutableFloatStateOf(0f)
+    var fadeOutMs by mutableFloatStateOf(0f)
+    var fadeInShape by androidx.compose.runtime.mutableIntStateOf(0)
+    var fadeOutShape by androidx.compose.runtime.mutableIntStateOf(0)
+    val hasFades get() = fadeInMs > 0f || fadeOutMs > 0f
     val edited get() = gainDb != 0f || semis != 0f || speed != 1f
     /** Set when this clip object was replaced (by an edit, or by an undo that put the clip back): history entries follow it to the clip that stands for it now. */
     var replacedBy: ClipM? = null
