@@ -280,13 +280,15 @@ private fun TrackHeader(vm: DawViewModel, t: TrackM, onImport: (TrackM) -> Unit)
                     Box(Modifier.size(8.dp).clip(CircleShape).background(when (t.pluginState) { 2 -> Zk.accent; 3 -> Zk.danger; else -> Zk.warn }))
                     Spacer(Modifier.width(6.dp))
                 }
-                Text(t.name, color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(t.name, color = Zk.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = !t.frozen))
+                if (t.frozen || vm.freezing == t) Text(if (t.frozen) "FROZEN" else "…", color = Color(0xFF0B0D10), fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp).clip(RoundedCornerShape(3.dp)).background(Zk.accent).padding(horizontal = 4.dp, vertical = 1.dp))
                 if (renaming) NameDialog("Rename track", t.name, "Rename", null, { vm.renameTrack(t, it) }, { renaming = false })
                 Box {
                     Text("⋮", color = Zk.dim, fontSize = 18.sp, modifier = Modifier.clickable { menu = true }.padding(horizontal = 6.dp))
                     DropdownMenu(menu, { menu = false }) {
                         if (t.kind == TrackKind.Audio) DropdownMenuItem(text = { Text("Add sample…") }, onClick = { menu = false; onImport(t) })
                         DropdownMenuItem(text = { Text("Rename track…") }, onClick = { menu = false; renaming = true })
+                        if (t.kind != TrackKind.Audio || t.clips.isNotEmpty() || t.frozen) DropdownMenuItem(text = { Text(if (t.frozen) "Unfreeze track" else "Freeze track") }, onClick = { menu = false; if (t.frozen) vm.unfreezeTrack(t) else vm.freezeTrack(t) })
                         DropdownMenuItem(text = { Text("Delete track") }, onClick = { menu = false; vm.removeTrack(t) })
                     }
                 }

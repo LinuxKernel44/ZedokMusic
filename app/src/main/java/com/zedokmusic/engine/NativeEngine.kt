@@ -42,6 +42,8 @@ object NativeEngine {
     external fun setTrackPan(id: Int, pan: Float)
     external fun setTrackWidth(id: Int, width: Float)
     external fun setMasterWidth(width: Float)
+    external fun setClipFrozen(id: Int, frozen: Boolean): Boolean
+    external fun setTrackFrozen(id: Int, frozen: Boolean)
     external fun addBus(): Int
     external fun removeBus(id: Int): Boolean
     external fun setBusGain(id: Int, gain: Float)

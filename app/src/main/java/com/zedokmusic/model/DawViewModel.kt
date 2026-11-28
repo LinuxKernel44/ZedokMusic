@@ -381,6 +381,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     fun removeTrack(t: TrackM) {
         clearHistory()   // removing a track cannot be undone yet, and older actions may refer to it
         t.fx.toList().forEach { removeEffect(t, it) }
+        t.frozenFile?.delete()
         if (t.pluginPath != null) { closeEditor(t); host.stop(t.id) }
         e.removeTrack(t.id); tracks.remove(t); if (selected == t) selected = tracks.firstOrNull(); dirty = true
     }
@@ -520,6 +521,35 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
     private fun widthOf(s: Float) = 1f - s
     private fun putStereo(t: TrackM, s: Float) { t.stereo = s.coerceIn(-1f, 1f); e.setTrackWidth(t.id, widthOf(t.stereo)); dirty = true }
     fun setStereo(t: TrackM, s: Float) { val o = t.stereo; putStereo(t, s); val n = t.stereo; if (o != n) record("Stereo width", "stereo${t.id}", undo = { putStereo(t, o) }, redo = { putStereo(t, n) }) }
+    // ---- freeze: render a track (instrument, notes, clips and effects, with a neutral fader) to a file and play that instead ----
+    var freezing by mutableStateOf<TrackM?>(null); private set
+    private fun freezeDir() = projectDir()?.let { File(it, "Cache/Freeze") }
+    private fun applyFrozen(t: TrackM, f: File): Boolean {
+        val r = e.loadClip(t.id, f.absolutePath, 0L) ?: return false
+        e.setTrackFrozen(t.id, true); e.setClipFrozen(r[0].toInt(), true)   // the track first: until then the new clip stays silent
+        t.frozenFile = f; t.frozenClip = r[0].toInt(); t.frozen = true; return true
+    }
+    fun freezeTrack(t: TrackM) {
+        if (t.frozen || freezing != null || exporting || recording) return
+        if (t.kind == TrackKind.Audio && t.clips.isEmpty()) { message = "${t.name} has nothing to freeze."; return }
+        val dir = freezeDir() ?: run { message = "No project folder."; return }
+        val to = fr(songBeats()) + 2 * 48000L
+        e.pause(); playing = false; clearHistory(); dir.mkdirs()
+        freezing = t; message = "Freezing ${t.name}…"
+        Thread {
+            val f = File(dir, t.name.replace(Regex("[^A-Za-z0-9 _.-]"), "_") + "_${t.id}_${System.currentTimeMillis()}.wav")
+            val ok = try { e.renderEncoded(f.absolutePath, 0L, to, 2, -t.id) } catch (ex: Throwable) { false }
+            if (ok && t in tracks && applyFrozen(t, f)) { dirty = true; message = "${t.name} frozen." } else { f.delete(); message = "Could not freeze ${t.name}." }
+            freezing = null
+        }.start()
+    }
+    fun unfreezeTrack(t: TrackM) {
+        if (!t.frozen) return
+        clearHistory()
+        e.setTrackFrozen(t.id, false); e.removeClip(t.frozenClip)
+        t.frozenFile?.delete(); t.frozenFile = null; t.frozenClip = 0; t.frozen = false; dirty = true; message = "${t.name} unfrozen."
+    }
+
     // ---- mixer routing: buses, track / bus outputs, sends ----
     fun busById(id: Int) = buses.firstOrNull { it.id == id }
     fun addBus(): BusM? {
@@ -1228,7 +1258,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
         val arr = JSONArray()
         for (t in tracks) arr.put(JSONObject().put("name", t.name).put("kind", t.kind.name).put("gain", t.gain.toDouble()).put("pan", t.pan.toDouble()).put("stereo", t.stereo.toDouble())
             .put("mute", t.mute).put("solo", t.solo).put("plugin", t.pluginPath ?: JSONObject.NULL)
-            .also { o -> if (t.output != 0) o.put("output", busPos(t.output)); if (t.sends.isNotEmpty()) o.put("sends", JSONArray().also { a -> t.sends.forEach { s -> a.put(JSONObject().put("bus", busPos(s.bus)).put("gain", s.gain.toDouble()).put("pre", s.pre)) } }) }
+            .also { o -> t.frozenFile?.let { ff -> if (t.frozen) o.put("frozen", mapPath(ff.absolutePath)) }; if (t.output != 0) o.put("output", busPos(t.output)); if (t.sends.isNotEmpty()) o.put("sends", JSONArray().also { a -> t.sends.forEach { s -> a.put(JSONObject().put("bus", busPos(s.bus)).put("gain", s.gain.toDouble()).put("pre", s.pre)) } }) }
             .put("params", paramsJson(t)).put("lanes", lanesJson(t)).put("fx", fxJson(t.fx)).put("preset", t.presetName).put("nstate", JSONObject(t.states.toMap()))
             .put("clips", JSONArray().also { a -> t.clips.forEach { c -> a.put(JSONObject().put("path", mapPath(c.path)).put("src", mapPath(c.src)).put("start", c.start.toDouble())
                 .put("gain", c.gainDb.toDouble()).put("semis", c.semis.toDouble()).put("speed", c.speed.toDouble()).put("mode", c.mode).put("srcBpm", c.srcBpm.toDouble())) } }))
@@ -1630,6 +1660,7 @@ class DawViewModel(app: Application) : AndroidViewModel(app) {
                 t.mute = o.optBoolean("mute"); t.solo = o.optBoolean("solo")
                 e.setTrackGain(t.id, t.gain); e.setTrackPan(t.id, t.pan); e.setTrackMute(t.id, t.mute); e.setTrackSolo(t.id, t.solo)
                 loadRouting(t, o)
+                o.optString("frozen").takeIf { it.isNotEmpty() }?.let { fp -> File(fp).takeIf { it.exists() }?.let { applyFrozen(t, it) } }
                 readPluginState(t, o)
                 loadFx(t, o.optJSONArray("fx"))
                 val ca = o.getJSONArray("clips")

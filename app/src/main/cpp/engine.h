@@ -28,6 +28,7 @@ struct Clip {
     int64_t offset = 0;  // offset into the audio (frames)
     int64_t length = 0;  // frames played
     float gain = 1.f;
+    bool frozen = false; // the rendered audio of a frozen track: played only while the track is frozen (the track's own clips are then silent)
 };
 
 struct Note {
@@ -81,6 +82,7 @@ struct TrackState {
     float gain = 1.f, pan = 0.f;
     float width = 1.f;                              // stereo width: 0 mono, 1 unchanged, 2 twice as wide (side signal gain)
     bool mute = false, solo = false;
+    bool frozen = false;                            // frozen: the instrument, its notes, its effects and its own clips are skipped; only clips marked frozen play
     int output = 0;                                 // 0 = the master, else the id of the bus this track is mixed into
     std::vector<SendState> sends;                   // at most kMaxSends, one per bus
 };
@@ -155,6 +157,8 @@ public:
     bool removeClip(int clipId);
     bool moveClip(int clipId, int64_t start);
     bool setClipGain(int clipId, float gain);
+    bool setClipFrozen(int clipId, bool frozen);  // marks a clip as the render of a frozen track
+    void setTrackFrozen(int id, bool frozen);
     void setTrackGain(int id, float g);
     void setTrackPan(int id, float p);
     void setTrackWidth(int id, float w);
@@ -238,7 +242,7 @@ public:
     bool renderToWav(const std::string& path, int64_t from, int64_t to, WavFormat fmt, int onlyTrack = 0);
     // Format codes: 0/1/2 = WAV 16/24/float, 4/5 = FLAC 16/24, 6/7 = MP3 320/192 kbps.
     bool renderEncoded(const std::string& path, int64_t from, int64_t to, int format, int onlyTrack = 0);
-    bool renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<float>& out);  // onlyTrack > 0: render just that track (a stem)
+    bool renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<float>& out);  // onlyTrack > 0: render just that track (a stem); onlyTrack < 0: render track -onlyTrack alone with a neutral fader, pan, width and output (what freezing records)
 
     struct Stats { int sampleRate, burst, bufferSize, xruns; float avgUs, maxUs, latencyMs; bool exclusive; int64_t callbacks; };
     Stats stats();

@@ -1,10 +1,10 @@
 # scene frames peak_dBFS rms_dBFS checksum (FNV-1a over the float bits of the output)
 clips_mix 144000 -1.066 -11.171 c2074b8a00ae2e42
-mute_solo 96000 -7.959 -11.459 2f75ccfe0888e9cb
+mute_solo 96000 -7.959 -11.459 f254a3ee72e46593
 hybrid_notes 168000 -4.757 -17.060 0dd3ba99cbe4ab52
 drums_pattern 144000 -2.280 -13.025 6d401dd0e59b56f7
 automation 144000 -11.366 -23.294 12423b4f457ff008
 fx_chain 144000 0.811 -8.893 7d8b204f89ff9b28
 bus_group 144000 -2.445 -10.632 d91603e0fb44f8b9
-bus_mute_solo 96000 -7.959 -11.459 c7b203eb017dfea3
+bus_mute_solo 96000 -7.959 -11.459 4fe72895aa340597
 full_song 240000 -1.452 -13.872 80954bb54be5132a

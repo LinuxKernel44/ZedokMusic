@@ -166,6 +166,31 @@ static int routingChecks() {
     double dpre = maxDiff(preRef, postFader, 1024); check("a post-fader send does follow the fader", dpre > 0.05, dpre);
     const auto muted = renderWith(2.0, [&](Engine& e) { int t; one(e, t); int b = e.addBus(), q = e.addBus(); e.setTrackOutput(t, q); e.setBusMute(q, true); e.setSend(t, b, 1.f, true); e.setTrackMute(t, true); });
     double mpk = 0; for (size_t i = 8192; i < muted.size(); i++) mpk = std::max(mpk, (double)std::fabs(muted[i]));   // the first block ramps from the initial unity gain check("a muted track sends nothing, even pre-fader", mpk < 1e-6, mpk);
+    // freeze: the raw render of a track, played back as a frozen clip, sounds like the live track (fader, pan, width and routing stay live)
+    {
+        const int64_t N = (int64_t)(2.0 * kProjectRate);
+        auto build = [&](Engine& e, int& t, int& u) {
+            t = e.addTrack(); u = e.addTrack();
+            e.addClip(t, tone(220, 1.5, 0.4), 0, 0, 1.5 * kProjectRate, 1.f); e.addClip(t, tone(277, 1.0, 0.3), 0.8 * kProjectRate, 0, 1.0 * kProjectRate, 0.7f);
+            e.addClip(u, tone(440, 1.5, 0.3), 0, 0, 1.5 * kProjectRate, 1.f);
+            e.setTrackPan(t, -0.5f); e.setTrackGain(t, 0.6f); e.setTrackWidth(t, 1.4f); e.setTrackGain(u, 0.9f);
+        };
+        auto ep = std::make_unique<Engine>(); Engine& e = *ep; int t, u; build(e, t, u);
+        std::vector<float> live; e.renderMix(0, N, 0, live);
+        std::vector<float> raw; e.renderMix(0, N, -t, raw);
+        double rawPk = 0; for (float x : raw) rawPk = std::max(rawPk, (double)std::fabs(x));
+        auto data = std::make_shared<std::vector<float>>(raw);
+        int cid = e.addClip(t, data, 0, 0, (int64_t)(raw.size() / 2), 1.f); e.setClipFrozen(cid, true); e.setTrackFrozen(t, true);
+        std::vector<float> frozen; e.renderMix(0, N, 0, frozen);
+        { size_t at = 0; double m = 0; for (size_t i = 0; i < live.size(); i++) { double d = std::fabs(live[i] - frozen[i]); if (d > m) { m = d; at = i; } } printf("max diff at float %zu (frame %zu): live %g frozen %g raw %g\n", at, at / 2, live[at], frozen[at], raw[at]); }
+        check("freeze: the frozen track sounds like the live one (<= 1e-5)", maxDiff(live, frozen) < 1e-5 && rawPk > 0.1, maxDiff(live, frozen));
+        e.setTrackFrozen(t, false);
+        std::vector<float> back; e.renderMix(0, N, 0, back);
+        check("unfreezing brings the original back (frozen clip silent) (<= 1e-6)", maxDiff(live, back) < 1e-6, maxDiff(live, back));
+        e.setTrackFrozen(t, true); e.setTrackGain(t, 0.3f);
+        std::vector<float> quieter; e.renderMix(0, N, 0, quieter);
+        check("freeze: the fader of a frozen track still works", maxDiff(live, quieter) > 0.05, maxDiff(live, quieter));
+    }
     { auto ep = std::make_unique<Engine>(); Engine& e = *ep; int t = e.addTrack(), b = e.addBus();
       check("a send needs a known track and bus", !e.setSend(t, 99, 1.f, false) && !e.setSend(77, b, 1.f, false), 0);
       check("a bus can be sent to once, then updated", e.setSend(t, b, 1.f, false) && e.setSend(t, b, 0.5f, true), 0);

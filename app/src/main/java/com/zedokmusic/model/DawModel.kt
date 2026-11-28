@@ -74,6 +74,10 @@ class TrackM(val id: Int, name: String, val kind: TrackKind, val color: Color, v
     /** Where the track is mixed: 0 = the master, else a bus id. */
     var output by mutableIntStateOf(0)
     val sends = mutableStateListOf<SendM>()
+    /** Frozen: the track plays its rendered audio ([frozenFile]) instead of its notes, clips, instrument and effects; unfreezing brings them back. */
+    var frozen by mutableStateOf(false)
+    var frozenFile: java.io.File? = null
+    var frozenClip = 0   // the engine's id of the frozen render
     /** 0 none, 1 starting, 2 ready, 3 error */
     var pluginState by mutableIntStateOf(0)
     var pluginName by mutableStateOf("")

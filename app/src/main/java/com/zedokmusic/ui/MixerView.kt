@@ -52,7 +52,7 @@ fun MixerView(vm: DawViewModel, onInserts: (TrackM?) -> Unit = {}) {
     routeBus?.let { b -> if (b in vm.buses) BusDialog(vm, b) { routeBus = null } else routeBus = null }
     Row(Modifier.fillMaxSize().background(Zk.bg).horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         vm.tracks.forEach { t ->
-            Strip(t.name, t.color, t.gain, t.pan, t.meter, t.mute, t.solo, vm.selected == t, t.fx.size, t.fx.any { !it.bypass }, { onInserts(t) }, stereo = t.stereo, onStereo = { vm.setStereo(t, it) },
+            Strip((if (t.frozen) "❄ " else "") + t.name, t.color, t.gain, t.pan, t.meter, t.mute, t.solo, vm.selected == t, t.fx.size, t.fx.any { !it.bypass }, { onInserts(t) }, stereo = t.stereo, onStereo = { vm.setStereo(t, it) },
                 onGain = { vm.setGain(t, it) }, onPan = { vm.setPan(t, it) }, onMute = { vm.setMute(t, !t.mute) }, onSolo = { vm.setSolo(t, !t.solo) }, onSelect = { vm.selected = t },
                 route = routeLabel(vm, t), routeActive = t.output != 0 || t.sends.isNotEmpty(), onRoute = { routeTrack = t })
         }

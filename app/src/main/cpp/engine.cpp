@@ -102,6 +102,11 @@ bool Engine::moveClip(int clipId, int64_t start) {
     edit([&](Project& p) { for (auto& t : p.tracks) for (auto& c : t.clips) if (c.id == clipId) { c.start = std::max<int64_t>(0, start); ok = true; } });
     return ok;
 }
+bool Engine::setClipFrozen(int clipId, bool frozen) {
+    bool ok = false;
+    edit([&](Project& p) { for (auto& t : p.tracks) for (auto& c : t.clips) if (c.id == clipId) { c.frozen = frozen; ok = true; } });
+    return ok;
+}
 bool Engine::setClipGain(int clipId, float gain) {
     bool ok = false;
     edit([&](Project& p) { for (auto& t : p.tracks) for (auto& c : t.clips) if (c.id == clipId) { c.gain = std::clamp(gain, 0.f, 4.f); ok = true; } });
@@ -114,6 +119,7 @@ TRACK_SET(setTrackPan(int id, float v), t.pan = std::clamp(v, -1.f, 1.f))
 TRACK_SET(setTrackWidth(int id, float v), t.width = std::clamp(v, 0.f, 2.f))
 void Engine::setMasterWidth(float w) { edit([&](Project& p) { p.masterWidth = std::clamp(w, 0.f, 2.f); }); }
 TRACK_SET(setTrackMute(int id, bool m), t.mute = m)
+TRACK_SET(setTrackFrozen(int id, bool f), t.frozen = f)
 TRACK_SET(setTrackSolo(int id, bool s), t.solo = s)
 void Engine::setMasterGain(float g) { edit([&](Project& p) { p.masterGain = std::clamp(g, 0.f, 4.f); }); }
 void Engine::setLoop(bool on, int64_t s, int64_t e) {
@@ -236,7 +242,7 @@ void Engine::accumulateDry(const Project& p, int64_t pos, int n, MixState& ms, i
         const TrackState& t = p.tracks[ti];
         float* tb = ms.dry[ti] + offset * 2;
         if (ms.playClips) for (auto& c : t.clips) {
-            if (!c.audio) continue;
+            if (!c.audio || c.frozen != t.frozen) continue;   // a frozen track plays only its frozen render, every other track never plays one
             int64_t cs = std::max<int64_t>(pos, c.start), ce = std::min<int64_t>(pos + n, c.start + c.length);
             if (ce <= cs) continue;
             const float* src = c.audio->data();
@@ -247,7 +253,7 @@ void Engine::accumulateDry(const Project& p, int64_t pos, int n, MixState& ms, i
                 tb[o] += src[si * 2] * c.gain; tb[o + 1] += src[si * 2 + 1] * c.gain;
             }
         }
-        if (t.plugin && t.pluginSlot >= 0) {
+        if (t.plugin && t.pluginSlot >= 0 && !t.frozen) {
             const float* po = ms.plugOut[t.pluginSlot] + offset * 2;
             for (int i = 0; i < n * 2; i++) tb[i] += po[i];
         }
@@ -385,11 +391,11 @@ void Engine::fxRealtime(const Project& p, MixState& ms, int frames, int64_t budg
         if (n > 0) {
             for (int i = 0; i < n; i++) {  // results of last callback's requests
                 const FxState& f = t.fx[i]; float* o = ms.stage[i];
-                if (fxActive(f)) f.plugin->collect(o, frames, waitLeft()); else memcpy(o, ch.hold[i], bytes);
+                if (!t.frozen && fxActive(f)) f.plugin->collect(o, frames, waitLeft()); else memcpy(o, ch.hold[i], bytes);
             }
             for (int i = 0; i < n; i++) {  // requests for this callback: effect i processes what effect i-1 returned
                 const FxState& f = t.fx[i]; const float* in = i == 0 ? ms.dry[ti] : ms.stage[i - 1];
-                if (fxActive(f)) fxSubmit(f, in, frames, posRing_[(blockCounter_ - i) & 31], fxAutoLast_[f.pluginSlot], &fxLastPos_[f.pluginSlot]);
+                if (!t.frozen && fxActive(f)) fxSubmit(f, in, frames, posRing_[(blockCounter_ - i) & 31], fxAutoLast_[f.pluginSlot], &fxLastPos_[f.pluginSlot]);
                 else memcpy(ch.hold[i], in, bytes);
             }
             cur = ms.stage[n - 1];
@@ -428,7 +434,7 @@ void Engine::fxOffline(const Project& p, MixState& ms, int frames, int64_t pos) 
     constexpr int64_t kWait = 5'000'000'000;
     for (size_t ti = 0; ti < p.tracks.size() && ti < (size_t)kMaxTracks; ti++) {
         const TrackState& t = p.tracks[ti];
-        if (t.mute) continue;
+        if (t.mute || t.frozen) continue;
         float* buf = ms.dry[ti];
         for (auto& f : t.fx) {
             if (!fxActive(f)) continue;
@@ -460,9 +466,19 @@ bool Engine::renderMix(int64_t from, int64_t to, int onlyTrack, std::vector<floa
     if (to <= from) to = std::max<int64_t>(from, projectLength());
     if (to <= from) return false;
     Project q = *p; q.loop = false;  // offline render ignores loop
+    const bool raw = onlyTrack < 0; if (raw) onlyTrack = -onlyTrack;
     if (onlyTrack > 0) for (auto& t : q.tracks) if (t.id != onlyTrack) t.mute = true;
+    if (raw) for (auto& t : q.tracks) if (t.id == onlyTrack) { t.gain = 1.f; t.pan = 0.f; t.width = 1.f; t.output = 0; t.sends.clear(); t.solo = false; t.mute = false; t.frozen = false; }
+    if (raw) { q.masterGain = 1.f; q.masterWidth = 1.f; }
+    if (raw) for (auto& t : q.tracks) if (t.id != onlyTrack) t.solo = false;
     auto ms = std::make_unique<MixState>();
     ms->playClips = true;
+    {   // gains start at unity, except for tracks that are silent for the whole render: they must not fade out during the first block
+        for (auto& g : ms->smoothGain) g = 1.f; for (auto& w : ms->smoothWidth) w = 1.f; for (auto& g : ms->smoothBusGain) g = 1.f; for (auto& w : ms->smoothBusWidth) w = 1.f; for (auto& row : ms->smoothSend) for (auto& g : row) g = 1.f;
+        bool anySolo = false; for (auto& t : q.tracks) anySolo |= t.solo;
+        for (auto& t : q.tracks) if (t.id < kMaxTracks && (t.mute || (anySolo && !t.solo))) ms->smoothGain[t.id] = 0.f;
+        ms->init = true;
+    }
     constexpr int64_t kSyncWaitNs = 5'000'000'000;
     const int plugFrames = kCallbackFrames;
     // Take the plugin bridges away from the realtime callback (it keeps running but outputs silence) and wait until it has noticed.
@@ -748,7 +764,7 @@ void Engine::windowEvents(const Project& p, const TrackState& t, int64_t pos, in
 }
 
 void Engine::pluginCollect(const Project& p, MixState& ms, int frames, int64_t maxWaitNs) {
-    for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0) {
+    for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0 && !t.frozen) {
         float* dst = ms.plugOut[t.pluginSlot];
         if (!t.plugin->ready() || !t.plugin->collect(dst, frames, maxWaitNs)) memset(dst, 0, sizeof(float) * 2 * frames);
     }
@@ -791,7 +807,7 @@ void Engine::pluginSubmit(const Project& p, int64_t windowPos, int frames, bool 
     liveTail_.store(tail, std::memory_order_release);
     const int panicAll = panicAll_.load(std::memory_order_relaxed);
     if (panicAll > 0) panicAll_.store(panicAll - 1, std::memory_order_relaxed);
-    for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0 && t.plugin->ready()) {
+    for (auto& t : p.tracks) if (t.plugin && t.pluginSlot >= 0 && t.plugin->ready() && !t.frozen) {
         ZkEvent ev[ZK_MAX_EVENTS]; int n = 0;
         ZkParamChange ch[ZK_MAX_PARAM_CHANGES]; int nc = 0;
         for (int i = 0; i < np_; i++) if (pe_[i].track == t.id && nc < ZK_MAX_PARAM_CHANGES) ch[nc++] = ZkParamChange{(uint32_t)pe_[i].index, pe_[i].value};
